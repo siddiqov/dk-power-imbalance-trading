@@ -1,0 +1,5 @@
+,Paradigm,Model Architecture,Dir Accuracy,Spread MAE,Trades,Win Rate,Volume (MWh),Gross PnL,Fees & Slip,Danish Tax (22%),Daily Return,Net Realized Profit (€)
+1,1. Transfer Learning (Two-Phase),Transfer-LightGBM,58.3%,€44.14,44/96,56.8%,76.9,"€2,308.87",€39.20,€499.33,+1.77%,"€1,770.34"
+2,2. Hierarchical (Macro + Micro),Hierarchical-LGBM+XGB,58.3%,€49.44,36/96,47.2%,94.2,"€2,068.02",€48.03,€444.40,+1.58%,"€1,575.60"
+3,Meta-Ensemble,Stacking-MetaEnsemble,58.3%,€44.79,28/96,53.6%,51.5,"€1,582.28",€26.27,€342.32,+1.21%,"€1,213.69"
+4,3. Dual Models (Pure 15m),Pure15m-CatBoost,58.3%,€44.91,27/96,48.1%,64.5,"€1,113.95",€32.90,€237.83,+0.84%,€843.22
