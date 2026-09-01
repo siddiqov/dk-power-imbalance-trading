@@ -1,5 +1,7 @@
-,Paradigm,Model Architecture,Dir Accuracy,Spread MAE,Trades,Win Rate,Volume (MWh),Gross PnL,Fees & Slip,Danish Tax (22%),Daily Return,Net Realized Profit (€)
-1,1. Transfer Learning (Two-Phase),Transfer-LightGBM,58.3%,€44.14,44/96,56.8%,76.9,"€2,308.87",€39.20,€499.33,+1.77%,"€1,770.34"
-2,2. Hierarchical (Macro + Micro),Hierarchical-LGBM+XGB,58.3%,€49.44,36/96,47.2%,94.2,"€2,068.02",€48.03,€444.40,+1.58%,"€1,575.60"
-3,Meta-Ensemble,Stacking-MetaEnsemble,58.3%,€44.79,28/96,53.6%,51.5,"€1,582.28",€26.27,€342.32,+1.21%,"€1,213.69"
-4,3. Dual Models (Pure 15m),Pure15m-CatBoost,58.3%,€44.91,27/96,48.1%,64.5,"€1,113.95",€32.90,€237.83,+0.84%,€843.22
+,Paradigm,Model Architecture,Dir Accuracy,Spread MAE,Trades,Win Rate,Volume (MWh),Gross PnL,Fees & Slip,Danish Tax (22%),Daily Return,Net Realized Profit (EUR)
+1,1. Transfer Learning,Deep-BiLSTM,58.3%,EUR 41.27,70/96,57.1%,157.8,"EUR 4,498.23",EUR 80.48,EUR 971.90,+3.45%,"EUR 3,445.84"
+2,3. Dual Models (Pure 15m),Transformer-TFT,57.3%,EUR 42.23,62/96,59.7%,117.8,"EUR 3,714.56",EUR 60.08,EUR 803.98,+2.85%,"EUR 2,850.49"
+3,1. Transfer Learning,Transfer-LightGBM,58.3%,EUR 44.99,52/96,63.5%,85.9,"EUR 3,052.76",EUR 43.83,EUR 661.96,+2.35%,"EUR 2,346.96"
+4,2. Hierarchical,Hierarchical-LGBM+XGB,58.3%,EUR 45.79,38/96,52.6%,93.3,"EUR 2,590.50",EUR 47.61,EUR 559.44,+1.98%,"EUR 1,983.46"
+5,4. Meta-Ensemble,Stacking-MetaEnsemble,58.3%,EUR 42.63,47/96,57.4%,75.8,"EUR 2,226.85",EUR 38.66,EUR 481.40,+1.71%,"EUR 1,706.79"
+6,3. Dual Models (Pure 15m),Pure15m-CatBoost,58.3%,EUR 44.91,27/96,48.1%,64.5,"EUR 1,113.95",EUR 32.90,EUR 237.83,+0.84%,EUR 843.22
