@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>V2 Commercial Energy Trading Simulator (DK1 & DK2)</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0f172a;
+            --card-bg: #1e293b;
+            --accent-green: #10b981;
+            --accent-blue: #3b82f6;
+            --accent-purple: #8b5cf6;
+            --border-color: #334155;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        }
+        .navbar {
+            background-color: var(--card-bg);
+            border-bottom: 1px solid var(--border-color);
+        }
+        .card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+        }
+        .metric-card {
+            padding: 1.25rem;
+            border-radius: 10px;
+            background: linear-gradient(145deg, #1e293b, #111827);
+            border: 1px solid var(--border-color);
+        }
+        .metric-val {
+            font-size: 1.75rem;
+            font-weight: 700;
+        }
+        .btn-zone {
+            font-weight: 600;
+            padding: 0.5rem 1.25rem;
+            border-radius: 8px;
+        }
+        .table {
+            color: var(--text-main);
+        }
+        .table-dark {
+            --bs-table-bg: var(--card-bg);
+            --bs-table-border-color: var(--border-color);
+        }
+        .badge-rank-1 {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            color: white;
+            font-size: 0.9rem;
+            padding: 0.4rem 0.75rem;
+            border-radius: 6px;
+        }
+        .chart-container img {
+            width: 100%;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+        .spinner-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(15, 23, 42, 0.85);
+            z-index: 9999;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Spinner Modal -->
+    <div id="spinnerOverlay" class="spinner-overlay">
+        <div class="spinner-border text-primary" style="width: 3.5rem; height: 3.5rem;" role="status"></div>
+        <h4 class="mt-4 text-white font-weight-bold">Training 3 Paradigms & Executing Trading Agent...</h4>
+        <p class="text-muted">Simulating 96-quarter Day-Ahead arbitrage with full Danish taxes & fees</p>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg px-4 py-3 mb-4">
+        <div class="container-fluid">
+            <span class="navbar-brand text-white fw-bold d-flex align-items-center">
+                <i class="fa-solid fa-bolt text-warning me-2 fs-4"></i>
+                V2 Commercial Energy Trading Simulator
+            </span>
+            <div class="d-flex align-items-center gap-3">
+                <span class="badge bg-primary px-3 py-2 fs-6">Zero Synthetic Data</span>
+                <span class="badge bg-success px-3 py-2 fs-6">96 Quarters / Day-Ahead</span>
+                <a href="/?area=DK1" class="btn btn-zone {% if price_area == 'DK1' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
+                    <i class="fa-solid fa-wind me-1"></i> DK1 (West Denmark)
+                </a>
+                <a href="/?area=DK2" class="btn btn-zone {% if price_area == 'DK2' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
+                    <i class="fa-solid fa-city me-1"></i> DK2 (East Denmark)
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid px-4 pb-5">
+
+        <!-- Top Control & Capital Summary -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <div class="text-muted small text-uppercase fw-bold">Price Area Selected</div>
+                    <div class="metric-val text-info mt-1">{{ price_area }}</div>
+                    <div class="text-muted small mt-1">{% if price_area == 'DK1' %}Jutland / Funen (Continental Synchronous){% else %}Zealand / Copenhagen (Nordic Synchronous){% endif %}</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <div class="text-muted small text-uppercase fw-bold">Initial Capital Budget</div>
+                    <div class="metric-val text-white mt-1">€ {{ "{:,.2f}".format(capital) }}</div>
+                    <div class="text-muted small mt-1">Fractional Kelly Position Sizing</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <div class="text-muted small text-uppercase fw-bold">Danish Wholesale Cost Friction</div>
+                    <div class="metric-val text-warning mt-1">€ 0.51 <span class="fs-6 text-muted">/ MWh</span></div>
+                    <div class="text-muted small mt-1">TSO (€0.20) + Exchange (€0.06) + Slip (€0.25)</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <div class="text-muted small text-uppercase fw-bold">Danish Corporate Tax</div>
+                    <div class="metric-val text-danger mt-1">22.0 %</div>
+                    <div class="text-muted small mt-1">Deducted from Net Operating Gains</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Action Bar -->
+        <div class="card p-3 mb-4">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h5 class="mb-1 text-white fw-bold"><i class="fa-solid fa-trophy text-warning me-2"></i>Multi-Paradigm Tournament Leaderboard (Day D)</h5>
+                    <p class="text-muted small mb-0">Ranked by actual Net Monetary Profit generated after Danish wholesale market fees, slippage, and 22% tax.</p>
+                </div>
+                <div>
+                    <button class="btn btn-success fw-bold px-4 py-2" onclick="runTournament()">
+                        <i class="fa-solid fa-play me-2"></i> Re-Run Tournament & Backtest ({{ price_area }})
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Commercial Leaderboard Table -->
+        <div class="card mb-4">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-dark table-hover mb-0 align-middle">
+                        <thead>
+                            <tr class="border-bottom border-secondary text-muted small text-uppercase">
+                                <th class="py-3 px-3">Rank</th>
+                                <th>Training Paradigm</th>
+                                <th>Model Architecture</th>
+                                <th>Direction Acc</th>
+                                <th>Spread MAE</th>
+                                <th>Trades (Active/Hold)</th>
+                                <th>Win Rate</th>
+                                <th>Traded Vol</th>
+                                <th>Gross PnL</th>
+                                <th>Fees & Slip</th>
+                                <th>Danish Tax (22%)</th>
+                                <th class="text-end px-3">Net Realized Profit (€)</th>
+                                <th>Daily Return</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in leaderboard %}
+                            <tr class="{% if loop.index == 1 %}table-active bg-opacity-25{% endif %}">
+                                <td class="px-3 fw-bold">
+                                    {% if loop.index == 1 %}
+                                    <span class="badge-rank-1"><i class="fa-solid fa-crown me-1"></i> #1</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">#{{ loop.index }}</span>
+                                    {% endif %}
+                                </td>
+                                <td class="fw-semibold text-info">{{ row['Paradigm'] }}</td>
+                                <td class="fw-bold">{{ row['Model Architecture'] }}</td>
+                                <td><span class="badge bg-dark border border-secondary">{{ row['Dir Accuracy'] }}</span></td>
+                                <td>{{ row['Spread MAE'] }}</td>
+                                <td>{{ row['Trades'] }}</td>
+                                <td><span class="fw-semibold {% if row['Win Rate']|replace('%','')|float >= 50 %}text-success{% else %}text-warning{% endif %}">{{ row['Win Rate'] }}</span></td>
+                                <td>{{ row['Volume (MWh)'] }} MWh</td>
+                                <td class="text-white">{{ row['Gross PnL'] }}</td>
+                                <td class="text-danger">-{{ row['Fees & Slip'] }}</td>
+                                <td class="text-danger">-{{ row['Danish Tax (22%)'] }}</td>
+                                <td class="text-end px-3 fw-bold fs-5 {% if '+' in row['Daily Return'] %}text-success{% else %}text-danger{% endif %}">
+                                    {{ row['Net Realized Profit (€)'] }}
+                                </td>
+                                <td>
+                                    <span class="badge {% if '+' in row['Daily Return'] %}bg-success{% else %}bg-danger{% endif %} px-2 py-1">
+                                        {{ row['Daily Return'] }}
+                                    </span>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="13" class="text-center py-4 text-muted">
+                                    No leaderboard data available. Click "Re-Run Tournament" above to generate results.
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 96-Quarter Backtest Dashboard Visuals -->
+        <div class="row">
+            <div class="col-12">
+                <div class="card p-3">
+                    <h5 class="fw-bold text-white mb-3">
+                        <i class="fa-solid fa-chart-line text-primary me-2"></i>
+                        96-Quarter Execution Chart, Cumulative Equity Curve & Fee Waterfall ({{ price_area }})
+                    </h5>
+                    <div class="chart-container">
+                        {% if chart_exists %}
+                        <img src="/static/results/v2_commercial_backtest_{{ price_area }}.png?t={{ range(1, 100000)|random }}" 
+                             alt="96-Quarter Backtest Dashboard"
+                             onerror="this.src='/results/v2_commercial_backtest_{{ price_area }}.png';">
+                        {% else %}
+                        <div class="text-center py-5 text-muted">
+                            <i class="fa-solid fa-image fs-1 mb-2"></i>
+                            <p>Dashboard image generating... Click "Re-Run Tournament" to generate latest plot.</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        function runTournament() {
+            document.getElementById('spinnerOverlay').style.display = 'flex';
+            fetch('/api/run_tournament', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    area: '{{ price_area }}',
+                    capital: {{ capital }}
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('spinnerOverlay').style.display = 'none';
+                if (data.status === 'success') {
+                    window.location.reload();
+                } else {
+                    alert('Error running tournament: ' + data.message);
+                }
+            })
+            .catch(err => {
+                document.getElementById('spinnerOverlay').style.display = 'none';
+                alert('Request failed: ' + err);
+            });
+        }
+    </script>
+</body>
+</html>
