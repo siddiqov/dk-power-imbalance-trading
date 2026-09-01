@@ -1,0 +1,61 @@
+{
+  "area": "DK2",
+  "best_model": "Baseline Ensemble",
+  "best_mae": 31.58,
+  "ranking": [
+    [
+      "Baseline Ensemble",
+      {
+        "mae": 31.58
+      }
+    ],
+    [
+      "Optuna Ensemble",
+      {
+        "mae": 31.58
+      }
+    ],
+    [
+      "GRU_24",
+      {
+        "mae": 57.35776628475126
+      }
+    ],
+    [
+      "GRU_96",
+      {
+        "mae": 58.3253185952954
+      }
+    ],
+    [
+      "LSTM_24",
+      {
+        "mae": 58.39123807671078
+      }
+    ],
+    [
+      "LSTM_96",
+      {
+        "mae": 58.64484192819307
+      }
+    ],
+    [
+      "Prophet",
+      {
+        "mae": 79.60703332727545
+      }
+    ]
+  ],
+  "baseline_mae": 31.58,
+  "optuna_mae": 31.58,
+  "lstm_24_mae": 58.39123807671078,
+  "lstm_96_mae": 58.64484192819307,
+  "gru_24_mae": 57.35776628475126,
+  "gru_96_mae": 58.3253185952954,
+  "prophet_mae": 79.60703332727545,
+  "best_lstm_lookback": 24,
+  "best_gru_lookback": 24,
+  "regime_accuracy_rf": "N/A",
+  "regime_accuracy_hmm": "N/A",
+  "regime_accuracy_consensus": "N/A"
+}

@@ -4,8 +4,9 @@
 #
 # Features:
 # - Dual Zone Switching: DK1 (West Denmark) & DK2 (East Denmark)
-# - Interactive Commercial Leaderboard covering all 4 Paradigms & Deep Sequence Models
-# - Real-Time Live ROC Tracker for Day-Ahead trading (e.g. Sept 2nd)
+# - Dual-Tab 96-Quarter Tournament Views:
+#   * Tab 1: 96-Quarter Backtesting Tournament (31st August / Day D-1 Test Set)
+#   * Tab 2: 96-Quarter Future Day-Ahead Forecasts (Tomorrow / Day D Pending)
 # - Full Danish Fee & Tax Accounting (TSO, Exchange, Slippage, 22% Tax)
 # - Enhanced 4-Panel 96-Quarter Visualization Dashboard
 # ==============================================================================
@@ -25,7 +26,7 @@ from flask import Flask, render_template, jsonify, request, send_from_directory
 
 from src.data_ingestion_v2 import V2DataEngine
 from run_v2_commercial_tournament import run_tournament
-from src.realtime_tracker_v2 import RealTimeDayAheadTracker
+from src.tournament_tables_v2 import TournamentTableGenerator
 
 app = Flask(__name__)
 
@@ -55,18 +56,29 @@ def load_leaderboard(price_area="DK1"):
 def index():
     price_area = request.args.get('area', 'DK1')
     initial_capital = float(request.args.get('capital', 100000.0))
+    active_tab = request.args.get('tab', 'backtest')
+
     leaderboard = load_leaderboard(price_area)
     chart_exists = os.path.exists(f"results/v2_commercial_backtest_{price_area}.png")
-    
-    # Calculate summary metrics for top model
     top_model = leaderboard[0] if leaderboard else {}
+
+    # Retrieve cached 96-Quarter Tables (Instant Response)
+    table_gen = TournamentTableGenerator(price_area=price_area)
+    df_backtest = table_gen.get_backtest_table()
+    df_future = table_gen.get_future_table()
+
+    backtest_records = df_backtest.to_dict(orient="records") if not df_backtest.empty else []
+    future_records = df_future.to_dict(orient="records") if not df_future.empty else []
 
     return render_template(
         'dashboard_v2.html',
         price_area=price_area,
         capital=initial_capital,
+        active_tab=active_tab,
         leaderboard=leaderboard,
         top_model=top_model,
+        backtest_records=backtest_records,
+        future_records=future_records,
         chart_exists=chart_exists
     )
 
@@ -89,87 +101,26 @@ def api_run_tournament():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
-@app.route('/api/predict_future')
-def api_predict_future():
+@app.route('/api/export_csv')
+def api_export_csv():
+    """Exports either the 96-quarter backtest or future forecast table to CSV."""
     price_area = request.args.get('area', 'DK1')
-    engine = V2DataEngine()
-    df_15m = engine._get_connection().execute(f"""
-        SELECT time_utc, spot_price_eur, imbalance_price_eur, spread_eur, direction
-        FROM v2_15min_imbalance
-        WHERE price_area = '{price_area}' AND imbalance_price_eur IS NOT NULL
-        ORDER BY time_utc DESC
-        LIMIT 50
-    """).fetchdf().iloc[::-1].reset_index(drop=True)
+    table_type = request.args.get('type', 'backtest')
+    table_gen = TournamentTableGenerator(price_area=price_area)
 
-    past_quarters = []
-    future_quarters = []
+    if table_type == 'backtest':
+        df = table_gen.get_backtest_table()
+        filename = f"96Q_backtest_table_{price_area}.csv"
+    else:
+        df = table_gen.get_future_table()
+        filename = f"96Q_future_table_{price_area}.csv"
 
-    if len(df_15m) >= 4:
-        # Past 3 completed quarters
-        for i in range(3, 0, -1):
-            row = df_15m.iloc[-i]
-            t_dk = (pd.to_datetime(row['time_utc']) + timedelta(hours=2)).strftime('%Y-%m-%d %H:%M')
-            act_eur = float(row['imbalance_price_eur'])
-            base_eur = float(row['spot_price_eur']) if pd.notnull(row['spot_price_eur']) else act_eur
-            opt_eur = act_eur * 0.98
-            lstm_eur = act_eur * 0.95
-            gru_eur = act_eur * 0.94
-            proph_eur = base_eur * 0.99
-
-            past_quarters.append({
-                'step_label': f'Q_{-i} ({-i*15}m)',
-                'time_dk': t_dk,
-                'baseline_eur': round(base_eur, 2),
-                'optuna_eur': round(opt_eur, 2),
-                'lstm_eur': round(lstm_eur, 2),
-                'gru_eur': round(gru_eur, 2),
-                'prophet_eur': round(proph_eur, 2),
-                'best_eur': round(opt_eur, 2),
-                'best_dkk': round(opt_eur * 7.46, 2),
-                'actual_eur': round(act_eur, 2),
-                'actual_dkk': round(act_eur * 7.46, 2),
-                'status': 'Confirmed'
-            })
-
-        # Future 5 quarters
-        last_time = pd.to_datetime(df_15m.iloc[-1]['time_utc'])
-        last_spot = float(df_15m.iloc[-1]['spot_price_eur']) if pd.notnull(df_15m.iloc[-1]['spot_price_eur']) else 45.0
-
-        for i in range(1, 6):
-            fut_time_dk = (last_time + timedelta(minutes=15 * i) + timedelta(hours=2)).strftime('%H:%M')
-            step_lbl = f'Q{i} (+{i*15}m)'
-            base_p = last_spot + np.sin(i) * 5.0
-            opt_p = base_p * 1.05
-            lstm_p = base_p * 1.02
-            gru_p = base_p * 0.98
-            proph_p = base_p * 1.01
-            all_p = [base_p, opt_p, lstm_p, gru_p, proph_p]
-
-            future_quarters.append({
-                'step_label': step_lbl,
-                'time_dk': fut_time_dk,
-                'baseline_eur': round(base_p, 2),
-                'optuna_eur': round(opt_p, 2),
-                'lstm_eur': round(lstm_p, 2),
-                'gru_eur': round(gru_p, 2),
-                'prophet_eur': round(proph_p, 2),
-                'best_eur': round(opt_p, 2),
-                'best_dkk': round(opt_p * 7.46, 2),
-                'range_str': f'[{max(0, min(all_p)-5):.0f} - {max(all_p)+5:.0f}]',
-                'status': 'Pending'
-            })
-
-    return jsonify({
-        'status': 'success',
-        'area': price_area,
-        'past_quarters': past_quarters,
-        'future_quarters': future_quarters
-    })
+    return send_from_directory("results", filename, as_attachment=True)
 
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     print("\n" + "=" * 80)
-    print(f"  V2 COMMERCIAL TRADING SIMULATOR RUNNING ON http://localhost:{port}")
+    print(f"  V2 COMMERCIAL TRADING SIMULATOR RUNNING ON http://127.0.0.1:{port}")
     print("=" * 80)
     app.run(host='0.0.0.0', port=port, debug=False)

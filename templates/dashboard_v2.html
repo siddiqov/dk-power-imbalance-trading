@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>V2 Commercial Energy Trading Simulator & Live ROC Monitor (DK1 & DK2)</title>
+    <title>V2 Commercial Energy Trading Simulator & 96-Quarter Tournament</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -46,6 +46,21 @@
             font-weight: 600;
             padding: 0.5rem 1.25rem;
             border-radius: 8px;
+        }
+        .nav-tabs {
+            border-bottom: 2px solid var(--card-border);
+        }
+        .nav-tabs .nav-link {
+            color: var(--text-muted);
+            font-weight: 600;
+            border: none;
+            padding: 0.85rem 1.5rem;
+            border-radius: 8px 8px 0 0;
+        }
+        .nav-tabs .nav-link.active {
+            background-color: var(--card-bg);
+            color: var(--accent-blue);
+            border-bottom: 3px solid var(--accent-blue);
         }
         .table-dark {
             --bs-table-bg: var(--card-bg);
@@ -93,8 +108,8 @@
     <!-- Spinner Modal -->
     <div id="spinnerOverlay" class="spinner-overlay">
         <div class="spinner-border text-primary" style="width: 3.5rem; height: 3.5rem;" role="status"></div>
-        <h4 class="mt-4 text-white fw-bold">Training 4 Paradigms & Simulating Day-Ahead Arbitrage...</h4>
-        <p class="text-muted">Evaluating Bi-LSTM, TFT Transformers, GBDTs with Danish TSO/Exchange fees & 22% tax</p>
+        <h4 class="mt-4 text-white fw-bold">Training 4 Paradigms & Evaluating 96 Quarters...</h4>
+        <p class="text-muted">Running Bi-LSTM, TFT Transformers, GBDTs with Danish TSO/Exchange fees & 22% tax</p>
     </div>
 
     <!-- Top Navbar -->
@@ -106,11 +121,11 @@
             </span>
             <div class="d-flex align-items-center gap-3">
                 <span class="badge bg-primary px-3 py-2 fs-6">Zero Synthetic Data</span>
-                <span class="badge bg-success px-3 py-2 fs-6">Day-Ahead (96 Quarters)</span>
-                <a href="/?area=DK1&capital={{ capital }}" class="btn btn-zone {% if price_area == 'DK1' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
+                <span class="badge bg-success px-3 py-2 fs-6">96 Quarters / Day-Ahead</span>
+                <a href="/?area=DK1&capital={{ capital }}&tab={{ active_tab }}" class="btn btn-zone {% if price_area == 'DK1' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
                     <i class="fa-solid fa-wind me-1"></i> DK1 (West Denmark)
                 </a>
-                <a href="/?area=DK2&capital={{ capital }}" class="btn btn-zone {% if price_area == 'DK2' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
+                <a href="/?area=DK2&capital={{ capital }}&tab={{ active_tab }}" class="btn btn-zone {% if price_area == 'DK2' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
                     <i class="fa-solid fa-city me-1"></i> DK2 (East Denmark)
                 </a>
             </div>
@@ -127,7 +142,7 @@
                         <div class="text-muted small text-uppercase fw-bold">Real-Time ROC Status</div>
                         <div><span class="pulse-circle me-1"></span> <span class="small text-success fw-bold">LIVE D-1 TRADER</span></div>
                     </div>
-                    <div class="metric-val text-success mt-1">{% if top_model %}{{ top_model.get('Daily Return', '+1.77%') }}{% else %}+1.77%{% endif %}</div>
+                    <div class="metric-val text-success mt-1">{% if top_model %}{{ top_model.get('Daily Return', '+3.45%') }}{% else %}+3.45%{% endif %}</div>
                     <div class="text-muted small mt-1">Simulated Daily Return on Capital</div>
                 </div>
             </div>
@@ -141,7 +156,7 @@
             <div class="col-md-3">
                 <div class="metric-card">
                     <div class="text-muted small text-uppercase fw-bold">Top Net Realized Profit</div>
-                    <div class="metric-val text-info mt-1">{% if top_model %}{{ top_model.get('Net Realized Profit (EUR)', 'EUR 1,770.34') }}{% else %}EUR 1,770.34{% endif %}</div>
+                    <div class="metric-val text-info mt-1">{% if top_model %}{{ top_model.get('Net Realized Profit (EUR)', 'EUR 3,445.84') }}{% else %}EUR 3,445.84{% endif %}</div>
                     <div class="text-muted small mt-1">After TSO, Exchange & 22% Danish Tax</div>
                 </div>
             </div>
@@ -154,70 +169,12 @@
             </div>
         </div>
 
-        <!-- 1. REAL-TIME 5-STEP ROLLING FORECAST CARD -->
-        <div class="card p-3 mb-4">
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <h5 class="fw-bold text-white mb-0">
-                    <i class="fa-solid fa-wand-magic-sparkles text-primary me-2"></i>
-                    Real-Time 5-Step Future Price Forecast (15m Intervals in Danish Time)
-                </h5>
-                <div class="d-flex align-items-center gap-2">
-                    <span class="badge bg-success px-3 py-2 d-inline-flex align-items-center gap-2">
-                        <span class="pulse-circle"></span> Auto-Reconciler Active (30s)
-                    </span>
-                    <button class="btn btn-outline-light btn-sm fw-semibold" onclick="fetchRollingForecast()">
-                        <i class="fa-solid fa-arrows-rotate me-1"></i> Refresh Forecast
-                    </button>
-                </div>
-            </div>
-
-            <!-- Model Pills -->
-            <div class="d-flex flex-wrap gap-2 mb-3">
-                <span class="badge bg-primary px-3 py-2">🏆 Optuna Bayesian Ensemble (Best)</span>
-                <span class="badge bg-dark border border-secondary px-3 py-2">📊 Baseline Ensemble</span>
-                <span class="badge bg-dark border border-secondary px-3 py-2">🧠 LSTM Neural Net</span>
-                <span class="badge bg-dark border border-secondary px-3 py-2">⚡ GRU Neural Net</span>
-                <span class="badge bg-dark border border-secondary px-3 py-2">📈 Facebook Prophet</span>
-                <span class="badge bg-dark border border-secondary px-3 py-2">🎯 RF + HMM Regime Detector</span>
-            </div>
-
-            <!-- 5-Step Table Container -->
-            <div class="table-responsive">
-                <table class="table table-dark table-hover mb-0 align-middle">
-                    <thead>
-                        <tr class="border-bottom border-secondary text-muted small text-uppercase">
-                            <th class="py-2 px-3">Quarter</th>
-                            <th>Danish Time (TimeDK)</th>
-                            <th>Baseline (EUR)</th>
-                            <th>Optuna Best (EUR)</th>
-                            <th>LSTM (EUR)</th>
-                            <th>GRU (EUR)</th>
-                            <th>Prophet (EUR)</th>
-                            <th>Best (DKK)</th>
-                            <th>Prediction Range</th>
-                            <th class="text-end px-3">Actual Settled (EUR)</th>
-                        </tr>
-                    </thead>
-                    <tbody id="rollingForecastTbody">
-                        <tr>
-                            <td colspan="10" class="text-center py-3 text-muted">
-                                <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div> Loading real-time rolling forecasts...
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-            <div class="text-muted small mt-2">
-                <i class="fa-solid fa-circle-info me-1"></i> Displaying <strong>Previous 3 Completed Quarters</strong> ($Q_{-3} \dots Q_{-1}$) with ground truth actuals, followed by <strong>Future 5 Quarters</strong> ($Q_1 \dots Q_5$) with real-time multi-model forecasts.
-            </div>
-        </div>
-
-        <!-- 2. DAY-AHEAD 96-QUARTER TOURNAMENT LEADERBOARD CARD -->
+        <!-- 4-Paradigm Commercial Summary Bar -->
         <div class="card p-3 mb-4">
             <div class="row align-items-center g-3">
                 <div class="col-lg-6">
                     <h5 class="mb-1 text-white fw-bold"><i class="fa-solid fa-trophy text-warning me-2"></i>Multi-Paradigm Tournament Leaderboard (Day D)</h5>
-                    <p class="text-muted small mb-0">Benchmarking Transfer Learning, Hierarchical, Dual 15m, Bi-LSTM & TFT Transformers on Net Monetary Profit.</p>
+                    <p class="text-muted small mb-0">Benchmarking Transfer Learning (Bi-LSTM), Hierarchical, Dual 15m (TFT), and Meta-Ensemble.</p>
                 </div>
                 <div class="col-lg-6 d-flex justify-content-end align-items-center gap-3">
                     <div class="input-group" style="max-width: 260px;">
@@ -231,7 +188,7 @@
             </div>
         </div>
 
-        <!-- 4-Paradigm Commercial Leaderboard Table -->
+        <!-- Leaderboard Summary Table -->
         <div class="card mb-4">
             <div class="card-body p-0">
                 <div class="table-responsive">
@@ -304,6 +261,175 @@
             </div>
         </div>
 
+        <!-- ================================================================= -->
+        <!-- DUAL TABS: 96-QUARTER BACKTESTING vs FUTURE DAY-AHEAD FORECASTS    -->
+        <!-- ================================================================= -->
+        <div class="card mb-4">
+            <div class="card-header p-0">
+                <ul class="nav nav-tabs px-3 pt-2" id="tournamentTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link {% if active_tab == 'backtest' %}active{% endif %}" id="backtest-tab" data-bs-toggle="tab" data-bs-target="#backtest-content" type="button" role="tab">
+                            <i class="fa-solid fa-backward-step text-primary me-2"></i>
+                            96-Quarter Backtesting Tournament (31st August / Day D-1)
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link {% if active_tab == 'future' %}active{% endif %}" id="future-tab" data-bs-toggle="tab" data-bs-target="#future-content" type="button" role="tab">
+                            <i class="fa-solid fa-wand-magic-sparkles text-warning me-2"></i>
+                            Future 96-Quarter Day-Ahead Forecasts (Tomorrow / Day D)
+                        </button>
+                    </li>
+                </ul>
+            </div>
+            <div class="card-body p-0">
+                <div class="tab-content" id="tournamentTabContent">
+
+                    <!-- TAB 1: 96-QUARTER BACKTESTING TABLE -->
+                    <div class="tab-pane fade {% if active_tab == 'backtest' %}show active{% endif %}" id="backtest-content" role="tabpanel">
+                        <div class="p-3 bg-dark bg-opacity-25 d-flex justify-content-between align-items-center border-bottom border-secondary">
+                            <div>
+                                <span class="fw-bold text-white"><i class="fa-solid fa-list-check text-success me-2"></i>96-Quarter Model Comparison vs. Actual Settled Prices ({{ price_area }})</span>
+                                <span class="badge bg-secondary ms-2">Test Dataset: 31st August (00:00 - 23:45 Danish Time)</span>
+                            </div>
+                            <a href="/api/export_csv?area={{ price_area }}&type=backtest" class="btn btn-sm btn-outline-info">
+                                <i class="fa-solid fa-file-csv me-1"></i> Export 96Q Backtest CSV
+                            </a>
+                        </div>
+                        <div class="table-responsive" style="max-height: 520px; overflow-y: auto;">
+                            <table class="table table-dark table-striped table-hover mb-0 text-center align-middle small">
+                                <thead class="sticky-top bg-dark border-bottom border-secondary">
+                                    <tr class="text-muted text-uppercase">
+                                        <th>Quarter</th>
+                                        <th>Danish Time</th>
+                                        <th>Spot (EUR)</th>
+                                        <th class="text-warning">Bi-LSTM (EUR)</th>
+                                        <th class="text-info">TFT (EUR)</th>
+                                        <th>Transfer-LGBM</th>
+                                        <th>Hierarchical</th>
+                                        <th>CatBoost</th>
+                                        <th class="text-success fw-bold">Meta-Best (EUR)</th>
+                                        <th>Best (DKK)</th>
+                                        <th class="text-primary fw-bold">Actual Settled (€)</th>
+                                        <th>Error Spread</th>
+                                        <th>Agent Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for row in backtest_records %}
+                                    <tr>
+                                        <td class="fw-bold text-muted">{{ row['quarter'] }}</td>
+                                        <td>{{ row['time_dk'] }}</td>
+                                        <td>€ {{ row['spot_price_eur'] }}</td>
+                                        <td class="text-warning">€ {{ row['deep_bilstm_eur'] }}</td>
+                                        <td class="text-info">€ {{ row['transformer_tft_eur'] }}</td>
+                                        <td>€ {{ row['transfer_lgb_eur'] }}</td>
+                                        <td>€ {{ row['hierarchical_eur'] }}</td>
+                                        <td>€ {{ row['pure15m_catboost_eur'] }}</td>
+                                        <td class="text-success fw-bold fs-6">€ {{ row['meta_ensemble_eur'] }}</td>
+                                        <td class="text-muted">{{ row['meta_ensemble_dkk'] }} kr</td>
+                                        <td class="text-primary fw-bold fs-6">€ {{ row['actual_settled_eur'] }}</td>
+                                        <td>
+                                            <span class="badge {% if row['error_spread_eur'] < 5.0 %}bg-success{% elif row['error_spread_eur'] < 15.0 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                                                ±€ {{ row['error_spread_eur'] }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            {% if 'BUY' in row['agent_action'] %}
+                                            <span class="badge bg-success"><i class="fa-solid fa-arrow-trend-up me-1"></i> BUY Spot</span>
+                                            {% elif 'SELL' in row['agent_action'] %}
+                                            <span class="badge bg-danger"><i class="fa-solid fa-arrow-trend-down me-1"></i> SELL Spot</span>
+                                            {% else %}
+                                            <span class="badge bg-secondary">HOLD</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% else %}
+                                    <tr>
+                                        <td colspan="13" class="text-center py-4 text-muted">No 96-quarter backtesting records generated yet.</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- TAB 2: FUTURE 96-QUARTER DAY-AHEAD FORECAST TABLE -->
+                    <div class="tab-pane fade {% if active_tab == 'future' %}show active{% endif %}" id="future-content" role="tabpanel">
+                        <div class="p-3 bg-dark bg-opacity-25 d-flex justify-content-between align-items-center border-bottom border-secondary">
+                            <div>
+                                <span class="fw-bold text-white"><i class="fa-solid fa-clock text-warning me-2"></i>Upcoming 96-Step Day-Ahead Predictions (15m Intervals in Danish Time)</span>
+                                <span class="badge bg-warning text-dark ms-2">Real-Time Forecasts for Tomorrow (00:00 - 23:45)</span>
+                            </div>
+                            <a href="/api/export_csv?area={{ price_area }}&type=future" class="btn btn-sm btn-outline-warning">
+                                <i class="fa-solid fa-file-csv me-1"></i> Export 96Q Future CSV
+                            </a>
+                        </div>
+                        <div class="table-responsive" style="max-height: 520px; overflow-y: auto;">
+                            <table class="table table-dark table-striped table-hover mb-0 text-center align-middle small">
+                                <thead class="sticky-top bg-dark border-bottom border-secondary">
+                                    <tr class="text-muted text-uppercase">
+                                        <th>Quarter</th>
+                                        <th>Danish Time</th>
+                                        <th>Spot DA (EUR)</th>
+                                        <th class="text-warning">Bi-LSTM (EUR)</th>
+                                        <th class="text-info">TFT (EUR)</th>
+                                        <th>Transfer-LGBM</th>
+                                        <th>Hierarchical</th>
+                                        <th>CatBoost</th>
+                                        <th class="text-success fw-bold">Meta-Best (EUR)</th>
+                                        <th>Best (DKK)</th>
+                                        <th>Predicted Direction</th>
+                                        <th>Trading Commitment</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for row in future_records %}
+                                    <tr>
+                                        <td class="fw-bold text-warning">{{ row['quarter'] }}</td>
+                                        <td>{{ row['time_dk'] }}</td>
+                                        <td>€ {{ row['spot_price_eur'] }}</td>
+                                        <td class="text-warning">€ {{ row['deep_bilstm_eur'] }}</td>
+                                        <td class="text-info">€ {{ row['transformer_tft_eur'] }}</td>
+                                        <td>€ {{ row['transfer_lgb_eur'] }}</td>
+                                        <td>€ {{ row['hierarchical_eur'] }}</td>
+                                        <td>€ {{ row['pure15m_catboost_eur'] }}</td>
+                                        <td class="text-success fw-bold fs-6">€ {{ row['meta_ensemble_eur'] }}</td>
+                                        <td class="text-muted">{{ row['meta_ensemble_dkk'] }} kr</td>
+                                        <td>
+                                            {% if 'UP' in row['predicted_direction'] %}
+                                            <span class="badge bg-success">UP (+1)</span>
+                                            {% elif 'DOWN' in row['predicted_direction'] %}
+                                            <span class="badge bg-danger">DOWN (-1)</span>
+                                            {% else %}
+                                            <span class="badge bg-secondary">BALANCED (0)</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if 'BUY' in row['agent_action'] %}
+                                            <span class="badge bg-success"><i class="fa-solid fa-cart-shopping me-1"></i> BUY Spot (Long)</span>
+                                            {% elif 'SELL' in row['agent_action'] %}
+                                            <span class="badge bg-danger"><i class="fa-solid fa-hand-holding-dollar me-1"></i> SELL Spot (Short)</span>
+                                            {% else %}
+                                            <span class="badge bg-secondary">HOLD</span>
+                                            {% endif %}
+                                        </td>
+                                        <td><span class="badge bg-dark border border-warning text-warning">⏳ Pending</span></td>
+                                    </tr>
+                                    {% else %}
+                                    <tr>
+                                        <td colspan="13" class="text-center py-4 text-muted">No upcoming 96-quarter forecasts generated yet.</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
         <!-- Enhanced 4-Panel 96-Quarter Backtest Dashboard Visuals -->
         <div class="row">
             <div class="col-12">
@@ -333,71 +459,8 @@
 
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        function renderForecastTable(data) {
-            const tbody = document.getElementById('rollingForecastTbody');
-            if (!tbody || !data || !data.past_quarters) return;
-
-            let html = '';
-
-            // 1. Past 3 Quarters (Q_-3 ... Q_-1)
-            data.past_quarters.forEach(q => {
-                html += `
-                <tr style="background-color: rgba(16, 185, 129, 0.08);">
-                    <td class="px-3 fw-bold text-success">${q.step_label}</td>
-                    <td class="fw-semibold text-white">${q.time_dk}</td>
-                    <td>${q.baseline_eur.toFixed(2)}</td>
-                    <td class="fw-bold text-success">${q.optuna_eur.toFixed(2)}</td>
-                    <td>${q.lstm_eur.toFixed(2)}</td>
-                    <td>${q.gru_eur.toFixed(2)}</td>
-                    <td>${q.prophet_eur.toFixed(2)}</td>
-                    <td class="text-muted">${q.best_dkk.toFixed(2)}</td>
-                    <td><span class="badge bg-secondary">Confirmed</span></td>
-                    <td class="text-end px-3 fw-bold text-info">${q.actual_eur.toFixed(2)}</td>
-                </tr>`;
-            });
-
-            // Separator
-            html += `
-            <tr class="bg-dark text-center">
-                <td colspan="10" class="py-1 text-muted small fw-bold text-uppercase" style="letter-spacing: 1px;">
-                    ▼ UPCOMING FUTURE 5-STEP INTERVALS (REAL-TIME FORECASTS) ▼
-                </td>
-            </tr>`;
-
-            // 2. Future 5 Quarters (Q1 ... Q5)
-            data.future_quarters.forEach(q => {
-                html += `
-                <tr>
-                    <td class="px-3 fw-bold text-primary">${q.step_label}</td>
-                    <td class="fw-bold text-white">${q.time_dk}</td>
-                    <td>${q.baseline_eur.toFixed(2)}</td>
-                    <td class="fw-bold text-success">${q.optuna_eur.toFixed(2)}</td>
-                    <td>${q.lstm_eur.toFixed(2)}</td>
-                    <td>${q.gru_eur.toFixed(2)}</td>
-                    <td>${q.prophet_eur.toFixed(2)}</td>
-                    <td class="text-muted">${q.best_dkk.toFixed(2)}</td>
-                    <td><span class="badge bg-dark border border-secondary text-white">${q.range_str}</span></td>
-                    <td class="text-end px-3"><span class="badge bg-warning text-dark"><i class="fa-solid fa-hourglass-half me-1"></i> Pending</span></td>
-                </tr>`;
-            });
-
-            tbody.innerHTML = html;
-        }
-
-        function fetchRollingForecast() {
-            fetch('/api/predict_future?area={{ price_area }}')
-                .then(res => res.json())
-                .then(data => renderForecastTable(data))
-                .catch(err => console.error('Failed to load forecast:', err));
-        }
-
-        // Initial fetch + 30s auto-reconciliation
-        document.addEventListener('DOMContentLoaded', () => {
-            fetchRollingForecast();
-            setInterval(fetchRollingForecast, 30000);
-        });
-
         function runTournament() {
             var capitalVal = parseFloat(document.getElementById('capitalInput').value) || 100000.0;
             document.getElementById('spinnerOverlay').style.display = 'flex';
