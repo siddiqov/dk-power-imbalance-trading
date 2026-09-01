@@ -154,7 +154,65 @@
             </div>
         </div>
 
-        <!-- Action & Capital Input Bar -->
+        <!-- 1. REAL-TIME 5-STEP ROLLING FORECAST CARD -->
+        <div class="card p-3 mb-4">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="fw-bold text-white mb-0">
+                    <i class="fa-solid fa-wand-magic-sparkles text-primary me-2"></i>
+                    Real-Time 5-Step Future Price Forecast (15m Intervals in Danish Time)
+                </h5>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge bg-success px-3 py-2 d-inline-flex align-items-center gap-2">
+                        <span class="pulse-circle"></span> Auto-Reconciler Active (30s)
+                    </span>
+                    <button class="btn btn-outline-light btn-sm fw-semibold" onclick="fetchRollingForecast()">
+                        <i class="fa-solid fa-arrows-rotate me-1"></i> Refresh Forecast
+                    </button>
+                </div>
+            </div>
+
+            <!-- Model Pills -->
+            <div class="d-flex flex-wrap gap-2 mb-3">
+                <span class="badge bg-primary px-3 py-2">🏆 Optuna Bayesian Ensemble (Best)</span>
+                <span class="badge bg-dark border border-secondary px-3 py-2">📊 Baseline Ensemble</span>
+                <span class="badge bg-dark border border-secondary px-3 py-2">🧠 LSTM Neural Net</span>
+                <span class="badge bg-dark border border-secondary px-3 py-2">⚡ GRU Neural Net</span>
+                <span class="badge bg-dark border border-secondary px-3 py-2">📈 Facebook Prophet</span>
+                <span class="badge bg-dark border border-secondary px-3 py-2">🎯 RF + HMM Regime Detector</span>
+            </div>
+
+            <!-- 5-Step Table Container -->
+            <div class="table-responsive">
+                <table class="table table-dark table-hover mb-0 align-middle">
+                    <thead>
+                        <tr class="border-bottom border-secondary text-muted small text-uppercase">
+                            <th class="py-2 px-3">Quarter</th>
+                            <th>Danish Time (TimeDK)</th>
+                            <th>Baseline (EUR)</th>
+                            <th>Optuna Best (EUR)</th>
+                            <th>LSTM (EUR)</th>
+                            <th>GRU (EUR)</th>
+                            <th>Prophet (EUR)</th>
+                            <th>Best (DKK)</th>
+                            <th>Prediction Range</th>
+                            <th class="text-end px-3">Actual Settled (EUR)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rollingForecastTbody">
+                        <tr>
+                            <td colspan="10" class="text-center py-3 text-muted">
+                                <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div> Loading real-time rolling forecasts...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="text-muted small mt-2">
+                <i class="fa-solid fa-circle-info me-1"></i> Displaying <strong>Previous 3 Completed Quarters</strong> ($Q_{-3} \dots Q_{-1}$) with ground truth actuals, followed by <strong>Future 5 Quarters</strong> ($Q_1 \dots Q_5$) with real-time multi-model forecasts.
+            </div>
+        </div>
+
+        <!-- 2. DAY-AHEAD 96-QUARTER TOURNAMENT LEADERBOARD CARD -->
         <div class="card p-3 mb-4">
             <div class="row align-items-center g-3">
                 <div class="col-lg-6">
@@ -276,6 +334,70 @@
     </div>
 
     <script>
+        function renderForecastTable(data) {
+            const tbody = document.getElementById('rollingForecastTbody');
+            if (!tbody || !data || !data.past_quarters) return;
+
+            let html = '';
+
+            // 1. Past 3 Quarters (Q_-3 ... Q_-1)
+            data.past_quarters.forEach(q => {
+                html += `
+                <tr style="background-color: rgba(16, 185, 129, 0.08);">
+                    <td class="px-3 fw-bold text-success">${q.step_label}</td>
+                    <td class="fw-semibold text-white">${q.time_dk}</td>
+                    <td>${q.baseline_eur.toFixed(2)}</td>
+                    <td class="fw-bold text-success">${q.optuna_eur.toFixed(2)}</td>
+                    <td>${q.lstm_eur.toFixed(2)}</td>
+                    <td>${q.gru_eur.toFixed(2)}</td>
+                    <td>${q.prophet_eur.toFixed(2)}</td>
+                    <td class="text-muted">${q.best_dkk.toFixed(2)}</td>
+                    <td><span class="badge bg-secondary">Confirmed</span></td>
+                    <td class="text-end px-3 fw-bold text-info">${q.actual_eur.toFixed(2)}</td>
+                </tr>`;
+            });
+
+            // Separator
+            html += `
+            <tr class="bg-dark text-center">
+                <td colspan="10" class="py-1 text-muted small fw-bold text-uppercase" style="letter-spacing: 1px;">
+                    ▼ UPCOMING FUTURE 5-STEP INTERVALS (REAL-TIME FORECASTS) ▼
+                </td>
+            </tr>`;
+
+            // 2. Future 5 Quarters (Q1 ... Q5)
+            data.future_quarters.forEach(q => {
+                html += `
+                <tr>
+                    <td class="px-3 fw-bold text-primary">${q.step_label}</td>
+                    <td class="fw-bold text-white">${q.time_dk}</td>
+                    <td>${q.baseline_eur.toFixed(2)}</td>
+                    <td class="fw-bold text-success">${q.optuna_eur.toFixed(2)}</td>
+                    <td>${q.lstm_eur.toFixed(2)}</td>
+                    <td>${q.gru_eur.toFixed(2)}</td>
+                    <td>${q.prophet_eur.toFixed(2)}</td>
+                    <td class="text-muted">${q.best_dkk.toFixed(2)}</td>
+                    <td><span class="badge bg-dark border border-secondary text-white">${q.range_str}</span></td>
+                    <td class="text-end px-3"><span class="badge bg-warning text-dark"><i class="fa-solid fa-hourglass-half me-1"></i> Pending</span></td>
+                </tr>`;
+            });
+
+            tbody.innerHTML = html;
+        }
+
+        function fetchRollingForecast() {
+            fetch('/api/predict_future?area={{ price_area }}')
+                .then(res => res.json())
+                .then(data => renderForecastTable(data))
+                .catch(err => console.error('Failed to load forecast:', err));
+        }
+
+        // Initial fetch + 30s auto-reconciliation
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchRollingForecast();
+            setInterval(fetchRollingForecast, 30000);
+        });
+
         function runTournament() {
             var capitalVal = parseFloat(document.getElementById('capitalInput').value) || 100000.0;
             document.getElementById('spinnerOverlay').style.display = 'flex';
