@@ -1,4 +1,4 @@
-﻿\"\"\"
+\"\"\"
 Helper script to download pre-trained machine learning and deep learning models
 from Google Drive into the local 'models/' directory.
 
@@ -18,7 +18,7 @@ MODELS_DIR = BASE_DIR / "models"
 # GOOGLE DRIVE CONFIGURATION
 # Replace these with your team's Google Drive shared Folder ID or File IDs
 # --------------------------------------------------------------------------
-GDRIVE_FOLDER_ID = ""  # Example: "1A2B3C4D5E6F7G8H9I0J"
+GDRIVE_FOLDER_ID = "1xDMe236gDmZ4jUcXXgWoFsdITAxMteWU"
 
 # Individual model files map: {filename: gdrive_file_id}
 MODEL_FILES = {

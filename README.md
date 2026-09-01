@@ -1,4 +1,4 @@
-﻿# Danish Power Imbalance Trading & Forecasting Engine (DK1 / DK2)
+# Danish Power Imbalance Trading & Forecasting Engine (DK1 / DK2)
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Framework](https://img.shields.io/badge/Framework-Flask%20%7C%20PyTorch%20%7C%20CatBoost-orange.svg)]()
@@ -15,7 +15,7 @@ In deregulated power grids such as the Nordic synchronized area, balance respons
 
 This repository implements a multi-horizon price forecasting engine, risk-managed quantitative trading strategies, an automated backtesting framework, and an interactive real-time Flask analytics dashboard.
 
-`
+`	ext
                     ┌──────────────────────────────────────────────┐
                     │ Energinet / Nord Pool Ingestion API          │
                     └──────────────────────┬───────────────────────┘
@@ -99,7 +99,7 @@ dk-power-imbalance-trading/
 ### 1. Clone & Setup Environment
 
 `ash
-git clone https://github.com/<your-username>/dk-power-imbalance-trading.git
+git clone https://github.com/siddiqov/dk-power-imbalance-trading.git
 cd dk-power-imbalance-trading
 
 # Create virtual environment
@@ -117,12 +117,13 @@ pip install -r requirements.txt
 
 ### 2. Download Pre-Trained Models (Google Drive)
 
-Pre-trained model binaries (.pkl, .pt) are hosted on Google Drive:
+Pre-trained model binaries (.pkl, .pt) are hosted on [Google Drive (Models Folder)](https://drive.google.com/drive/folders/1xDMe236gDmZ4jUcXXgWoFsdITAxMteWU?usp=sharing).
+
+You can automatically download all trained weights into your local models/ directory:
 
 `ash
 python scripts/download_models.py
 `
-*(Team members: Ensure your Google Drive link/ID is set in scripts/download_models.py if setting up a new environment).*
 
 ### 3. Run the Web Dashboard
 
