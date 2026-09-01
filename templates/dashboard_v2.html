@@ -8,13 +8,15 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
         :root {
-            --bg-dark: #090d16;
-            --card-bg: #131d31;
-            --card-border: #1e293b;
-            --accent-green: #10b981;
-            --accent-blue: #3b82f6;
-            --accent-purple: #8b5cf6;
+            --bg-dark: #070a12;
+            --card-bg: #0f172a;
+            --card-surface: #1e293b;
+            --card-border: #334155;
+            --accent-green: #22c55e;
+            --accent-blue: #38bdf8;
+            --accent-yellow: #facc15;
             --text-main: #f8fafc;
+            --text-secondary: #e2e8f0;
             --text-muted: #94a3b8;
         }
         body {
@@ -30,7 +32,7 @@
             background-color: var(--card-bg);
             border: 1px solid var(--card-border);
             border-radius: 12px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
         }
         .metric-card {
             padding: 1.25rem;
@@ -51,7 +53,7 @@
             border-bottom: 2px solid var(--card-border);
         }
         .nav-tabs .nav-link {
-            color: var(--text-muted);
+            color: #cbd5e1;
             font-weight: 600;
             border: none;
             padding: 0.85rem 1.5rem;
@@ -64,8 +66,36 @@
         }
         .table-dark {
             --bs-table-bg: var(--card-bg);
+            --bs-table-striped-bg: #141e33;
+            --bs-table-hover-bg: #1c2a47;
             --bs-table-border-color: var(--card-border);
+            color: var(--text-secondary);
         }
+        .table-dark th {
+            color: #f1f5f9;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+            vertical-align: middle;
+            background-color: #0b1120 !important;
+            border-bottom: 2px solid #475569 !important;
+            padding: 0.75rem 0.5rem !important;
+        }
+        .table-dark td {
+            vertical-align: middle;
+            padding: 0.65rem 0.45rem !important;
+            color: #e2e8f0;
+            font-weight: 500;
+        }
+        .val-spot { color: #f8fafc; font-weight: 600; }
+        .val-lstm { color: #fde047; font-weight: 600; }
+        .val-tft { color: #38bdf8; font-weight: 600; }
+        .val-lgb { color: #86efac; font-weight: 600; }
+        .val-hier { color: #e9d5ff; font-weight: 600; }
+        .val-cat { color: #fdba74; font-weight: 600; }
+        .val-best-eur { color: #4ade80; font-weight: 700; font-size: 0.95rem; }
+        .val-best-dkk { color: #cbd5e1; font-weight: 500; }
+        .val-actual { color: #ffffff; font-weight: 700; font-size: 0.95rem; background: rgba(56, 189, 248, 0.12); border-radius: 6px; padding: 3px 6px; }
+
         .badge-rank-1 {
             background: linear-gradient(135deg, #f59e0b, #d97706);
             color: white;
@@ -95,7 +125,7 @@
             display: none;
             position: fixed;
             top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(9, 13, 22, 0.88);
+            background: rgba(7, 10, 18, 0.92);
             z-index: 9999;
             justify-content: center;
             align-items: center;
@@ -144,8 +174,8 @@
                     </div>
                     <div class="metric-val text-success mt-1">{% if top_model %}{{ top_model.get('Daily Return', '+3.45%') }}{% else %}+3.45%{% endif %}</div>
                     <div class="d-flex justify-content-between align-items-center mt-1 text-muted small">
-                        <span><i class="fa-regular fa-clock me-1 text-warning"></i> <span id="liveClock">01 Sep 2026 18:50:00 CET</span></span>
-                        <span class="badge bg-dark border border-secondary text-info">Target: 02 Sep 2026</span>
+                        <span class="text-light"><i class="fa-regular fa-clock me-1 text-warning"></i> <span id="liveClock">01 Sep 2026 19:15:00 CET</span></span>
+                        <span class="badge bg-dark border border-secondary text-info fw-bold">Target: 02 Sep 2026</span>
                     </div>
                 </div>
             </div>
@@ -181,10 +211,10 @@
                 </div>
                 <div class="col-lg-6 d-flex justify-content-end align-items-center gap-3">
                     <div class="input-group" style="max-width: 260px;">
-                        <span class="input-group-text bg-dark border-secondary text-muted">€ Capital</span>
-                        <input type="number" id="capitalInput" class="form-control bg-dark text-white border-secondary" value="{{ capital }}" step="10000">
+                        <span class="input-group-text bg-dark border-secondary text-light">€ Capital</span>
+                        <input type="number" id="capitalInput" class="form-control bg-dark text-white border-secondary fw-bold" value="{{ capital }}" step="10000">
                     </div>
-                    <button class="btn btn-success fw-bold px-4 py-2 text-nowrap" onclick="runTournament()">
+                    <button class="btn btn-success fw-bold px-4 py-2 text-nowrap shadow-sm" onclick="runTournament()">
                         <i class="fa-solid fa-play me-2"></i> Run Tournament & Backtest ({{ price_area }})
                     </button>
                 </div>
@@ -224,7 +254,7 @@
                                     {% endif %}
                                 </td>
                                 <td class="fw-semibold text-info">{{ row['Paradigm'] }}</td>
-                                <td class="fw-bold">
+                                <td class="fw-bold text-white">
                                     {% if 'LSTM' in row['Model Architecture'] or 'Transformer' in row['Model Architecture'] or 'TFT' in row['Model Architecture'] %}
                                     <i class="fa-solid fa-brain text-warning me-1"></i>
                                     {% elif 'LightGBM' in row['Model Architecture'] or 'XGB' in row['Model Architecture'] or 'CatBoost' in row['Model Architecture'] %}
@@ -234,19 +264,19 @@
                                     {% endif %}
                                     {{ row['Model Architecture'] }}
                                 </td>
-                                <td><span class="badge bg-dark border border-secondary">{{ row['Dir Accuracy'] }}</span></td>
-                                <td>{{ row['Spread MAE'] }}</td>
+                                <td><span class="badge bg-dark border border-secondary text-light">{{ row['Dir Accuracy'] }}</span></td>
+                                <td class="text-light fw-semibold">{{ row['Spread MAE'] }}</td>
                                 <td>{{ row['Trades'] }}</td>
-                                <td><span class="fw-semibold {% if row['Win Rate']|replace('%','')|float >= 50 %}text-success{% else %}text-warning{% endif %}">{{ row['Win Rate'] }}</span></td>
-                                <td>{{ row['Volume (MWh)'] }} MWh</td>
-                                <td class="text-white">{{ row['Gross PnL'] }}</td>
-                                <td class="text-danger">-{{ row['Fees & Slip'] }}</td>
-                                <td class="text-danger">-{{ row['Danish Tax (22%)'] }}</td>
+                                <td><span class="fw-bold {% if row['Win Rate']|replace('%','')|float >= 50 %}text-success{% else %}text-warning{% endif %}">{{ row['Win Rate'] }}</span></td>
+                                <td class="text-light">{{ row['Volume (MWh)'] }} MWh</td>
+                                <td class="text-white fw-semibold">{{ row['Gross PnL'] }}</td>
+                                <td class="text-danger fw-semibold">-{{ row['Fees & Slip'] }}</td>
+                                <td class="text-danger fw-semibold">-{{ row['Danish Tax (22%)'] }}</td>
                                 <td class="text-end px-3 fw-bold fs-5 {% if '+' in row['Daily Return'] %}text-success{% else %}text-danger{% endif %}">
                                     {{ row['Net Realized Profit (EUR)'] if 'Net Realized Profit (EUR)' in row else row.get('Net Realized Profit (€)', 'EUR 0.00') }}
                                 </td>
                                 <td>
-                                    <span class="badge {% if '+' in row['Daily Return'] %}bg-success{% else %}bg-danger{% endif %} px-2 py-1">
+                                    <span class="badge {% if '+' in row['Daily Return'] %}bg-success{% else %}bg-danger{% endif %} px-2 py-1 fs-6">
                                         {{ row['Daily Return'] }}
                                     </span>
                                 </td>
@@ -289,60 +319,62 @@
 
                     <!-- TAB 1: 96-QUARTER BACKTESTING TABLE -->
                     <div class="tab-pane fade {% if active_tab == 'backtest' %}show active{% endif %}" id="backtest-content" role="tabpanel">
-                        <div class="p-3 bg-dark bg-opacity-25 d-flex justify-content-between align-items-center border-bottom border-secondary">
+                        <div class="p-3 bg-dark bg-opacity-50 d-flex justify-content-between align-items-center border-bottom border-secondary">
                             <div>
-                                <span class="fw-bold text-white"><i class="fa-solid fa-list-check text-success me-2"></i>96-Quarter Model Comparison vs. Actual Settled Imbalance Prices ({{ price_area }})</span>
-                                <span class="badge bg-secondary ms-2">Test Dataset: 31st August (00:00 - 23:45 Danish Time)</span>
+                                <span class="fw-bold text-white fs-6"><i class="fa-solid fa-list-check text-success me-2"></i>96-Quarter Model Comparison vs. Actual Settled Imbalance Prices ({{ price_area }})</span>
+                                <span class="badge bg-secondary ms-2 text-light">Test Dataset: 31st August (00:00 - 23:45 Danish Time)</span>
                             </div>
-                            <a href="/api/export_csv?area={{ price_area }}&type=backtest" class="btn btn-sm btn-outline-info">
+                            <a href="/api/export_csv?area={{ price_area }}&type=backtest" class="btn btn-sm btn-outline-info fw-bold">
                                 <i class="fa-solid fa-file-csv me-1"></i> Export 96Q Backtest CSV
                             </a>
                         </div>
-                        <div class="table-responsive" style="max-height: 520px; overflow-y: auto;">
-                            <table class="table table-dark table-striped table-hover mb-0 text-center align-middle small">
-                                <thead class="sticky-top bg-dark border-bottom border-secondary">
-                                    <tr class="text-muted text-uppercase">
+                        <div class="table-responsive" style="max-height: 540px; overflow-y: auto;">
+                            <table class="table table-dark table-striped table-hover mb-0 text-center align-middle">
+                                <thead class="sticky-top">
+                                    <tr>
                                         <th>Quarter</th>
-                                        <th>Danish Time</th>
-                                        <th>Spot (EUR)</th>
-                                        <th class="text-warning">Bi-LSTM (EUR)</th>
-                                        <th class="text-info">TFT (EUR)</th>
-                                        <th>Transfer-LGBM</th>
-                                        <th>Hierarchical</th>
-                                        <th>CatBoost</th>
-                                        <th class="text-success fw-bold">Meta-Best (EUR)</th>
-                                        <th>Best (DKK)</th>
-                                        <th class="text-primary fw-bold text-nowrap">Actual Settled Imbalance Price (EUR)</th>
-                                        <th>Error Spread</th>
-                                        <th>Agent Action</th>
+                                        <th>Danish<br>Time</th>
+                                        <th>Spot DA<br><span class="text-light">(EUR)</span></th>
+                                        <th class="val-lstm">Bi-LSTM<br>(EUR)</th>
+                                        <th class="val-tft">TFT<br>(EUR)</th>
+                                        <th class="val-lgb">Transfer<br>LGBM</th>
+                                        <th class="val-hier">Hierarchical<br>(EUR)</th>
+                                        <th class="val-cat">CatBoost<br>(EUR)</th>
+                                        <th class="text-success">Meta-Best<br>(EUR)</th>
+                                        <th class="text-light">Best<br>(DKK)</th>
+                                        <th style="min-width: 135px;" class="text-info bg-primary bg-opacity-25 border-start border-end border-info">Actual Settled<br>Imbalance (€)</th>
+                                        <th>Error<br>Spread</th>
+                                        <th>Trading Agent<br>Action</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {% for row in backtest_records %}
                                     <tr>
-                                        <td class="fw-bold text-muted">{{ row['quarter'] }}</td>
-                                        <td>{{ row['time_dk'] }}</td>
-                                        <td>€ {{ row['spot_price_eur'] }}</td>
-                                        <td class="text-warning">€ {{ row['deep_bilstm_eur'] }}</td>
-                                        <td class="text-info">€ {{ row['transformer_tft_eur'] }}</td>
-                                        <td>€ {{ row['transfer_lgb_eur'] }}</td>
-                                        <td>€ {{ row['hierarchical_eur'] }}</td>
-                                        <td>€ {{ row['pure15m_catboost_eur'] }}</td>
-                                        <td class="text-success fw-bold fs-6">€ {{ row['meta_ensemble_eur'] }}</td>
-                                        <td class="text-muted">{{ row['meta_ensemble_dkk'] }} kr</td>
-                                        <td class="text-primary fw-bold fs-6">€ {{ row['actual_settled_imbalance_eur'] }}</td>
+                                        <td class="fw-bold text-warning">{{ row['quarter'] }}</td>
+                                        <td class="text-light font-monospace small">{{ row['time_dk'] }}</td>
+                                        <td class="val-spot">€ {{ row['spot_price_eur'] }}</td>
+                                        <td class="val-lstm">€ {{ row['deep_bilstm_eur'] }}</td>
+                                        <td class="val-tft">€ {{ row['transformer_tft_eur'] }}</td>
+                                        <td class="val-lgb">€ {{ row['transfer_lgb_eur'] }}</td>
+                                        <td class="val-hier">€ {{ row['hierarchical_eur'] }}</td>
+                                        <td class="val-cat">€ {{ row['pure15m_catboost_eur'] }}</td>
+                                        <td class="val-best-eur">€ {{ row['meta_ensemble_eur'] }}</td>
+                                        <td class="val-best-dkk">{{ row['meta_ensemble_dkk'] }} kr</td>
+                                        <td class="border-start border-end border-secondary bg-primary bg-opacity-10">
+                                            <span class="val-actual">€ {{ row['actual_settled_imbalance_eur'] }}</span>
+                                        </td>
                                         <td>
-                                            <span class="badge {% if row['error_spread_eur'] < 5.0 %}bg-success{% elif row['error_spread_eur'] < 15.0 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                                            <span class="badge {% if row['error_spread_eur'] < 5.0 %}bg-success{% elif row['error_spread_eur'] < 15.0 %}bg-warning text-dark{% else %}bg-danger{% endif %} fw-bold">
                                                 ±€ {{ row['error_spread_eur'] }}
                                             </span>
                                         </td>
                                         <td>
                                             {% if 'BUY' in row['agent_action'] %}
-                                            <span class="badge bg-success"><i class="fa-solid fa-arrow-trend-up me-1"></i> BUY Spot</span>
+                                            <span class="badge bg-success px-2 py-1"><i class="fa-solid fa-arrow-trend-up me-1"></i> BUY Spot</span>
                                             {% elif 'SELL' in row['agent_action'] %}
-                                            <span class="badge bg-danger"><i class="fa-solid fa-arrow-trend-down me-1"></i> SELL Spot</span>
+                                            <span class="badge bg-danger px-2 py-1"><i class="fa-solid fa-arrow-trend-down me-1"></i> SELL Spot</span>
                                             {% else %}
-                                            <span class="badge bg-secondary">HOLD</span>
+                                            <span class="badge bg-secondary px-2 py-1">HOLD</span>
                                             {% endif %}
                                         </td>
                                     </tr>
@@ -358,68 +390,70 @@
 
                     <!-- TAB 2: FUTURE 96-QUARTER DAY-AHEAD FORECAST TABLE -->
                     <div class="tab-pane fade {% if active_tab == 'future' %}show active{% endif %}" id="future-content" role="tabpanel">
-                        <div class="p-3 bg-dark bg-opacity-25 d-flex justify-content-between align-items-center border-bottom border-secondary">
+                        <div class="p-3 bg-dark bg-opacity-50 d-flex justify-content-between align-items-center border-bottom border-secondary">
                             <div>
-                                <span class="fw-bold text-white"><i class="fa-solid fa-clock text-warning me-2"></i>Upcoming 96-Step Day-Ahead Predictions (15m Intervals in Danish Time)</span>
-                                <span class="badge bg-warning text-dark ms-2">Real-Time Forecasts for Tomorrow: 2nd September 2026 (00:00 - 23:45)</span>
+                                <span class="fw-bold text-white fs-6"><i class="fa-solid fa-clock text-warning me-2"></i>Upcoming 96-Step Day-Ahead Predictions (15m Intervals in Danish Time)</span>
+                                <span class="badge bg-warning text-dark ms-2 fw-bold">Tomorrow: 2nd September 2026 (00:00 - 23:45)</span>
                             </div>
-                            <a href="/api/export_csv?area={{ price_area }}&type=future" class="btn btn-sm btn-outline-warning">
+                            <a href="/api/export_csv?area={{ price_area }}&type=future" class="btn btn-sm btn-outline-warning fw-bold">
                                 <i class="fa-solid fa-file-csv me-1"></i> Export 96Q Future CSV
                             </a>
                         </div>
-                        <div class="table-responsive" style="max-height: 520px; overflow-y: auto;">
-                            <table class="table table-dark table-striped table-hover mb-0 text-center align-middle small">
-                                <thead class="sticky-top bg-dark border-bottom border-secondary">
-                                    <tr class="text-muted text-uppercase">
+                        <div class="table-responsive" style="max-height: 540px; overflow-y: auto;">
+                            <table class="table table-dark table-striped table-hover mb-0 text-center align-middle">
+                                <thead class="sticky-top">
+                                    <tr>
                                         <th>Quarter</th>
-                                        <th>Danish Time</th>
-                                        <th>Spot DA (EUR)</th>
-                                        <th class="text-warning">Bi-LSTM (EUR)</th>
-                                        <th class="text-info">TFT (EUR)</th>
-                                        <th>Transfer-LGBM</th>
-                                        <th>Hierarchical</th>
-                                        <th>CatBoost</th>
-                                        <th class="text-success fw-bold">Meta-Best (EUR)</th>
-                                        <th>Best (DKK)</th>
-                                        <th class="text-primary fw-bold text-nowrap">Actual Settled Imbalance Price (EUR)</th>
-                                        <th>Predicted Direction</th>
-                                        <th>Trading Commitment</th>
-                                        <th>Status</th>
+                                        <th>Danish<br>Time</th>
+                                        <th>Spot DA<br><span class="text-light">(EUR)</span></th>
+                                        <th class="val-lstm">Bi-LSTM<br>(EUR)</th>
+                                        <th class="val-tft">TFT<br>(EUR)</th>
+                                        <th class="val-lgb">Transfer<br>LGBM</th>
+                                        <th class="val-hier">Hierarchical<br>(EUR)</th>
+                                        <th class="val-cat">CatBoost<br>(EUR)</th>
+                                        <th class="text-success">Meta-Best<br>(EUR)</th>
+                                        <th class="text-light">Best<br>(DKK)</th>
+                                        <th style="min-width: 135px;" class="text-info bg-primary bg-opacity-25 border-start border-end border-info">Actual Settled<br>Imbalance (€)</th>
+                                        <th>Predicted<br>Direction</th>
+                                        <th>Trading<br>Commitment</th>
+                                        <th>Settlement<br>Status</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {% for row in future_records %}
                                     <tr>
                                         <td class="fw-bold text-warning">{{ row['quarter'] }}</td>
-                                        <td>{{ row['time_dk'] }}</td>
-                                        <td>€ {{ row['spot_price_eur'] }}</td>
-                                        <td class="text-warning">€ {{ row['deep_bilstm_eur'] }}</td>
-                                        <td class="text-info">€ {{ row['transformer_tft_eur'] }}</td>
-                                        <td>€ {{ row['transfer_lgb_eur'] }}</td>
-                                        <td>€ {{ row['hierarchical_eur'] }}</td>
-                                        <td>€ {{ row['pure15m_catboost_eur'] }}</td>
-                                        <td class="text-success fw-bold fs-6">€ {{ row['meta_ensemble_eur'] }}</td>
-                                        <td class="text-muted">{{ row['meta_ensemble_dkk'] }} kr</td>
-                                        <td class="text-muted fst-italic">{{ row.get('actual_settled_imbalance_eur', '--') }}</td>
+                                        <td class="text-light font-monospace small">{{ row['time_dk'] }}</td>
+                                        <td class="val-spot">€ {{ row['spot_price_eur'] }}</td>
+                                        <td class="val-lstm">€ {{ row['deep_bilstm_eur'] }}</td>
+                                        <td class="val-tft">€ {{ row['transformer_tft_eur'] }}</td>
+                                        <td class="val-lgb">€ {{ row['transfer_lgb_eur'] }}</td>
+                                        <td class="val-hier">€ {{ row['hierarchical_eur'] }}</td>
+                                        <td class="val-cat">€ {{ row['pure15m_catboost_eur'] }}</td>
+                                        <td class="val-best-eur">€ {{ row['meta_ensemble_eur'] }}</td>
+                                        <td class="val-best-dkk">{{ row['meta_ensemble_dkk'] }} kr</td>
+                                        <td class="border-start border-end border-secondary bg-primary bg-opacity-10 text-light fw-bold">
+                                            {{ row.get('actual_settled_imbalance_eur', '--') }}
+                                        </td>
                                         <td>
                                             {% if 'UP' in row['predicted_direction'] %}
-                                            <span class="badge bg-success">UP (+1)</span>
+                                            <span class="badge bg-success px-2 py-1">UP (+1)</span>
                                             {% elif 'DOWN' in row['predicted_direction'] %}
-                                            <span class="badge bg-danger">DOWN (-1)</span>
+                                            <span class="badge bg-danger px-2 py-1">DOWN (-1)</span>
                                             {% else %}
-                                            <span class="badge bg-secondary">BALANCED (0)</span>
+                                            <span class="badge bg-secondary px-2 py-1">BALANCED (0)</span>
                                             {% endif %}
                                         </td>
                                         <td>
                                             {% if 'BUY' in row['agent_action'] %}
-                                            <span class="badge bg-success"><i class="fa-solid fa-cart-shopping me-1"></i> BUY Spot (Long)</span>
+                                            <span class="badge bg-success px-2 py-1"><i class="fa-solid fa-cart-shopping me-1"></i> BUY Spot</span>
                                             {% elif 'SELL' in row['agent_action'] %}
-                                            <span class="badge bg-danger"><i class="fa-solid fa-hand-holding-dollar me-1"></i> SELL Spot (Short)</span>
+                                            <span class="badge bg-danger px-2 py-1"><i class="fa-solid fa-hand-holding-dollar me-1"></i> SELL Spot</span>
                                             {% else %}
-                                            <span class="badge bg-secondary">HOLD</span>
+                                            <span class="badge bg-secondary px-2 py-1">HOLD</span>
                                             {% endif %}
                                         </td>
-                                        <td><span class="badge bg-dark border border-warning text-warning">⏳ Pending Settlement</span></td>
+                                        <td><span class="badge bg-dark border border-warning text-warning fw-semibold">⏳ Pending</span></td>
                                     </tr>
                                     {% else %}
                                     <tr>
@@ -444,7 +478,7 @@
                             <i class="fa-solid fa-chart-line text-primary me-2"></i>
                             Enhanced 4-Panel 96-Quarter Diagnostic & Arbitrage Dashboard ({{ price_area }})
                         </h5>
-                        <span class="text-muted small">Panel 1: Forecast Overlay | Panel 2: Buy/Sell Actions | Panel 3: Equity Growth | Panel 4: Fee Waterfall</span>
+                        <span class="text-light small">Panel 1: Forecast Overlay | Panel 2: Buy/Sell Actions | Panel 3: Equity Growth | Panel 4: Fee Waterfall</span>
                     </div>
                     <div class="chart-container">
                         {% if chart_exists %}
