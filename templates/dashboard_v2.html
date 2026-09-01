@@ -291,7 +291,7 @@
                     <div class="tab-pane fade {% if active_tab == 'backtest' %}show active{% endif %}" id="backtest-content" role="tabpanel">
                         <div class="p-3 bg-dark bg-opacity-25 d-flex justify-content-between align-items-center border-bottom border-secondary">
                             <div>
-                                <span class="fw-bold text-white"><i class="fa-solid fa-list-check text-success me-2"></i>96-Quarter Model Comparison vs. Actual Settled Prices ({{ price_area }})</span>
+                                <span class="fw-bold text-white"><i class="fa-solid fa-list-check text-success me-2"></i>96-Quarter Model Comparison vs. Actual Settled Imbalance Prices ({{ price_area }})</span>
                                 <span class="badge bg-secondary ms-2">Test Dataset: 31st August (00:00 - 23:45 Danish Time)</span>
                             </div>
                             <a href="/api/export_csv?area={{ price_area }}&type=backtest" class="btn btn-sm btn-outline-info">
@@ -312,7 +312,7 @@
                                         <th>CatBoost</th>
                                         <th class="text-success fw-bold">Meta-Best (EUR)</th>
                                         <th>Best (DKK)</th>
-                                        <th class="text-primary fw-bold">Actual Settled (€)</th>
+                                        <th class="text-primary fw-bold text-nowrap">Actual Settled Imbalance Price (EUR)</th>
                                         <th>Error Spread</th>
                                         <th>Agent Action</th>
                                     </tr>
@@ -330,7 +330,7 @@
                                         <td>€ {{ row['pure15m_catboost_eur'] }}</td>
                                         <td class="text-success fw-bold fs-6">€ {{ row['meta_ensemble_eur'] }}</td>
                                         <td class="text-muted">{{ row['meta_ensemble_dkk'] }} kr</td>
-                                        <td class="text-primary fw-bold fs-6">€ {{ row['actual_settled_eur'] }}</td>
+                                        <td class="text-primary fw-bold fs-6">€ {{ row['actual_settled_imbalance_eur'] }}</td>
                                         <td>
                                             <span class="badge {% if row['error_spread_eur'] < 5.0 %}bg-success{% elif row['error_spread_eur'] < 15.0 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
                                                 ±€ {{ row['error_spread_eur'] }}
@@ -381,6 +381,7 @@
                                         <th>CatBoost</th>
                                         <th class="text-success fw-bold">Meta-Best (EUR)</th>
                                         <th>Best (DKK)</th>
+                                        <th class="text-primary fw-bold text-nowrap">Actual Settled Imbalance Price (EUR)</th>
                                         <th>Predicted Direction</th>
                                         <th>Trading Commitment</th>
                                         <th>Status</th>
@@ -399,6 +400,7 @@
                                         <td>€ {{ row['pure15m_catboost_eur'] }}</td>
                                         <td class="text-success fw-bold fs-6">€ {{ row['meta_ensemble_eur'] }}</td>
                                         <td class="text-muted">{{ row['meta_ensemble_dkk'] }} kr</td>
+                                        <td class="text-muted fst-italic">{{ row.get('actual_settled_imbalance_eur', '--') }}</td>
                                         <td>
                                             {% if 'UP' in row['predicted_direction'] %}
                                             <span class="badge bg-success">UP (+1)</span>
@@ -417,11 +419,11 @@
                                             <span class="badge bg-secondary">HOLD</span>
                                             {% endif %}
                                         </td>
-                                        <td><span class="badge bg-dark border border-warning text-warning">⏳ Pending</span></td>
+                                        <td><span class="badge bg-dark border border-warning text-warning">⏳ Pending Settlement</span></td>
                                     </tr>
                                     {% else %}
                                     <tr>
-                                        <td colspan="13" class="text-center py-4 text-muted">No upcoming 96-quarter forecasts generated yet.</td>
+                                        <td colspan="14" class="text-center py-4 text-muted">No upcoming 96-quarter forecasts generated yet.</td>
                                     </tr>
                                     {% endfor %}
                                 </tbody>

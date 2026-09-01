@@ -91,7 +91,7 @@ class TournamentTableGenerator:
                 "pure15m_catboost_eur": round(price_cat, 2),
                 "meta_ensemble_eur": round(price_ens, 2),
                 "meta_ensemble_dkk": round(price_ens_dkk, 2),
-                "actual_settled_eur": round(actual_imbalance, 2),
+                "actual_settled_imbalance_eur": round(actual_imbalance, 2),
                 "error_spread_eur": round(error_spread, 2),
                 "agent_action": action,
                 "status": "Settled"
@@ -147,6 +147,7 @@ class TournamentTableGenerator:
                 "pure15m_catboost_eur": round(pred_cat, 2),
                 "meta_ensemble_eur": round(pred_ens, 2),
                 "meta_ensemble_dkk": round(pred_ens_dkk, 2),
+                "actual_settled_imbalance_eur": "--",
                 "predicted_direction": direction,
                 "agent_action": action,
                 "status": "⏳ Pending Settlement"
