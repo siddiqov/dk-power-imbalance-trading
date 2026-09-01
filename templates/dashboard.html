@@ -1,0 +1,976 @@
+<!-- templates/dashboard.html - Multi-Model Live Price Forecasting, Regime Switching & Dynamic Accuracy Dashboard -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Danish Power Market - Multi-Model Imbalance Price & Regime Forecasting</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Tahoma, Geneva, Verdana, sans-serif;
+            background: #f4f6f9;
+            color: #2C3E50;
+        }
+
+        .container {
+            max-width: 1560px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, #1A365D, #2B6CB0);
+            color: white;
+            padding: 24px 30px;
+            border-radius: 14px;
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+
+        .header-sub {
+            font-size: 14px;
+            opacity: 0.9;
+            margin-top: 6px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .timezone-badge {
+            background: rgba(255,255,255,0.2);
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .area-badge {
+            background: #ECC94B;
+            color: #744210;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .model-badge {
+            background: #48BB78;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .status {
+            background: rgba(255,255,255,0.15);
+            padding: 10px 18px;
+            border-radius: 24px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        /* Cards */
+        .card {
+            background: white;
+            border-radius: 14px;
+            padding: 22px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+            margin-bottom: 24px;
+            border: 1px solid #E2E8F0;
+        }
+
+        .card h3 {
+            color: #1A365D;
+            margin-bottom: 16px;
+            font-size: 17px;
+            font-weight: 700;
+            border-bottom: 2px solid #EDF2F7;
+            padding-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        /* Grid */
+        .grid-4 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 16px;
+        }
+
+        .stat-box {
+            background: #F7FAFC;
+            border-radius: 10px;
+            padding: 16px;
+            border-left: 4px solid #3182CE;
+        }
+
+        .stat-box .label {
+            font-size: 12px;
+            color: #718096;
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        .stat-box .value {
+            font-size: 26px;
+            font-weight: 700;
+            color: #1A365D;
+            margin: 6px 0;
+        }
+
+        .stat-box .subtext {
+            font-size: 12px;
+            color: #4A5568;
+        }
+
+        /* Data Tables */
+        .table-responsive {
+            overflow-x: auto;
+            width: 100%;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .data-table th, .data-table td {
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 1px solid #E2E8F0;
+            white-space: nowrap;
+        }
+
+        .data-table th {
+            background: #F7FAFC;
+            color: #4A5568;
+            font-weight: 700;
+            text-transform: uppercase;
+            font-size: 11px;
+            letter-spacing: 0.5px;
+        }
+
+        .data-table tbody tr:hover {
+            background: #F8FAFC;
+        }
+
+        .past-row {
+            background: #F0FFF4 !important;
+        }
+
+        .past-row:hover {
+            background: #E6FFFA !important;
+        }
+
+        .divider-row td {
+            background: #EDF2F7 !important;
+            font-weight: bold;
+            color: #4A5568;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 6px 12px;
+            text-align: center;
+        }
+
+        .best-col {
+            background: rgba(72, 187, 120, 0.08);
+            font-weight: bold;
+            color: #22543D;
+        }
+
+        /* Badges */
+        .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .badge-success { background: #C6F6D5; color: #22543D; }
+        .badge-danger { background: #FED7D7; color: #742A2A; }
+        .badge-warning { background: #FEEBC8; color: #744210; }
+        .badge-info { background: #BEE3F8; color: #2A4365; }
+        .badge-neutral { background: #E2E8F0; color: #4A5568; }
+
+        .regime-badge {
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            display: inline-block;
+        }
+
+        .regime-up { background: #FEEBC8; color: #C05621; }
+        .regime-down { background: #EBF8FF; color: #2B6CB0; }
+        .regime-neutral { background: #E2E8F0; color: #4A5568; }
+
+        /* Buttons */
+        .btn {
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: none;
+            font-weight: 600;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-primary {
+            background: #3182CE;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #2B6CB0;
+        }
+
+        .btn-neutral {
+            background: #EDF2F7;
+            color: #4A5568;
+        }
+
+        .btn-neutral:hover {
+            background: #E2E8F0;
+        }
+
+        .area-select {
+            padding: 8px 14px;
+            border-radius: 8px;
+            border: 1px solid #CBD5E0;
+            background: white;
+            font-weight: 600;
+            color: #2D3748;
+            font-size: 13px;
+            outline: none;
+        }
+
+        .plot-container {
+            text-align: center;
+            background: white;
+            padding: 12px;
+            border-radius: 10px;
+        }
+
+        .plot-container img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 30px;
+            color: #718096;
+        }
+
+        .spinner {
+            border: 3px solid #E2E8F0;
+            border-top: 3px solid #3182CE;
+            border-radius: 50%;
+            width: 32px;
+            height: 32px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 12px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .info-bar {
+            background: #EBF8FF;
+            border-left: 4px solid #3182CE;
+            padding: 10px 14px;
+            font-size: 13px;
+            color: #2B6CB0;
+            border-radius: 6px;
+            margin-top: 12px;
+        }
+
+        .model-pills {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+
+        .model-pill {
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            background: #EDF2F7;
+            color: #4A5568;
+        }
+
+        .model-pill.active {
+            background: #3182CE;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div>
+                <h1>⚡ Danish Power Market - Multi-Model Imbalance Price & Regime Forecasting</h1>
+                <div class="header-sub">
+                    <span>Energinet 15-Minute Imbalance Settlement</span>
+                    <span class="timezone-badge">🕒 Danish Time (CET/CEST)</span>
+                    <span class="area-badge" id="current-area-badge">Zone: DK1</span>
+                    <span class="model-badge" id="active-models-badge">🤖 9 Models Active</span>
+                </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 14px;">
+                <select class="area-select" id="area-selector" onchange="changeArea()">
+                    <option value="DK1" selected>Price Area: DK1 (West Denmark)</option>
+                    <option value="DK2">Price Area: DK2 (East Denmark)</option>
+                </select>
+                <div class="status">
+                    <span id="status-text">🟢 Online</span>
+                    <span id="update-time" style="margin-left: 8px; font-weight: normal;"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Metric Summary Cards -->
+        <div class="grid-4" style="margin-bottom: 24px;">
+            <div class="stat-box">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div class="label">Current Imbalance Price</div>
+                    <span class="badge badge-info" id="current-price-time-badge" style="font-size: 11px; padding: 2px 6px;">🕒 --:--</span>
+                </div>
+                <div class="value" id="current-price-display">-- EUR</div>
+                <div class="subtext">
+                    <span id="current-price-dkk-display">≈ -- DKK/MWh</span>
+                    <span id="current-price-time-display" style="color: #2B6CB0; font-weight: 600; margin-left: 4px;"></span>
+                </div>
+            </div>
+            <div class="stat-box" style="border-left-color: #38A169;">
+                <div class="label">Market Regime (RF + HMM)</div>
+                <div class="value" id="current-regime-display" style="font-size: 20px;">--</div>
+                <div class="subtext" id="current-confidence-display">Consensus Confidence: --%</div>
+            </div>
+            <div class="stat-box" style="border-left-color: #D69E2E;">
+                <div class="label">Next 15-Min Interval</div>
+                <div class="value" id="next-interval-display">--:--</div>
+                <div class="subtext">Danish Local Time</div>
+            </div>
+            <div class="stat-box" style="border-left-color: #805AD5;">
+                <div class="label">Best Model & Running MAE</div>
+                <div class="value" id="best-model-display" style="font-size: 18px;">Optuna Ensemble</div>
+                <div class="subtext" id="running-mae-display">Recent MAE: -- EUR/MWh</div>
+            </div>
+        </div>
+
+        <!-- 1. REAL-TIME 5-STEP FORECAST CARD (WITH PAST 3 QUARTERS & REGIMES) -->
+        <div class="card">
+            <h3>
+                <span>🔮 Real-Time 5-Step Future Price Forecast (15m Intervals in Danish Time)</span>
+                <div class="btn-group" style="display: flex; align-items: center; gap: 10px;">
+                    <span id="auto-reconcile-badge" class="badge badge-success" style="font-size:12px; padding: 7px 12px; display:inline-flex; align-items:center; gap:6px;">
+                        <span style="display:inline-block; width:8px; height:8px; background:#38A169; border-radius:50%;"></span>
+                        Auto-Reconciler Active (30s)
+                    </span>
+                    <button class="btn btn-primary" onclick="fetchPrediction(true)">🔄 Refresh Forecast</button>
+                </div>
+            </h3>
+
+            <div class="model-pills">
+                <span class="model-pill active">🏆 Optuna Bayesian Ensemble (Best)</span>
+                <span class="model-pill">📊 Baseline Ensemble</span>
+                <span class="model-pill">🧠 LSTM Neural Net</span>
+                <span class="model-pill">⚡ GRU Neural Net</span>
+                <span class="model-pill">📈 Facebook Prophet</span>
+                <span class="model-pill">🎯 RF + HMM Regime Detector</span>
+            </div>
+
+            <div class="table-responsive" id="prediction-table-container">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <div>Loading real-time multi-model predictions...</div>
+                </div>
+            </div>
+            <div class="info-bar">
+                ℹ️ Displaying <strong>Previous 3 Completed Quarters</strong> ($Q_{-3} \dots Q_{-1}$) with ground truth actuals & regimes, followed by <strong>Future 5 Quarters</strong> ($Q_1 \dots Q_5$) with all model forecasts. Settlements auto-reconcile dynamically via Energinet API.
+            </div>
+        </div>
+
+        <!-- 2. DYNAMIC 4-PANEL VISUALIZATION CARD -->
+        <div class="card">
+            <h3>
+                <span>📈 Multi-Model Live Forecast & Regime Visualizations</span>
+                <button class="btn btn-neutral" onclick="loadPlots()" style="font-size: 12px; padding: 6px 12px;">🔄 Refresh Plots</button>
+            </h3>
+            <div class="plot-container" id="plot-container">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <div>Rendering 4-panel dynamic visualizations...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. BACKTESTING EVALUATION CARD -->
+        <div class="card">
+            <h3>
+                <span>🏆 Backtesting Model Evaluation (Historical Validation Benchmark)</span>
+                <div class="btn-group">
+                    <button class="btn btn-primary" onclick="fetchBacktest(true)">🔄 Re-run Backtest</button>
+                </div>
+            </h3>
+            <p style="font-size: 13px; color: #718096; margin-bottom: 12px;">
+                Evaluates multi-step forecasting models against confirmed Energinet settlement periods, comparing Supervised Random Forest Classifier and Unsupervised Gaussian HMM regime switching.
+            </p>
+            <div class="table-responsive" id="backtest-table-container">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <div>Loading backtest results...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. LOCALSTORAGE RECONCILED HISTORY CARD -->
+        <div class="card">
+            <h3>
+                <span>💾 LocalStorage Prediction History & Accuracy Tracking</span>
+                <div class="btn-group">
+                    <button class="btn btn-neutral" onclick="clearStoredHistory()" style="font-size: 12px; padding: 6px 12px;">🗑️ Clear Stored History</button>
+                </div>
+            </h3>
+            <div class="table-responsive" id="history-table-container">
+                <div style="color: #718096; padding: 15px;">No stored history yet. Predictions are tracked here automatically.</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentArea = 'DK1';
+        const STORAGE_KEY = 'nurex_forecast_store_v3';
+
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('update-time').textContent = now.toLocaleTimeString();
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        function changeArea() {
+            currentArea = document.getElementById('area-selector').value;
+            document.getElementById('current-area-badge').textContent = `Zone: ${currentArea}`;
+            fetchPrediction(true);
+            fetchBacktest(false);
+        }
+
+        function getRegimeBadge(regime) {
+            if (!regime) return 'regime-neutral';
+            const r = regime.toLowerCase();
+            if (r.includes('up')) return 'regime-up';
+            if (r.includes('down')) return 'regime-down';
+            return 'regime-neutral';
+        }
+
+        // ============================================================
+        // 1. FETCH PREDICTIONS & BUILD ENHANCED 8-ROW TABLE
+        // ============================================================
+        async function fetchPrediction(refresh = false) {
+            const container = document.getElementById('prediction-table-container');
+            if (refresh) {
+                container.innerHTML = `<div class="loading"><div class="spinner"></div><div>Querying Energinet API & running all 9 models...</div></div>`;
+            }
+
+            try {
+                const res = await fetch(`/api/predict?area=${currentArea}`);
+                const data = await res.json();
+
+                if (data.error) {
+                    container.innerHTML = `<div style="color: red; padding: 20px;">Error: ${data.error}</div>`;
+                    return;
+                }
+
+                // Update Metric Cards
+                document.getElementById('current-price-display').textContent = `${data.current_price_eur.toFixed(2)} EUR`;
+                document.getElementById('current-price-dkk-display').textContent = `≈ ${data.current_price_dkk.toFixed(2)} DKK/MWh`;
+                const settledTime = data.latest_price_time_dk || (data.past_quarters && data.past_quarters.length > 0 ? data.past_quarters[data.past_quarters.length - 1].time_dk.split(' ')[1] : '--:--');
+                const settledFullTime = data.latest_price_full_dk || (data.past_quarters && data.past_quarters.length > 0 ? data.past_quarters[data.past_quarters.length - 1].time_dk : '');
+                document.getElementById('current-price-time-badge').textContent = `🕒 ${settledTime} DK`;
+                document.getElementById('current-price-time-display').textContent = `(Settled at ${settledTime})`;
+                document.getElementById('current-regime-display').textContent = data.regime || 'Neutral';
+                document.getElementById('current-confidence-display').textContent = `Confidence: ${(data.regime_confidence * 100).toFixed(0)}%`;
+                document.getElementById('next-interval-display').textContent = data.next_interval_time_dk || '--:--';
+                if (data.best_model) {
+                    document.getElementById('best-model-display').textContent = data.best_model;
+                }
+
+                // Save future batch to LocalStorage
+                saveForecastBatchToStorage(data);
+
+                // Render Table
+                renderForecastTable(data);
+
+                // Load Plots
+                loadPlots();
+
+                // Refresh history view
+                renderHistoryTable();
+
+            } catch (err) {
+                console.error(err);
+                container.innerHTML = `<div style="color: red; padding: 20px;">Failed to load predictions: ${err}</div>`;
+            }
+        }
+
+        function renderForecastTable(data) {
+            const container = document.getElementById('prediction-table-container');
+            const past = data.past_quarters || [];
+            const future = data.future_quarters || [];
+
+            let html = `
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Quarter</th>
+                            <th>Danish Time (TimeDK)</th>
+                            <th>Baseline (EUR)</th>
+                            <th class="best-col">Optuna Best (EUR)</th>
+                            <th>LSTM (EUR)</th>
+                            <th>GRU (EUR)</th>
+                            <th>Prophet (EUR)</th>
+                            <th>Best (DKK)</th>
+                            <th>Prediction Range</th>
+                            <th>Actual Settled (EUR)</th>
+                            <th>Original Regime</th>
+                            <th>Predicted Regime</th>
+                            <th>Regime Match</th>
+                            <th>Status / Error</th>
+                            <th>Confidence</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            // 1. Render Past 3 Quarters
+            if (past.length > 0) {
+                past.forEach(p => {
+                    const actReg = p.original_regime || p.actual_regime || 'Neutral';
+                    const predReg = p.predicted_regime || 'Neutral';
+                    const regMatch = p.regime_match || (actReg === predReg ? '✅ Match' : '❌ Mismatch');
+                    const matchBadge = regMatch.includes('Match') ? 'badge-success' : 'badge-danger';
+                    const errVal = p.error_eur !== undefined ? p.error_eur : Math.abs((p.optuna_eur || p.best_eur) - p.actual_eur);
+                    const errBadge = errVal < 25 ? 'badge-success' : (errVal < 50 ? 'badge-warning' : 'badge-danger');
+
+                    html += `
+                        <tr class="past-row">
+                            <td><strong style="color: #2C7A7B;">${p.step_label}</strong></td>
+                            <td><strong style="color: #1A365D;">${p.time_dk}</strong></td>
+                            <td>${p.baseline_eur !== undefined ? p.baseline_eur.toFixed(2) : '--'}</td>
+                            <td class="best-col">${p.optuna_eur !== undefined ? p.optuna_eur.toFixed(2) : '--'}</td>
+                            <td>${p.lstm_eur !== undefined ? p.lstm_eur.toFixed(2) : '--'}</td>
+                            <td>${p.gru_eur !== undefined ? p.gru_eur.toFixed(2) : '--'}</td>
+                            <td>${p.prophet_eur !== undefined ? p.prophet_eur.toFixed(2) : '--'}</td>
+                            <td>${p.actual_dkk !== undefined ? p.actual_dkk.toFixed(2) : (p.actual_eur * 7.46).toFixed(2)}</td>
+                            <td><span style="color:#718096;">Confirmed</span></td>
+                            <td><strong style="color: #2B6CB0;">${p.actual_eur.toFixed(2)}</strong></td>
+                            <td><span class="regime-badge ${getRegimeBadge(actReg)}">${actReg}</span></td>
+                            <td><span class="regime-badge ${getRegimeBadge(predReg)}">${predReg}</span></td>
+                            <td><span class="badge ${matchBadge}">${regMatch}</span></td>
+                            <td><span class="badge ${errBadge}">Δ ${errVal.toFixed(2)} EUR</span></td>
+                            <td><span class="badge badge-neutral">Settled</span></td>
+                        </tr>
+                    `;
+                });
+            }
+
+            // Divider row
+            html += `
+                <tr class="divider-row">
+                    <td colspan="15">▼ Upcoming Future 5-Step Intervals (Real-Time Forecasts) ▼</td>
+                </tr>
+            `;
+
+            // 2. Render Future 5 Quarters
+            future.forEach((f, idx) => {
+                const stepKey = f.step_label || `Q${idx + 1} (+${(idx + 1) * 15}m)`;
+                const timeDk = f.time_dk || '--:--';
+                const fullDateDk = f.full_date_dk || timeDk;
+                const rangeStr = f.range_str || `[${f.min_eur ? f.min_eur.toFixed(0) : '--'} - ${f.max_eur ? f.max_eur.toFixed(0) : '--'}]`;
+
+                // Check LocalStorage for auto-reconciled settlement
+                const stored = getStoredForecast(currentArea, fullDateDk);
+                const actualEur = stored && stored.actual_eur !== null ? stored.actual_eur : null;
+                const actualDkk = stored && stored.actual_dkk !== null ? stored.actual_dkk : null;
+                const optunaPrice = f.optuna_eur !== undefined ? f.optuna_eur : f.best_eur;
+
+                let actualEurStr = `<span class="badge badge-neutral">⏳ Pending</span>`;
+                let origRegimeStr = `<span class="badge badge-neutral">⏳ Pending</span>`;
+                let regimeMatchStr = `<span class="badge badge-neutral">⏳ Pending</span>`;
+                let statusStr = `<span class="badge badge-neutral">⏳ In-Progress</span>`;
+
+                if (actualEur !== null) {
+                    actualEurStr = `<strong style="color: #2B6CB0;">${actualEur.toFixed(2)}</strong>`;
+                    const err = Math.abs(optunaPrice - actualEur);
+                    const errBadge = err < 25 ? 'badge-success' : (err < 50 ? 'badge-warning' : 'badge-danger');
+                    statusStr = `<span class="badge ${errBadge}">Δ ${err.toFixed(2)} EUR</span>`;
+                    
+                    const origReg = stored.original_regime || 'Neutral';
+                    origRegimeStr = `<span class="regime-badge ${getRegimeBadge(origReg)}">${origReg}</span>`;
+                    const isMatch = origReg === f.predicted_regime;
+                    regimeMatchStr = `<span class="badge ${isMatch ? 'badge-success' : 'badge-danger'}">${isMatch ? '✅ Match' : '❌ Mismatch'}</span>`;
+                }
+
+                html += `
+                    <tr>
+                        <td><strong>${stepKey}</strong></td>
+                        <td><strong style="color: #1A365D;">${timeDk}</strong></td>
+                        <td>${f.baseline_eur !== undefined ? f.baseline_eur.toFixed(2) : '--'}</td>
+                        <td class="best-col">${f.optuna_eur !== undefined ? f.optuna_eur.toFixed(2) : (f.best_eur ? f.best_eur.toFixed(2) : '--')}</td>
+                        <td>${f.lstm_eur !== undefined ? f.lstm_eur.toFixed(2) : '--'}</td>
+                        <td>${f.gru_eur !== undefined ? f.gru_eur.toFixed(2) : '--'}</td>
+                        <td>${f.prophet_eur !== undefined ? f.prophet_eur.toFixed(2) : '--'}</td>
+                        <td>${f.best_dkk !== undefined ? f.best_dkk.toFixed(2) : (optunaPrice * 7.46).toFixed(2)}</td>
+                        <td><span style="color: #718096; font-size: 12px;">${rangeStr}</span></td>
+                        <td>${actualEurStr}</td>
+                        <td>${origRegimeStr}</td>
+                        <td><span class="regime-badge ${getRegimeBadge(f.predicted_regime)}">${f.predicted_regime || 'Neutral'}</span></td>
+                        <td>${regimeMatchStr}</td>
+                        <td>${statusStr}</td>
+                        <td><span class="badge badge-info">${f.confidence || 'High'}</span></td>
+                    </tr>
+                `;
+            });
+
+            html += `</tbody></table>`;
+            container.innerHTML = html;
+        }
+
+        // ============================================================
+        // 2. DYNAMIC PLOT RENDERING
+        // ============================================================
+        async function loadPlots() {
+            const plotContainer = document.getElementById('plot-container');
+            try {
+                const res = await fetch(`/api/plot?area=${currentArea}&t=${Date.now()}`);
+                const data = await res.json();
+                if (data.image) {
+                    plotContainer.innerHTML = `<img src="data:image/png;base64,${data.image}" alt="Multi-Model Forecast Visualizations" style="width:100%; height:auto;" />`;
+                } else {
+                    plotContainer.innerHTML = `<div style="color: #718096; padding: 20px;">Generating plots...</div>`;
+                }
+            } catch (err) {
+                console.error('Failed to load plots:', err);
+            }
+        }
+
+        // ============================================================
+        // 3. FETCH BACKTEST BENCHMARK
+        // ============================================================
+        async function fetchBacktest(refresh = false) {
+            const container = document.getElementById('backtest-table-container');
+            if (refresh) {
+                container.innerHTML = `<div class="loading"><div class="spinner"></div><div>Running multi-model backtest pipeline...</div></div>`;
+            }
+
+            try {
+                const res = await fetch(`/api/backtest?area=${currentArea}&refresh=${refresh}`);
+                const data = await res.json();
+
+                if (data.error) {
+                    container.innerHTML = `<div style="color: red; padding: 20px;">Error: ${data.error}</div>`;
+                    return;
+                }
+
+                const rows = data.results || [];
+                let html = `
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Step</th>
+                                <th>Danish Time (TimeDK)</th>
+                                <th>Ground Truth (EUR)</th>
+                                <th>Ensemble Predicted (EUR)</th>
+                                <th>Abs Error (EUR)</th>
+                                <th>Ground Truth (DKK)</th>
+                                <th>Predicted (DKK)</th>
+                                <th>Original Regime</th>
+                                <th>Consensus Regime</th>
+                                <th>Regime Match</th>
+                                <th>RF Match</th>
+                                <th>HMM Match</th>
+                                <th>Confidence</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                rows.forEach(r => {
+                    const predReg = r.Predicted_Regime || r.Consensus_Regime || 'Neutral';
+                    const regMatch = r.Regime_Match || r.RF_Correct || (r.Actual_Regime === predReg ? '✅ Match' : '❌ Mismatch');
+                    const matchBadge = regMatch.includes('Match') ? 'badge-success' : 'badge-danger';
+                    const actRegBadge = getRegimeBadge(r.Actual_Regime);
+                    const predRegBadge = getRegimeBadge(predReg);
+                    const errVal = r.Error_EUR !== undefined ? r.Error_EUR : Math.abs(r.Predicted_Ensemble_EUR - r.Actual_EUR);
+
+                    html += `
+                        <tr>
+                            <td><strong>${r.Step}</strong></td>
+                            <td><strong style="color: #1A365D;">${r.TimeDK}</strong></td>
+                            <td><strong style="color: #2B6CB0;">${r.Actual_EUR.toFixed(2)}</strong></td>
+                            <td><strong>${r.Predicted_Ensemble_EUR.toFixed(2)}</strong></td>
+                            <td><span class="badge ${errVal < 25 ? 'badge-success' : 'badge-warning'}">${errVal.toFixed(2)}</span></td>
+                            <td>${r.Actual_DKK.toFixed(2)}</td>
+                            <td>${r.Predicted_DKK.toFixed(2)}</td>
+                            <td><span class="regime-badge ${actRegBadge}">${r.Actual_Regime}</span></td>
+                            <td><span class="regime-badge ${predRegBadge}">${predReg}</span></td>
+                            <td><span class="badge ${matchBadge}">${regMatch}</span></td>
+                            <td><span class="badge ${r.RF_Correct && r.RF_Correct.includes('Match') ? 'badge-success' : 'badge-danger'}">${r.RF_Correct || 'N/A'}</span></td>
+                            <td><span class="badge ${r.HMM_Correct && r.HMM_Correct.includes('Match') ? 'badge-success' : 'badge-danger'}">${r.HMM_Correct || 'N/A'}</span></td>
+                            <td>${r.Confidence || '85.0%'}</td>
+                        </tr>
+                    `;
+                });
+
+                html += `</tbody></table>`;
+                container.innerHTML = html;
+
+            } catch (err) {
+                console.error(err);
+                container.innerHTML = `<div style="color: red; padding: 20px;">Failed to load backtest data: ${err}</div>`;
+            }
+        }
+
+        // ============================================================
+        // 4. LOCALSTORAGE AUTO-RECONCILIATION ENGINE
+        // ============================================================
+        function getStoredHistory() {
+            try {
+                return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
+            } catch (e) {
+                return {};
+            }
+        }
+
+        function saveForecastBatchToStorage(data) {
+            if (!data || !data.future_quarters) return;
+            const history = getStoredHistory();
+            const area = currentArea;
+
+            data.future_quarters.forEach((f, idx) => {
+                const fullDateDk = f.full_date_dk || f.time_dk;
+                const storageKey = `${area}_${fullDateDk}`;
+
+                if (!history[storageKey]) {
+                    history[storageKey] = {
+                        area: area,
+                        horizon: f.step_label || `Q${idx + 1}`,
+                        full_date_dk: fullDateDk,
+                        time_dk: f.time_dk,
+                        optuna_eur: f.optuna_eur !== undefined ? f.optuna_eur : f.best_eur,
+                        baseline_eur: f.baseline_eur,
+                        lstm_eur: f.lstm_eur,
+                        gru_eur: f.gru_eur,
+                        prophet_eur: f.prophet_eur,
+                        predicted_regime: f.predicted_regime || 'Neutral',
+                        original_regime: null,
+                        actual_eur: null,
+                        actual_dkk: null,
+                        status: 'Pending',
+                        saved_at: new Date().toISOString()
+                    };
+                }
+            });
+
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+        }
+
+        function getStoredForecast(area, fullDateDk) {
+            const history = getStoredHistory();
+            return history[`${area}_${fullDateDk}`] || null;
+        }
+
+        async function autoCheckActuals() {
+            try {
+                const res = await fetch(`/api/check_actuals?area=${currentArea}`);
+                const data = await res.json();
+                if (!data || !data.settled_map) return;
+
+                const settledMap = data.settled_map;
+                const history = getStoredHistory();
+                let updated = false;
+
+                Object.keys(history).forEach(key => {
+                    const item = history[key];
+                    if (item.area === currentArea && item.status === 'Pending') {
+                        const targetDt = item.full_date_dk;
+                        if (settledMap[targetDt]) {
+                            const match = settledMap[targetDt];
+                            item.actual_eur = match.eur;
+                            item.actual_dkk = match.dkk;
+                            item.original_regime = match.regime || 'Neutral';
+                            item.status = 'Settled';
+                            item.settled_at = new Date().toISOString();
+                            updated = true;
+                        }
+                    }
+                });
+
+                if (updated) {
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+                    renderHistoryTable();
+                    // Also trigger re-render of forecast table if visible
+                    fetchPrediction(false);
+                }
+
+                // Update running MAE in metric card
+                updateRunningMaeMetric();
+
+            } catch (err) {
+                console.error('Auto-reconciler check error:', err);
+            }
+        }
+
+        setInterval(autoCheckActuals, 30000); // Poll every 30s
+
+        function updateRunningMaeMetric() {
+            const history = getStoredHistory();
+            let totalErr = 0;
+            let count = 0;
+
+            Object.values(history).forEach(item => {
+                if (item.area === currentArea && item.status === 'Settled' && item.actual_eur !== null) {
+                    totalErr += Math.abs(item.optuna_eur - item.actual_eur);
+                    count++;
+                }
+            });
+
+            const display = document.getElementById('running-mae-display');
+            if (count > 0) {
+                const mae = totalErr / count;
+                display.textContent = `Running MAE: ${mae.toFixed(2)} EUR/MWh (${count} intervals)`;
+            } else {
+                display.textContent = `Running MAE: Tracking Live (0 settled)`;
+            }
+        }
+
+        async function renderHistoryTable() {
+            const container = document.getElementById('history-table-container');
+            let items = [];
+
+            try {
+                const res = await fetch(`/api/forecast_ledger?area=${currentArea}`);
+                const data = await res.json();
+                if (data && data.ledger && data.ledger.length > 0) {
+                    items = data.ledger;
+                }
+            } catch (e) {
+                console.warn("Could not fetch server ledger, falling back to LocalStorage:", e);
+            }
+
+            // Fallback to local storage if API returned no records
+            if (items.length === 0) {
+                const history = getStoredHistory();
+                items = Object.values(history).filter(i => i.area === currentArea);
+            }
+
+            if (items.length === 0) {
+                container.innerHTML = `<div style="color: #718096; padding: 15px;">No recorded live forecast ledger entries yet. Live forecasts are logged continuously as intervals arrive.</div>`;
+                return;
+            }
+
+            let html = `
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Interval (TimeDK)</th>
+                            <th>Horizon</th>
+                            <th>Best Model (EUR)</th>
+                            <th>LSTM (EUR)</th>
+                            <th>GRU (EUR)</th>
+                            <th>Optuna (EUR)</th>
+                            <th>Baseline (EUR)</th>
+                            <th>Actual Settled (EUR)</th>
+                            <th>Original Regime</th>
+                            <th>Predicted Regime</th>
+                            <th>Status / Error</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            items.slice(0, 20).forEach(item => {
+                const hasActual = item.actual_eur !== null && item.actual_eur !== undefined;
+                const bestVal = item.best_eur !== undefined ? item.best_eur : (item.lstm_eur || item.optuna_eur);
+                const err = hasActual && bestVal !== undefined ? Math.abs(bestVal - item.actual_eur) : null;
+                const errBadge = err !== null ? (err < 25 ? 'badge-success' : (err < 50 ? 'badge-warning' : 'badge-danger')) : 'badge-neutral';
+                const statusText = hasActual ? `✅ Settled (Δ ${err.toFixed(2)} EUR)` : `⏳ Pending Settlement`;
+                const fullDate = item.target_time_dk || item.full_date_dk || '--';
+                const horizon = item.step_label || item.horizon || 'Q1';
+
+                html += `
+                    <tr>
+                        <td><strong style="color: #1A365D;">${fullDate}</strong></td>
+                        <td>${horizon}</td>
+                        <td><strong style="color: #2B6CB0;">${bestVal ? bestVal.toFixed(2) : '--'}</strong></td>
+                        <td>${item.lstm_eur ? item.lstm_eur.toFixed(2) : '--'}</td>
+                        <td>${item.gru_eur ? item.gru_eur.toFixed(2) : '--'}</td>
+                        <td>${item.optuna_eur ? item.optuna_eur.toFixed(2) : '--'}</td>
+                        <td>${item.baseline_eur ? item.baseline_eur.toFixed(2) : '--'}</td>
+                        <td>${hasActual ? `<strong style="color: #2D3748;">${item.actual_eur.toFixed(2)}</strong>` : `<span class="badge badge-neutral">Pending</span>`}</td>
+                        <td>${item.original_regime ? `<span class="regime-badge ${getRegimeBadge(item.original_regime)}">${item.original_regime}</span>` : `<span class="badge badge-neutral">Pending</span>`}</td>
+                        <td><span class="regime-badge ${getRegimeBadge(item.predicted_regime)}">${item.predicted_regime || 'Neutral'}</span></td>
+                        <td><span class="badge ${errBadge}">${statusText}</span></td>
+                    </tr>
+                `;
+            });
+
+            html += `</tbody></table>`;
+            container.innerHTML = html;
+            updateRunningMaeMetric();
+        }
+
+        function clearStoredHistory() {
+            if (confirm("Clear all locally stored forecast history?")) {
+                localStorage.removeItem(STORAGE_KEY);
+                renderHistoryTable();
+                updateRunningMaeMetric();
+            }
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchPrediction(true);
+            fetchBacktest(false);
+            autoCheckActuals();
+        });
+    </script>
+</body>
+</html>

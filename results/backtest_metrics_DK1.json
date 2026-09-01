@@ -1,0 +1,19 @@
+{
+  "area": "DK1",
+  "test_intervals": 5,
+  "mae_eur": 52.9,
+  "rmse_eur": 58.8,
+  "regime_accuracy": 100.0,
+  "rf_regime_accuracy": 100.0,
+  "hmm_regime_accuracy": 60.0,
+  "ensemble_weights": {
+    "rf": 0.2055,
+    "xgb": 0.2023,
+    "lgb": 0.197,
+    "cat": 0.2063,
+    "enet": 0.1889
+  },
+  "hyperparameters_tuned": false,
+  "n_optuna_trials": 0,
+  "tested_at": "2026-08-31 13:07:10"
+}

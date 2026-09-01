@@ -1,0 +1,36 @@
+{
+  "rf": {
+    "n_estimators": 150,
+    "max_depth": 9,
+    "min_samples_split": 9,
+    "min_samples_leaf": 6,
+    "max_features": 0.4
+  },
+  "xgb": {
+    "n_estimators": 61,
+    "max_depth": 6,
+    "learning_rate": 0.030677494197539703,
+    "subsample": 0.9643147977787601,
+    "colsample_bytree": 0.8171985738889623,
+    "min_child_weight": 6
+  },
+  "lgb": {
+    "n_estimators": 58,
+    "num_leaves": 24,
+    "learning_rate": 0.03268770375788529,
+    "feature_fraction": 0.6301321323053057,
+    "bagging_fraction": 0.7554709158757928,
+    "bagging_freq": 2,
+    "min_child_samples": 43
+  },
+  "cat": {
+    "iterations": 99,
+    "depth": 7,
+    "learning_rate": 0.07704034497932644,
+    "l2_leaf_reg": 1.7040176261680153
+  },
+  "enet": {
+    "alpha": 0.8347543269851664,
+    "l1_ratio": 0.48332818157122676
+  }
+}
