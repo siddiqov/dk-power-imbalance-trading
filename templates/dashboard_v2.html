@@ -265,9 +265,11 @@
                                     {{ row['Model Architecture'] }}
                                 </td>
                                 <td><span class="badge bg-dark border border-secondary text-light">{{ row['Dir Accuracy'] }}</span></td>
-                                <td class="text-light fw-semibold">{{ row['Spread MAE'] }}</td>
-                                <td>{{ row['Trades'] }}</td>
-                                <td><span class="fw-bold {% if row['Win Rate']|replace('%','')|float >= 50 %}text-success{% else %}text-warning{% endif %}">{{ row['Win Rate'] }}</span></td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-info fw-bold px-2 py-1 shadow-sm" onclick="openTradeLedger('{{ row['Model Architecture'] }}')" title="Click to inspect all trades quarter-by-quarter">
+                                        <i class="fa-solid fa-calculator me-1"></i> {{ row['Trades'] }} <i class="fa-solid fa-arrow-up-right-from-square ms-1 small"></i>
+                                    </button>
+                                </td>
                                 <td class="text-light">{{ row['Volume (MWh)'] }} MWh</td>
                                 <td class="text-white fw-semibold">{{ row['Gross PnL'] }}</td>
                                 <td class="text-danger fw-semibold">-{{ row['Fees & Slip'] }}</td>
@@ -504,6 +506,98 @@
 
     </div>
 
+    <!-- Trade Audit Ledger Modal -->
+    <div class="modal fade" id="tradeLedgerModal" tabindex="-1" aria-labelledby="tradeLedgerModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable" style="max-width: 95vw;">
+            <div class="modal-content bg-dark text-light border border-secondary shadow-lg">
+                <div class="modal-header bg-dark border-bottom border-secondary px-4 py-3">
+                    <div class="d-flex align-items-center gap-3">
+                        <i class="fa-solid fa-file-invoice-dollar text-warning fs-3"></i>
+                        <div>
+                            <h5 class="modal-title fw-bold text-white mb-0" id="tradeLedgerModalLabel">
+                                Commercial Trade Audit Ledger: <span id="modalModelName" class="text-info">Transformer-TFT</span> ({{ price_area }})
+                            </h5>
+                            <span class="text-muted small">100% Real Day-Ahead Commitments & Intraday Energinet Imbalance Cash Flows</span>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                
+                <div class="modal-body p-4 bg-dark bg-opacity-75">
+                    
+                    <!-- KPI Summary Bar in Modal -->
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-3">
+                            <div class="p-3 rounded bg-dark border border-secondary">
+                                <div class="text-muted small text-uppercase fw-bold">Occurred Quarters</div>
+                                <div id="modalOccurredFraction" class="fs-4 fw-bold text-warning mt-1">-- / 96</div>
+                                <div class="text-muted small">Physically Delivered so far</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="p-3 rounded bg-dark border border-secondary">
+                                <div class="text-muted small text-uppercase fw-bold">Active Trades Executed</div>
+                                <div id="modalActiveTrades" class="fs-4 fw-bold text-info mt-1">--</div>
+                                <div class="text-muted small" id="modalHoldTrades">-- Holds</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="p-3 rounded bg-dark border border-secondary">
+                                <div class="text-muted small text-uppercase fw-bold">Total Fees Paid (€0.51/MWh)</div>
+                                <div id="modalFeesPaid" class="fs-4 fw-bold text-danger mt-1">-€ --</div>
+                                <div class="text-muted small">Nord Pool (€0.06) + TSO (€0.20) + Slip (€0.25)</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="p-3 rounded bg-dark border border-secondary">
+                                <div class="text-muted small text-uppercase fw-bold">Accumulated Net Profit</div>
+                                <div id="modalNetProfit" class="fs-4 fw-bold text-success mt-1">+€ --</div>
+                                <div class="text-muted small" id="modalLiveROC">Live ROC: +--%</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Ledger Table -->
+                    <div class="table-responsive rounded border border-secondary" style="max-height: 520px; overflow-y: auto;">
+                        <table class="table table-dark table-striped table-hover mb-0 text-center align-middle small" id="modalLedgerTable">
+                            <thead class="sticky-top bg-dark border-bottom border-secondary">
+                                <tr class="text-muted text-uppercase">
+                                    <th>Quarter</th>
+                                    <th>Danish<br>Time</th>
+                                    <th>Spot DA<br>(EUR)</th>
+                                    <th class="text-warning">Model Imbalance<br>(EUR)</th>
+                                    <th>Predicted<br>Spread</th>
+                                    <th>Trading<br>Decision</th>
+                                    <th>Volume<br>(MWh)</th>
+                                    <th>DA Cash Flow<br>(Outflow/Inflow)</th>
+                                    <th class="text-info">Actual Settled<br>Imbalance (EUR)</th>
+                                    <th>Settlement<br>Cash Flow</th>
+                                    <th>Round-Trip<br>Fees (€)</th>
+                                    <th class="text-success fw-bold">Quarter Realized<br>Net PnL (€)</th>
+                                    <th>Running Portfolio<br>Capital (€)</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="modalLedgerBody">
+                                <tr>
+                                    <td colspan="14" class="text-center py-4 text-muted">
+                                        <div class="spinner-border spinner-border-sm text-info me-2" role="status"></div>
+                                        Fetching live audit ledger from Energinet API...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                </div>
+                
+                <div class="modal-footer bg-dark border-top border-secondary px-4 py-3">
+                    <button type="button" class="btn btn-secondary px-4" data-bs-dismiss="modal">Close Audit Log</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         function updateLiveClock() {
@@ -520,6 +614,71 @@
         }
         setInterval(updateLiveClock, 1000);
         updateLiveClock();
+
+        function openTradeLedger(modelName) {
+            document.getElementById('modalModelName').innerText = modelName;
+            var capitalVal = parseFloat(document.getElementById('capitalInput').value) || 100000.0;
+            
+            var modalEl = new bootstrap.Modal(document.getElementById('tradeLedgerModal'));
+            modalEl.show();
+
+            var tbody = document.getElementById('modalLedgerBody');
+            tbody.innerHTML = `<tr><td colspan="14" class="text-center py-4 text-muted"><div class="spinner-border spinner-border-sm text-info me-2" role="status"></div>Loading 100% genuine quarter-by-quarter ledger for ${modelName}...</td></tr>`;
+
+            fetch(`/api/model_trades_ledger?area={{ price_area }}&model=${encodeURIComponent(modelName)}&capital=${capitalVal}`)
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('modalOccurredFraction').innerText = `${data.occurred_quarters} / ${data.total_quarters}`;
+                document.getElementById('modalActiveTrades').innerText = `${data.active_occurred} Active Trades`;
+                document.getElementById('modalHoldTrades').innerText = `${data.hold_occurred} Holds`;
+                document.getElementById('modalFeesPaid').innerText = `-€ ${data.fees_so_far.toFixed(2)}`;
+                document.getElementById('modalNetProfit').innerText = `${data.net_realized_profit_so_far >= 0 ? '+€' : '-€'} ${Math.abs(data.net_realized_profit_so_far).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                document.getElementById('modalLiveROC').innerText = `Live ROC: ${data.live_roc_percent >= 0 ? '+' : ''}${data.live_roc_percent.toFixed(2)}%`;
+
+                var html = '';
+                data.trades.forEach(t => {
+                    var actionBadge = '<span class="badge bg-secondary">HOLD</span>';
+                    if (t.action.includes('BUY')) {
+                        actionBadge = '<span class="badge bg-success"><i class="fa-solid fa-arrow-trend-up me-1"></i> BUY Spot</span>';
+                    } else if (t.action.includes('SELL')) {
+                        actionBadge = '<span class="badge bg-danger"><i class="fa-solid fa-arrow-trend-down me-1"></i> SELL Spot</span>';
+                    }
+
+                    var pnlClass = 'text-muted';
+                    if (t.net_pnl_eur.startsWith('+€')) {
+                        pnlClass = 'text-success fw-bold';
+                    } else if (t.net_pnl_eur.startsWith('-€')) {
+                        pnlClass = 'text-danger fw-bold';
+                    }
+
+                    var statusBadge = t.status.includes('Settled') 
+                        ? '<span class="badge bg-success bg-opacity-75 text-white fw-bold"><i class="fa-solid fa-check me-1"></i> Settled</span>'
+                        : '<span class="badge bg-dark border border-warning text-warning fw-semibold">⏳ Pending</span>';
+
+                    html += `<tr>
+                        <td class="fw-bold text-warning">${t.quarter}</td>
+                        <td class="font-monospace text-light small">${t.time_dk}</td>
+                        <td class="text-light">€ ${t.spot_price_eur.toFixed(2)}</td>
+                        <td class="text-warning">€ ${t.pred_imbalance_eur.toFixed(2)}</td>
+                        <td class="${t.pred_spread_eur >= 0 ? 'text-success' : 'text-danger'} fw-semibold">${t.pred_spread_eur >= 0 ? '+' : ''}€ ${t.pred_spread_eur.toFixed(2)}</td>
+                        <td>${actionBadge}</td>
+                        <td class="text-light">${t.volume_mwh > 0 ? t.volume_mwh.toFixed(1) + ' MWh' : '--'}</td>
+                        <td class="font-monospace small ${t.da_cash_flow.startsWith('-') ? 'text-danger' : (t.da_cash_flow.startsWith('+') ? 'text-success' : 'text-muted')}">${t.da_cash_flow}</td>
+                        <td class="text-info fw-bold">${t.actual_settled_eur}</td>
+                        <td class="font-monospace small ${t.settle_cash_flow.startsWith('+') ? 'text-success' : (t.settle_cash_flow.startsWith('-') ? 'text-danger' : 'text-muted')}">${t.settle_cash_flow}</td>
+                        <td class="text-danger small">${t.roundtrip_fees_eur > 0 ? '-€ ' + t.roundtrip_fees_eur.toFixed(2) : '--'}</td>
+                        <td class="${pnlClass}">${t.net_pnl_eur}</td>
+                        <td class="fw-bold text-light">${t.running_capital}</td>
+                        <td>${statusBadge}</td>
+                    </tr>`;
+                });
+
+                tbody.innerHTML = html;
+            })
+            .catch(err => {
+                tbody.innerHTML = `<tr><td colspan="14" class="text-center py-4 text-danger">Failed to load trade ledger: ${err}</td></tr>`;
+            });
+        }
 
         function runTournament() {
             var capitalVal = parseFloat(document.getElementById('capitalInput').value) || 100000.0;

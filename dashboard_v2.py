@@ -101,6 +101,19 @@ def api_run_tournament():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+@app.route('/api/model_trades_ledger')
+def api_model_trades_ledger():
+    """Returns quarter-by-quarter financial trade audit ledger for an occurred/active model."""
+    price_area = request.args.get('area', 'DK1')
+    model_name = request.args.get('model', 'Transformer-TFT')
+    capital = float(request.args.get('capital', 100000.0))
+
+    from src.live_intraday_ledger import LiveIntradayLedger
+    ledger_calc = LiveIntradayLedger(price_area=price_area, capital=capital)
+    summary = ledger_calc.get_live_today_ledger(model_name=model_name)
+    return jsonify(summary)
+
+
 @app.route('/api/export_csv')
 def api_export_csv():
     """Exports either the 96-quarter backtest or future forecast table to CSV."""
