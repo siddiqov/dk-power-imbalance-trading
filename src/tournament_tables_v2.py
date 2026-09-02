@@ -34,9 +34,7 @@ class TournamentTableGenerator:
         return self.generate_and_save_backtest_table()
 
     def get_future_table(self):
-        csv_path = f"results/96Q_future_table_{self.price_area}.csv"
-        if os.path.exists(csv_path):
-            return pd.read_csv(csv_path)
+        # Always dynamically generate to pull the latest 15-minute settled quarters from Energinet
         return self.generate_and_save_future_table()
 
     def generate_and_save_backtest_table(self):
