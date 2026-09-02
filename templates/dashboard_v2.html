@@ -453,7 +453,13 @@
                                             <span class="badge bg-secondary px-2 py-1">HOLD</span>
                                             {% endif %}
                                         </td>
-                                        <td><span class="badge bg-dark border border-warning text-warning fw-semibold">⏳ Pending</span></td>
+                                        <td>
+                                            {% if 'Settled' in row.get('status', '') %}
+                                            <span class="badge bg-success bg-opacity-75 text-white fw-bold px-2 py-1"><i class="fa-solid fa-check me-1"></i> Settled</span>
+                                            {% else %}
+                                            <span class="badge bg-dark border border-warning text-warning fw-semibold px-2 py-1">⏳ Pending</span>
+                                            {% endif %}
+                                        </td>
                                     </tr>
                                     {% else %}
                                     <tr>
