@@ -1,10 +1,10 @@
-\"\"\"
+"""
 Helper script to download pre-trained machine learning and deep learning models
 from Google Drive into the local 'models/' directory.
 
 Usage:
     python scripts/download_models.py
-\"\"\"
+"""
 
 import os
 import sys
@@ -46,9 +46,19 @@ def download_models():
     if GDRIVE_FOLDER_ID:
         print(f"[INFO] Downloading full models folder from Google Drive (ID: {GDRIVE_FOLDER_ID})...")
         url = f"https://drive.google.com/drive/folders/{GDRIVE_FOLDER_ID}?usp=sharing"
-        gdown.download_folder(url=url, output=str(MODELS_DIR), quiet=False)
-        print("[SUCCESS] All model assets downloaded successfully!")
-        return
+        
+        max_retries = 10
+        import time
+        for attempt in range(max_retries):
+            try:
+                gdown.download_folder(url=url, output=str(MODELS_DIR), quiet=False)
+                print("[SUCCESS] All model assets downloaded successfully!")
+                return
+            except Exception as e:
+                print(f"[WARNING] Download attempt {attempt + 1} failed due to: {e}. Retrying in 2 seconds...")
+                time.sleep(2)
+        print("[ERROR] Max retries reached. Download failed.")
+        sys.exit(1)
 
     active_files = {k: v for k, v in MODEL_FILES.items() if not v.startswith("YOUR_")}
     if not active_files:
