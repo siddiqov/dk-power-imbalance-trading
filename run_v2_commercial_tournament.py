@@ -229,4 +229,5 @@ def plot_enhanced_4panel_dashboard(all_models, trading_summaries, price_area):
 
 
 if __name__ == '__main__':
-    run_tournament(price_area="DK1")
+    area_arg = sys.argv[1] if len(sys.argv) > 1 else "DK1"
+    run_tournament(price_area=area_arg)

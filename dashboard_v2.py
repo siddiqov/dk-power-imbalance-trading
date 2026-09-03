@@ -27,6 +27,7 @@ from flask import Flask, render_template, jsonify, request, send_from_directory
 from src.data_ingestion_v2 import V2DataEngine
 from run_v2_commercial_tournament import run_tournament
 from src.tournament_tables_v2 import TournamentTableGenerator
+from src.live_intraday_ledger import LiveIntradayLedger
 
 app = Flask(__name__)
 
@@ -41,8 +42,17 @@ def serve_static_results(filename):
     return send_from_directory('results', filename)
 
 
-def load_leaderboard(price_area="DK1"):
-    """Loads the commercial leaderboard CSV."""
+def load_leaderboard(price_area="DK1", capital=100000.0, mode='live'):
+    """Loads the real-time occurred quarters leaderboard or historical backtest CSV."""
+    if mode == 'live':
+        try:
+            ledger_calc = LiveIntradayLedger(price_area=price_area, capital=capital)
+            live_lb = ledger_calc.get_live_today_leaderboard()
+            if live_lb:
+                return live_lb
+        except Exception as e:
+            print(f"  [WARN] Live leaderboard calculation fallback: {e}")
+
     csv_path = f"results/v2_commercial_leaderboard_{price_area}.csv"
     if os.path.exists(csv_path):
         df = pd.read_csv(csv_path)
@@ -58,7 +68,7 @@ def index():
     initial_capital = float(request.args.get('capital', 100000.0))
     active_tab = request.args.get('tab', 'backtest')
 
-    leaderboard = load_leaderboard(price_area)
+    leaderboard = load_leaderboard(price_area, capital=initial_capital, mode='live')
     chart_exists = os.path.exists(f"results/v2_commercial_backtest_{price_area}.png")
     top_model = leaderboard[0] if leaderboard else {}
 
@@ -70,6 +80,9 @@ def index():
     backtest_records = df_backtest.to_dict(orient="records") if not df_backtest.empty else []
     future_records = df_future.to_dict(orient="records") if not df_future.empty else []
 
+    from datetime import datetime
+    today_str = datetime.now().strftime("%d %B %Y")
+
     return render_template(
         'dashboard_v2.html',
         price_area=price_area,
@@ -79,7 +92,8 @@ def index():
         top_model=top_model,
         backtest_records=backtest_records,
         future_records=future_records,
-        chart_exists=chart_exists
+        chart_exists=chart_exists,
+        today_str=today_str
     )
 
 

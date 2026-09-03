@@ -190,3 +190,22 @@ class DeepSequenceTrainer:
             pred_96 = model(past_in, fut_in).cpu().numpy().squeeze(0)
 
         return model, pred_96
+
+    def predict_biseq2seq_lstm(self, model, X_recent):
+        """Generates 96-quarter multi-step forecast using trained BiSeq2SeqLSTM."""
+        model.eval()
+        with torch.no_grad():
+            arr = X_recent.values if hasattr(X_recent, 'values') else np.array(X_recent)
+            recent_in = torch.tensor(arr[-self.seq_len:], dtype=torch.float32).unsqueeze(0).to(self.device)
+            return model(recent_in).cpu().numpy().squeeze(0)
+
+    def predict_tft_attention(self, model, X_recent, X_future_known):
+        """Generates 96-quarter multi-step forecast using trained TemporalFusionAttentionModel."""
+        model.eval()
+        with torch.no_grad():
+            arr_rec = X_recent.values if hasattr(X_recent, 'values') else np.array(X_recent)
+            arr_fut = X_future_known.values if hasattr(X_future_known, 'values') else np.array(X_future_known)
+            fut_dim = min(15, arr_rec.shape[1])
+            past_in = torch.tensor(arr_rec[-self.seq_len:], dtype=torch.float32).unsqueeze(0).to(self.device)
+            fut_in = torch.tensor(arr_fut[:self.horizon, :fut_dim], dtype=torch.float32).unsqueeze(0).to(self.device)
+            return model(past_in, fut_in).cpu().numpy().squeeze(0)

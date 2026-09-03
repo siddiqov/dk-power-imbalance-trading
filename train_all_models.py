@@ -31,9 +31,9 @@ from models.prophet_model import train_prophet_models, predict_with_prophet, loa
 
 
 def main():
-    area = 'DK1'
+    area = sys.argv[1].upper() if len(sys.argv) > 1 else 'DK1'
     print("=" * 70)
-    print("  FULL MODEL TRAINING & BENCHMARK PIPELINE")
+    print(f"  FULL MODEL TRAINING & BENCHMARK PIPELINE ({area})")
     print("  9 Models + RF Regime Classifier + Gaussian HMM Regime Detector")
     print("=" * 70)
 
@@ -159,7 +159,7 @@ def main():
         'regime_accuracy_consensus': metrics_opt.get('regime_accuracy_consensus', 'N/A'),
     }
 
-    results_path = os.path.join('results', 'full_model_comparison_DK1.json')
+    results_path = os.path.join('results', f'full_model_comparison_{area}.json')
     os.makedirs('results', exist_ok=True)
     with open(results_path, 'w') as f:
         json.dump(full_results, f, indent=2, default=str)

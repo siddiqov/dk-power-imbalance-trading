@@ -206,8 +206,8 @@
         <div class="card p-3 mb-4">
             <div class="row align-items-center g-3">
                 <div class="col-lg-6">
-                    <h5 class="mb-1 text-white fw-bold"><i class="fa-solid fa-trophy text-warning me-2"></i>Multi-Paradigm Tournament Leaderboard (Day D)</h5>
-                    <p class="text-muted small mb-0">Benchmarking Transfer Learning (Bi-LSTM), Hierarchical, Dual 15m (TFT), and Meta-Ensemble.</p>
+                    <h5 class="mb-1 text-white fw-bold"><i class="fa-solid fa-trophy text-warning me-2"></i>Multi-Paradigm Tournament Leaderboard (Occurred Quarters Today / Day D)</h5>
+                    <p class="text-muted small mb-0">Real-time commercial trading results & rankings across all paradigms up to physically settled quarters.</p>
                 </div>
                 <div class="col-lg-6 d-flex justify-content-end align-items-center gap-3">
                     <div class="input-group" style="max-width: 260px;">
@@ -265,11 +265,13 @@
                                     {{ row['Model Architecture'] }}
                                 </td>
                                 <td><span class="badge bg-dark border border-secondary text-light">{{ row['Dir Accuracy'] }}</span></td>
+                                <td><span class="text-light fw-semibold">{{ row.get('Spread MAE', '--') }}</span></td>
                                 <td>
                                     <button class="btn btn-sm btn-outline-info fw-bold px-2 py-1 shadow-sm" onclick="openTradeLedger('{{ row['Model Architecture'] }}')" title="Click to inspect all trades quarter-by-quarter">
                                         <i class="fa-solid fa-calculator me-1"></i> {{ row['Trades'] }} <i class="fa-solid fa-arrow-up-right-from-square ms-1 small"></i>
                                     </button>
                                 </td>
+                                <td><span class="badge bg-dark border border-secondary text-info fw-bold">{{ row.get('Win Rate', '--') }}</span></td>
                                 <td class="text-light">{{ row['Volume (MWh)'] }} MWh</td>
                                 <td class="text-white fw-semibold">{{ row['Gross PnL'] }}</td>
                                 <td class="text-danger fw-semibold">-{{ row['Fees & Slip'] }}</td>
@@ -394,8 +396,9 @@
                     <div class="tab-pane fade {% if active_tab == 'future' %}show active{% endif %}" id="future-content" role="tabpanel">
                         <div class="p-3 bg-dark bg-opacity-50 d-flex justify-content-between align-items-center border-bottom border-secondary">
                             <div>
-                                <span class="fw-bold text-white fs-6"><i class="fa-solid fa-clock text-warning me-2"></i>Upcoming 96-Step Day-Ahead Predictions (15m Intervals in Danish Time)</span>
-                                <span class="badge bg-warning text-dark ms-2 fw-bold">Tomorrow: 2nd September 2026 (00:00 - 23:45)</span>
+                                <i class="fas fa-clock text-warning me-2"></i>
+                                <span>Upcoming 96-Step Day-Ahead Predictions <small>(15m Intervals in Danish Time)</small></span>
+                                <span class="badge bg-warning text-dark ms-2 fw-bold">Today: {{ today_str }} (00:00 - 23:45)</span>
                             </div>
                             <a href="/api/export_csv?area={{ price_area }}&type=future" class="btn btn-sm btn-outline-warning fw-bold">
                                 <i class="fa-solid fa-file-csv me-1"></i> Export 96Q Future CSV
