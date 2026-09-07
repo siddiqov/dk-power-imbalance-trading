@@ -151,12 +151,32 @@
             </span>
             <div class="d-flex align-items-center gap-3">
                 <span class="badge bg-primary px-3 py-2 fs-6">Zero Synthetic Data</span>
-                <span class="badge bg-success px-3 py-2 fs-6">96 Quarters / Day-Ahead</span>
-                <a href="/?area=DK1&capital={{ capital }}&tab={{ active_tab }}" class="btn btn-zone {% if price_area == 'DK1' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
-                    <i class="fa-solid fa-wind me-1"></i> DK1 (West Denmark)
+                
+                <!-- Trade Volume Sizing Selector -->
+                <div class="btn-group shadow-sm" role="group" aria-label="Volume Selector">
+                    <span class="input-group-text bg-dark border-secondary text-warning fw-bold small px-2">
+                        <i class="fa-solid fa-gauge-high me-1"></i> Volume / 15m:
+                    </span>
+                    <a href="/?area={{ price_area }}&capital={{ capital }}&volume=2.0&tab={{ active_tab }}" 
+                       class="btn btn-sm {% if trade_volume == 2.0 %}btn-warning fw-bold text-dark{% else %}btn-outline-secondary text-light{% endif %}">
+                        2.0 MWh
+                    </a>
+                    <a href="/?area={{ price_area }}&capital={{ capital }}&volume=5.0&tab={{ active_tab }}" 
+                       class="btn btn-sm {% if trade_volume == 5.0 %}btn-warning fw-bold text-dark{% else %}btn-outline-secondary text-light{% endif %}">
+                        5.0 MWh
+                    </a>
+                    <a href="/?area={{ price_area }}&capital={{ capital }}&volume=10.0&tab={{ active_tab }}" 
+                       class="btn btn-sm {% if trade_volume == 10.0 %}btn-warning fw-bold text-dark{% else %}btn-outline-secondary text-light{% endif %}">
+                        10.0 MWh
+                    </a>
+                </div>
+
+                <!-- Price Area Selector (DK1 / DK2) -->
+                <a href="/?area=DK1&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}" class="btn btn-zone {% if price_area == 'DK1' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
+                    <i class="fa-solid fa-wind me-1"></i> DK1 (West)
                 </a>
-                <a href="/?area=DK2&capital={{ capital }}&tab={{ active_tab }}" class="btn btn-zone {% if price_area == 'DK2' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
-                    <i class="fa-solid fa-city me-1"></i> DK2 (East Denmark)
+                <a href="/?area=DK2&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}" class="btn btn-zone {% if price_area == 'DK2' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
+                    <i class="fa-solid fa-city me-1"></i> DK2 (East)
                 </a>
             </div>
         </div>
@@ -181,7 +201,10 @@
             </div>
             <div class="col-md-3">
                 <div class="metric-card">
-                    <div class="text-muted small text-uppercase fw-bold">Trading Capital Allocated</div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div class="text-muted small text-uppercase fw-bold">Trading Capital Allocated</div>
+                        <span class="badge bg-warning text-dark fw-bold">{{ trade_volume }} MWh / Trade</span>
+                    </div>
                     <div class="metric-val text-white mt-1">€ {{ "{:,.2f}".format(capital) }}</div>
                     <div class="text-muted small mt-1">Fractional Kelly Sizing</div>
                 </div>
@@ -195,9 +218,12 @@
             </div>
             <div class="col-md-3">
                 <div class="metric-card">
-                    <div class="text-muted small text-uppercase fw-bold">Danish Market Friction</div>
-                    <div class="metric-val text-warning mt-1">€ 0.51 <span class="fs-6 text-muted">/ MWh</span></div>
-                    <div class="text-muted small mt-1">TSO (€0.20) + EPEX (€0.06) + Slip (€0.25)</div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div class="text-muted small text-uppercase fw-bold">Danish Market Friction</div>
+                        <span class="badge bg-dark border border-secondary text-muted">€0.51/MWh</span>
+                    </div>
+                    <div class="metric-val text-warning mt-1">€ {{ "%.2f"|format(0.51 * trade_volume) }} <span class="fs-6 text-muted">/ trade</span></div>
+                    <div class="text-muted small mt-1">TSO (€0.20) + Nord Pool (€0.06) + Slip (€0.25)</div>
                 </div>
             </div>
         </div>
@@ -628,7 +654,7 @@
             var tbody = document.getElementById('modalLedgerBody');
             tbody.innerHTML = `<tr><td colspan="14" class="text-center py-4 text-muted"><div class="spinner-border spinner-border-sm text-info me-2" role="status"></div>Loading 100% genuine quarter-by-quarter ledger for ${modelName}...</td></tr>`;
 
-            fetch(`/api/model_trades_ledger?area={{ price_area }}&model=${encodeURIComponent(modelName)}&capital=${capitalVal}`)
+            fetch(`/api/model_trades_ledger?area={{ price_area }}&model=${encodeURIComponent(modelName)}&capital=${capitalVal}&volume={{ trade_volume }}`)
             .then(res => res.json())
             .then(data => {
                 document.getElementById('modalOccurredFraction').innerText = `${data.occurred_quarters} / ${data.total_quarters}`;
@@ -692,14 +718,15 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     area: '{{ price_area }}',
-                    capital: capitalVal
+                    capital: capitalVal,
+                    volume: {{ trade_volume }}
                 })
             })
             .then(res => res.json())
             .then(data => {
                 document.getElementById('spinnerOverlay').style.display = 'none';
                 if (data.status === 'success') {
-                    window.location.href = '/?area={{ price_area }}&capital=' + capitalVal;
+                    window.location.href = '/?area={{ price_area }}&capital=' + capitalVal + '&volume={{ trade_volume }}';
                 } else {
                     alert('Error running tournament: ' + data.message);
                 }

@@ -23,9 +23,10 @@ class LiveIntradayLedger:
     and completed quarters on Day D-1 (Backtest).
     """
 
-    def __init__(self, price_area='DK1', capital=100000.0):
+    def __init__(self, price_area='DK1', capital=100000.0, trade_volume_mwh=2.0):
         self.price_area = price_area
         self.capital = capital
+        self.trade_volume_mwh = float(trade_volume_mwh)
         self.engine = V2DataEngine()
         self.fee_per_mwh = 0.51 # €0.06 Nord Pool + €0.20 TSO + €0.25 Slippage
         self.tax_rate = 0.22 # Danish 22% Corporate Tax
@@ -105,7 +106,7 @@ class LiveIntradayLedger:
             p_pred = float(row[col]) if col in row else p_spot
             pred_spread = p_pred - p_spot
 
-            volume = 2.0
+            volume = self.trade_volume_mwh
             action = "HOLD"
             direction = "BALANCED (0)"
             if pred_spread > threshold:
@@ -246,7 +247,7 @@ class LiveIntradayLedger:
             winning_trades = [t for t in active_settled if t["net_pnl_eur"].startswith("+€")]
             win_rate = (len(winning_trades) / len(active_settled) * 100.0) if active_settled else 0.0
 
-            traded_vol = len(active_settled) * 2.0
+            traded_vol = len(active_settled) * self.trade_volume_mwh
             gross_pnl = summary["gross_pnl_so_far"]
             fees = summary["fees_so_far"]
             tax = summary["tax_so_far"]

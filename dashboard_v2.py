@@ -42,11 +42,11 @@ def serve_static_results(filename):
     return send_from_directory('results', filename)
 
 
-def load_leaderboard(price_area="DK1", capital=100000.0, mode='live'):
+def load_leaderboard(price_area="DK1", capital=100000.0, trade_volume_mwh=2.0, mode='live'):
     """Loads the real-time occurred quarters leaderboard or historical backtest CSV."""
     if mode == 'live':
         try:
-            ledger_calc = LiveIntradayLedger(price_area=price_area, capital=capital)
+            ledger_calc = LiveIntradayLedger(price_area=price_area, capital=capital, trade_volume_mwh=trade_volume_mwh)
             live_lb = ledger_calc.get_live_today_leaderboard()
             if live_lb:
                 return live_lb
@@ -66,9 +66,10 @@ def load_leaderboard(price_area="DK1", capital=100000.0, mode='live'):
 def index():
     price_area = request.args.get('area', 'DK1')
     initial_capital = float(request.args.get('capital', 100000.0))
+    trade_volume_mwh = float(request.args.get('volume', 2.0))
     active_tab = request.args.get('tab', 'backtest')
 
-    leaderboard = load_leaderboard(price_area, capital=initial_capital, mode='live')
+    leaderboard = load_leaderboard(price_area, capital=initial_capital, trade_volume_mwh=trade_volume_mwh, mode='live')
     chart_exists = os.path.exists(f"results/v2_commercial_backtest_{price_area}.png")
     top_model = leaderboard[0] if leaderboard else {}
 
@@ -87,6 +88,7 @@ def index():
         'dashboard_v2.html',
         price_area=price_area,
         capital=initial_capital,
+        trade_volume=trade_volume_mwh,
         active_tab=active_tab,
         leaderboard=leaderboard,
         top_model=top_model,
@@ -103,9 +105,10 @@ def api_run_tournament():
         data = request.get_json() or {}
         price_area = data.get('area', 'DK1')
         capital = float(data.get('capital', 100000.0))
+        trade_volume_mwh = float(data.get('volume', 2.0))
 
         df_lb = run_tournament(price_area=price_area, initial_capital=capital)
-        leaderboard = load_leaderboard(price_area)
+        leaderboard = load_leaderboard(price_area, capital=capital, trade_volume_mwh=trade_volume_mwh, mode='live')
         return jsonify({
             "status": "success",
             "message": f"Full 4-Paradigm Tournament completed for {price_area}!",
@@ -121,9 +124,10 @@ def api_model_trades_ledger():
     price_area = request.args.get('area', 'DK1')
     model_name = request.args.get('model', 'Transformer-TFT')
     capital = float(request.args.get('capital', 100000.0))
+    trade_volume_mwh = float(request.args.get('volume', 2.0))
 
     from src.live_intraday_ledger import LiveIntradayLedger
-    ledger_calc = LiveIntradayLedger(price_area=price_area, capital=capital)
+    ledger_calc = LiveIntradayLedger(price_area=price_area, capital=capital, trade_volume_mwh=trade_volume_mwh)
     summary = ledger_calc.get_live_today_ledger(model_name=model_name)
     return jsonify(summary)
 
