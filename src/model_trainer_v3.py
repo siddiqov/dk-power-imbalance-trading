@@ -257,6 +257,9 @@ class V3QuantileModelSuite:
 
         df_feat = self.feature_engine.build_features(df_day_d)
         feature_cols = self.models.get("_feature_cols", self.feature_engine.get_feature_names())
+        for c in feature_cols:
+            if c not in df_feat.columns:
+                df_feat[c] = 0.0
         X = df_feat[feature_cols].fillna(0.0).values
         spot_arr = df_feat["spot_price_eur"].values
 

@@ -2,6 +2,7 @@
 # dashboard_v3.py
 # V3 Optimeering Commercial Dashboard Server (Port 5001 Default)
 # Quantile Horizon Fan Charts, Direction Probabilities, Spike Shield Ledgers
+# Dual-Market Support: Pure Day-Ahead (D-1) & Continuous Intraday (D-0)
 # ==============================================================================
 
 import os
@@ -31,18 +32,20 @@ def index():
     initial_capital = float(request.args.get('capital', 100000.0))
     trade_volume = float(request.args.get('volume', 2.0))
     active_tab = request.args.get('tab', 'live')
+    raw_mode = request.args.get('mode', 'day_ahead')  # 'day_ahead' or 'intraday'
+    market_mode = "DAY_AHEAD_D1" if raw_mode == 'day_ahead' else "INTRADAY_D0"
 
     # Load 96-quarter genuine table from Energi Data Service
     table_gen = TournamentTableGenerator(price_area=price_area)
     df_future = table_gen.get_future_table()
     df_backtest = table_gen.get_backtest_table()
 
-    # Run V3 Strategy Engine
+    # Run V3 Strategy Engine with selected Market Mode
     strategy = V3CommercialStrategyEngine(price_area=price_area, capital=initial_capital, base_volume_mwh=trade_volume)
     
     # Evaluate for default / winner model
     target_df = df_future if active_tab == 'live' else df_backtest
-    ledger_summary = strategy.evaluate_trading_ledger(target_df, model_name="Transformer-TFT")
+    ledger_summary = strategy.evaluate_trading_ledger(target_df, model_name="Transformer-TFT", market_mode=market_mode)
     
     # Generate Optimeering Predictions & Chart
     preds = strategy.model_suite.predict_day_ahead_quantiles(target_df)
@@ -53,7 +56,7 @@ def index():
     leaderboard = []
     models = ["Transformer-TFT", "Hierarchical-LGBM+XGB", "Transfer-LightGBM", "Pure15m-CatBoost", "Deep-BiLSTM", "Stacking-MetaEnsemble"]
     for m in models:
-        s = strategy.evaluate_trading_ledger(target_df, model_name=m)
+        s = strategy.evaluate_trading_ledger(target_df, model_name=m, market_mode=market_mode)
         settled = [t for t in s["trades"] if t["is_settled"]]
         active = [t for t in settled if "BUY" in t["action"] or "SELL" in t["action"]]
         win_trades = [t for t in active if t["net_pnl_eur"].startswith("+€")]
@@ -86,6 +89,8 @@ def index():
         capital=initial_capital,
         trade_volume=trade_volume,
         active_tab=active_tab,
+        raw_mode=raw_mode,
+        market_mode=market_mode,
         leaderboard=leaderboard,
         top_model=top_model,
         summary=ledger_summary,
@@ -105,12 +110,14 @@ def api_model_trades_ledger():
     capital = float(request.args.get('capital', 100000.0))
     trade_volume = float(request.args.get('volume', 2.0))
     tab = request.args.get('tab', 'live')
+    raw_mode = request.args.get('mode', 'day_ahead')
+    market_mode = "DAY_AHEAD_D1" if raw_mode == 'day_ahead' else "INTRADAY_D0"
 
     table_gen = TournamentTableGenerator(price_area=price_area)
     target_df = table_gen.get_future_table() if tab == 'live' else table_gen.get_backtest_table()
 
     strategy = V3CommercialStrategyEngine(price_area=price_area, capital=capital, base_volume_mwh=trade_volume)
-    summary = strategy.evaluate_trading_ledger(target_df, model_name=model_name)
+    summary = strategy.evaluate_trading_ledger(target_df, model_name=model_name, market_mode=market_mode)
     return jsonify(summary)
 
 
