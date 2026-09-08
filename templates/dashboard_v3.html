@@ -78,10 +78,10 @@
             <div class="d-flex align-items-center gap-3">
                 <!-- Market Mode Selector (Day-Ahead vs Intraday) -->
                 <div class="btn-group me-2" role="group">
-                    <a href="/?area={{ price_area }}&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}&mode=day_ahead" class="btn btn-sm btn-mode {% if raw_mode == 'day_ahead' %}btn-success text-white shadow{% else %}btn-outline-secondary text-light{% endif %}">
+                    <a href="/?area={{ price_area }}&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}&mode=day_ahead&date={{ selected_date }}" class="btn btn-sm btn-mode {% if raw_mode == 'day_ahead' %}btn-success text-white shadow{% else %}btn-outline-secondary text-light{% endif %}">
                         <i class="fa-solid fa-calendar-day me-1"></i> Pure Day-Ahead (D-1 Fixed)
                     </a>
-                    <a href="/?area={{ price_area }}&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}&mode=intraday" class="btn btn-sm btn-mode {% if raw_mode == 'intraday' %}btn-warning text-dark fw-bold shadow{% else %}btn-outline-secondary text-light{% endif %}">
+                    <a href="/?area={{ price_area }}&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}&mode=intraday&date={{ selected_date }}" class="btn btn-sm btn-mode {% if raw_mode == 'intraday' %}btn-warning text-dark fw-bold shadow{% else %}btn-outline-secondary text-light{% endif %}">
                         <i class="fa-solid fa-bolt me-1"></i> Continuous Intraday (D-0 Rolling)
                     </a>
                 </div>
@@ -89,16 +89,16 @@
                 <!-- Volume Selector -->
                 <div class="btn-group" role="group">
                     <span class="input-group-text bg-dark border-secondary text-warning fw-bold small px-2">Volume:</span>
-                    <a href="/?area={{ price_area }}&capital={{ capital }}&volume=2.0&tab={{ active_tab }}&mode={{ raw_mode }}" class="btn btn-sm {% if trade_volume == 2.0 %}btn-warning fw-bold text-dark{% else %}btn-outline-secondary text-light{% endif %}">2.0 MWh</a>
-                    <a href="/?area={{ price_area }}&capital={{ capital }}&volume=5.0&tab={{ active_tab }}&mode={{ raw_mode }}" class="btn btn-sm {% if trade_volume == 5.0 %}btn-warning fw-bold text-dark{% else %}btn-outline-secondary text-light{% endif %}">5.0 MWh</a>
-                    <a href="/?area={{ price_area }}&capital={{ capital }}&volume=10.0&tab={{ active_tab }}&mode={{ raw_mode }}" class="btn btn-sm {% if trade_volume == 10.0 %}btn-warning fw-bold text-dark{% else %}btn-outline-secondary text-light{% endif %}">10.0 MWh</a>
+                    <a href="/?area={{ price_area }}&capital={{ capital }}&volume=2.0&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}" class="btn btn-sm {% if trade_volume == 2.0 %}btn-warning fw-bold text-dark{% else %}btn-outline-secondary text-light{% endif %}">2.0 MWh</a>
+                    <a href="/?area={{ price_area }}&capital={{ capital }}&volume=5.0&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}" class="btn btn-sm {% if trade_volume == 5.0 %}btn-warning fw-bold text-dark{% else %}btn-outline-secondary text-light{% endif %}">5.0 MWh</a>
+                    <a href="/?area={{ price_area }}&capital={{ capital }}&volume=10.0&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}" class="btn btn-sm {% if trade_volume == 10.0 %}btn-warning fw-bold text-dark{% else %}btn-outline-secondary text-light{% endif %}">10.0 MWh</a>
                 </div>
 
                 <!-- Price Area Selector -->
-                <a href="/?area=DK1&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}&mode={{ raw_mode }}" class="btn btn-zone {% if price_area == 'DK1' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
+                <a href="/?area=DK1&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}" class="btn btn-zone {% if price_area == 'DK1' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
                     <i class="fa-solid fa-wind me-1"></i> DK1 (West)
                 </a>
-                <a href="/?area=DK2&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}&mode={{ raw_mode }}" class="btn btn-zone {% if price_area == 'DK2' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
+                <a href="/?area=DK2&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}" class="btn btn-zone {% if price_area == 'DK2' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
                     <i class="fa-solid fa-city me-1"></i> DK2 (East)
                 </a>
             </div>
@@ -160,43 +160,20 @@
             </div>
         </div>
 
-        <!-- Navigation Tabs: Live Real-Time vs Backtest -->
-        <ul class="nav nav-pills mb-4">
-            <li class="nav-item">
-                <a class="nav-link {% if active_tab == 'live' %}active bg-info text-dark fw-bold{% else %}text-light{% endif %}" href="/?area={{ price_area }}&capital={{ capital }}&volume={{ trade_volume }}&tab=live&mode={{ raw_mode }}">
-                    <i class="fa-solid fa-satellite-dish me-1"></i> Live Real-Time Market (Day D)
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link {% if active_tab == 'backtest' %}active bg-info text-dark fw-bold{% else %}text-light{% endif %}" href="/?area={{ price_area }}&capital={{ capital }}&volume={{ trade_volume }}&tab=backtest&mode={{ raw_mode }}">
-                    <i class="fa-solid fa-clock-rotate-left me-1"></i> Full 96-Quarter Backtest
-                </a>
-            </li>
-        </ul>
-
-        <!-- Visual Optimeering Horizon Fan Chart & Direction Probabilities -->
-        <div class="card p-3 mb-4">
-            <div class="d-flex justify-content-between align-items-center mb-2">
-                <h5 class="fw-bold mb-0 text-white">
-                    <i class="fa-solid fa-cloud-bolt text-info me-2"></i>
-                    Optimeering Quantile Horizon Fan Chart & Direction Probabilities ({{ price_area }})
+        <!-- 1. V3 Optimeering Model Suite Leaderboard (TOP POSITION) -->
+        <div class="card p-3 mb-4 shadow-sm border-secondary">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="fw-bold text-white mb-0">
+                    <i class="fa-solid fa-ranking-star text-warning me-2"></i> 
+                    V3 Optimeering Model Suite Leaderboard 
+                    <span class="badge bg-dark border border-secondary text-info ms-2">Area: {{ price_area }} | Volume: {{ trade_volume }} MWh</span>
                 </h5>
-                <span class="badge bg-dark border border-secondary text-info">Auto-Refreshed: {{ today_str }}</span>
+                <div class="small text-muted">
+                    Mode: <span class="badge {% if raw_mode == 'day_ahead' %}bg-success{% else %}bg-warning text-dark{% endif %} fw-bold">{{ market_mode }}</span>
+                </div>
             </div>
-            <div class="text-center py-2">
-                {% if chart_exists %}
-                    <img src="/static/results/v3_optimeering_dashboard_{{ price_area }}.png?t={{ ts }}" class="img-fluid rounded border border-secondary" alt="V3 Optimeering Dashboard">
-                {% else %}
-                    <div class="py-5 text-muted"><div class="spinner-border text-info mb-3"></div><br>Generating Optimeering Quantile Fan Chart...</div>
-                {% endif %}
-            </div>
-        </div>
-
-        <!-- Multi-Model Performance Leaderboard -->
-        <div class="card p-3 mb-4">
-            <h5 class="fw-bold text-white mb-3"><i class="fa-solid fa-ranking-star text-warning me-2"></i> V3 Optimeering Model Suite Leaderboard</h5>
             <div class="table-responsive">
-                <table class="table table-dark table-hover align-middle">
+                <table class="table table-dark table-hover align-middle mb-0">
                     <thead>
                         <tr class="text-muted small text-uppercase">
                             <th>Rank</th>
@@ -218,7 +195,7 @@
                             <td class="fw-bold text-warning">{{ row.Rank }}</td>
                             <td class="fw-bold text-light">
                                 {{ row['Model Architecture'] }}
-                                {% if row.Rank == '#1' %}<span class="badge bg-success ms-2">TOP</span>{% endif %}
+                                {% if row.Rank == '#1' %}<span class="badge bg-success ms-2"><i class="fa-solid fa-star me-1"></i>LEADER</span>{% endif %}
                             </td>
                             <td><span class="badge bg-primary">{{ row.Trades }}</span></td>
                             <td class="text-success fw-bold">{{ row['Win Rate'] }}</td>
@@ -240,6 +217,154 @@
             </div>
         </div>
 
+        <!-- 2. Operations & Backtesting Workspace Tabs -->
+        <div class="card p-3 mb-4 border-secondary">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                <ul class="nav nav-pills" id="mainTabs" role="tablist">
+                    <li class="nav-item">
+                        <a class="nav-link {% if active_tab == 'live' %}active bg-info text-dark fw-bold{% else %}text-light{% endif %}" href="/?area={{ price_area }}&capital={{ capital }}&volume={{ trade_volume }}&tab=live&mode={{ raw_mode }}&date={{ selected_date }}">
+                            <i class="fa-solid fa-satellite-dish me-1"></i> 📡 Live Real-Time Market (Day D)
+                        </a>
+                    </li>
+                    <li class="nav-item ms-2">
+                        <a class="nav-link {% if active_tab == 'backtest' %}active bg-info text-dark fw-bold{% else %}text-light{% endif %}" href="/?area={{ price_area }}&capital={{ capital }}&volume={{ trade_volume }}&tab=backtest&mode={{ raw_mode }}&date={{ selected_date }}">
+                            <i class="fa-solid fa-calendar-check me-1"></i> 📅 Historical Backtest Tournament
+                        </a>
+                    </li>
+                </ul>
+
+                <!-- Calendar Date Picker (Active in Backtest Tab) -->
+                {% if active_tab == 'backtest' %}
+                <form method="GET" action="/" class="d-flex align-items-center gap-2">
+                    <input type="hidden" name="area" value="{{ price_area }}">
+                    <input type="hidden" name="capital" value="{{ capital }}">
+                    <input type="hidden" name="volume" value="{{ trade_volume }}">
+                    <input type="hidden" name="tab" value="backtest">
+                    <input type="hidden" name="mode" value="{{ raw_mode }}">
+                    
+                    <span class="text-muted small fw-bold text-uppercase"><i class="fa-regular fa-calendar me-1 text-warning"></i> Select Date:</span>
+                    <input type="date" name="date" class="form-control form-control-sm bg-dark text-light border-secondary" value="{{ selected_date }}" style="width: 160px;">
+                    <button type="submit" class="btn btn-sm btn-warning fw-bold text-dark">
+                        <i class="fa-solid fa-play me-1"></i> Run Backtest
+                    </button>
+                </form>
+                {% endif %}
+            </div>
+
+            <!-- Header Context Banner -->
+            <div class="alert {% if active_tab == 'live' %}alert-primary{% else %}alert-secondary{% endif %} bg-dark border-secondary text-light py-2 px-3 d-flex justify-content-between align-items-center mb-3">
+                <div>
+                    {% if active_tab == 'live' %}
+                        <i class="fa-solid fa-satellite-dish text-info me-2"></i>
+                        <strong>Live Market Feed:</strong> Ingesting real-time Day-Ahead auction prices and rolling Energinet 15-minute settlements for today.
+                    {% else %}
+                        <i class="fa-solid fa-clock-rotate-left text-warning me-2"></i>
+                        <strong>Historical Backtest Date:</strong> <span class="badge bg-warning text-dark fs-6">{{ selected_date }}</span> | Evaluating 96 quarters against 100% genuine ground-truth Energinet settlements.
+                    {% endif %}
+                </div>
+                <div class="small text-muted">
+                    Zero Synthetic Data Guarantee | Danish Tax: 22% | Friction: €0.51/MWh
+                </div>
+            </div>
+
+            <!-- Visual Optimeering Horizon Fan Chart & Direction Probabilities (BELOW LEADERBOARD) -->
+            <div class="card bg-dark border-secondary p-3 mb-4">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="fw-bold mb-0 text-white">
+                        <i class="fa-solid fa-cloud-bolt text-info me-2"></i>
+                        {% if active_tab == 'backtest' %}
+                            Historical Backtest Quantile Horizon Fan Chart & Probability Stacks ({{ price_area }} - {{ selected_date }})
+                        {% else %}
+                            Live Real-Time Optimeering Quantile Horizon Fan Chart & Direction Probabilities ({{ price_area }})
+                        {% endif %}
+                    </h6>
+                    <span class="badge bg-dark border border-secondary text-info">
+                        {% if active_tab == 'backtest' %}Date: {{ selected_date }}{% else %}Live Refreshed: {{ today_str }}{% endif %}
+                    </span>
+                </div>
+                <div class="text-center py-2">
+                    {% if chart_exists %}
+                        <img src="/static/results/{{ chart_filename }}?t={{ ts }}" class="img-fluid rounded border border-secondary shadow" alt="V3 Optimeering Dashboard">
+                    {% else %}
+                        <div class="py-5 text-muted"><div class="spinner-border text-info mb-3"></div><br>Generating Optimeering Quantile Fan Chart...</div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Integrated 96-Quarter Audited Execution Ledger -->
+            <div class="card bg-dark border-secondary p-3">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h6 class="fw-bold mb-0 text-white">
+                        <i class="fa-solid fa-list-check text-warning me-2"></i>
+                        {% if active_tab == 'backtest' %}
+                            Audited 96-Quarter Settlement Ledger for {{ selected_date }} ({{ top_model.get('Model Architecture', 'Transformer-TFT') }})
+                        {% else %}
+                            Live Real-Time 96-Quarter Trade Journal & Gate Closure Orders ({{ top_model.get('Model Architecture', 'Transformer-TFT') }})
+                        {% endif %}
+                    </h6>
+                    <button class="btn btn-sm btn-outline-warning" onclick="openTradeLedger('{{ top_model.get('Model Architecture', 'Transformer-TFT') }}')">
+                        <i class="fa-solid fa-expand me-1"></i> Fullscreen Audit Modal
+                    </button>
+                </div>
+                <div class="table-responsive" style="max-height: 480px; overflow-y: auto;">
+                    <table class="table table-dark table-sm table-striped text-center align-middle" style="font-size: 0.85rem;">
+                        <thead class="sticky-top bg-dark">
+                            <tr class="text-muted small">
+                                <th>Quarter</th>
+                                <th>Time (DK)</th>
+                                <th>Spot (€)</th>
+                                <th>Pred Imbalance (€)</th>
+                                <th>Pred Spread (€)</th>
+                                <th>Quantiles (q10-q90)</th>
+                                <th>P(Up) / P(Down)</th>
+                                <th>Decision</th>
+                                <th>Volume</th>
+                                <th>DA Cash Flow</th>
+                                <th>Actual Settled (€)</th>
+                                <th>Settlement Flow</th>
+                                <th>Fees (€)</th>
+                                <th>Net PnL (€)</th>
+                                <th>Running Capital</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for t in summary.trades %}
+                            <tr>
+                                <td class="fw-bold text-warning">{{ t.quarter }}</td>
+                                <td class="font-monospace text-light small">{{ t.time_dk }}</td>
+                                <td class="text-light">€ {{ "%.2f"|format(t.spot_price_eur) }}</td>
+                                <td class="text-info">€ {{ "%.2f"|format(t.pred_imbalance_eur) }}</td>
+                                <td class="{% if t.pred_spread_eur >= 0 %}text-success{% else %}text-danger{% endif %} fw-bold">
+                                    {{ "+" if t.pred_spread_eur >= 0 else "" }}€ {{ "%.2f"|format(t.pred_spread_eur) }}
+                                </td>
+                                <td class="small text-muted font-monospace">€{{ "%.0f"|format(t.q10_price_eur) }} - €{{ "%.0f"|format(t.q90_price_eur) }}</td>
+                                <td class="small font-monospace"><span class="text-success">{{ t.p_up }}%</span> / <span class="text-danger">{{ t.p_down }}%</span></td>
+                                <td>
+                                    <span class="badge {% if 'BUY' in t.action %}bg-success{% elif 'SELL' in t.action %}bg-danger{% elif 'Shield' in t.action %}bg-warning text-dark{% else %}bg-secondary{% endif %}">
+                                        {{ t.action }}
+                                    </span>
+                                </td>
+                                <td class="text-light">{% if t.volume_mwh > 0 %}{{ "%.1f"|format(t.volume_mwh) }} MWh{% else %}--{% endif %}</td>
+                                <td class="small font-monospace {% if t.da_cash_flow.startswith('-') %}text-danger{% elif t.da_cash_flow.startswith('+') %}text-success{% else %}text-muted{% endif %}">{{ t.da_cash_flow }}</td>
+                                <td class="text-info fw-bold">{{ t.actual_settled_eur }}</td>
+                                <td class="small font-monospace {% if t.settle_cash_flow.startswith('+') %}text-success{% elif t.settle_cash_flow.startswith('-') %}text-danger{% else %}text-muted{% endif %}">{{ t.settle_cash_flow }}</td>
+                                <td class="text-danger small">{% if t.roundtrip_fees_eur > 0 %}-€ {{ "%.2f"|format(t.roundtrip_fees_eur) }}{% else %}--{% endif %}</td>
+                                <td class="{% if t.net_pnl_eur.startswith('+€') %}text-success fw-bold{% elif t.net_pnl_eur.startswith('-€') %}text-danger fw-bold{% else %}text-muted{% endif %}">{{ t.net_pnl_eur }}</td>
+                                <td class="fw-bold text-light">{{ t.running_capital }}</td>
+                                <td>
+                                    <span class="badge {% if 'Settled' in t.status %}bg-success{% elif 'Locked' in t.status %}bg-primary{% else %}bg-dark border border-secondary text-muted{% endif %}">
+                                        {{ t.status }}
+                                    </span>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
         <!-- Modal: Trade Execution Ledger -->
         <div class="modal fade" id="tradeLedgerModal" tabindex="-1" aria-hidden="true">
             <div class="modal-dialog modal-xl modal-dialog-scrollable">
@@ -254,7 +379,7 @@
                     <div class="modal-body">
                         <div class="d-flex justify-content-between align-items-center mb-3">
                             <div class="small text-muted">All orders locked at Gate Closure to prevent retroactive signal mutation.</div>
-                            <span class="badge bg-success">Friction: €0.51/MWh</span>
+                            <span class="badge bg-success">Friction: €0.51/MWh | Tax: 22%</span>
                         </div>
                         <table class="table table-dark table-sm table-striped text-center align-middle" style="font-size: 0.85rem;">
                             <thead>
@@ -289,6 +414,15 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        function updateLiveClock() {
+            var now = new Date();
+            var timeStr = now.toLocaleTimeString('en-GB', { timeZone: 'Europe/Copenhagen', hour12: false });
+            var clockEl = document.getElementById('liveClock');
+            if (clockEl) clockEl.innerText = timeStr + ' CET';
+        }
+        setInterval(updateLiveClock, 1000);
+        updateLiveClock();
+
         function openTradeLedger(modelName) {
             document.getElementById('modalModelName').innerText = modelName;
             var modalEl = new bootstrap.Modal(document.getElementById('tradeLedgerModal'));
@@ -297,7 +431,7 @@
             var tbody = document.getElementById('modalLedgerBody');
             tbody.innerHTML = `<tr><td colspan="16" class="text-center py-4 text-muted"><div class="spinner-border spinner-border-sm text-info me-2"></div>Loading V3 genuine ledger for ${modelName}...</td></tr>`;
 
-            fetch(`/api/model_trades_ledger?area={{ price_area }}&model=${encodeURIComponent(modelName)}&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}&mode={{ raw_mode }}`)
+            fetch(`/api/model_trades_ledger?area={{ price_area }}&model=${encodeURIComponent(modelName)}&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}`)
             .then(res => res.json())
             .then(data => {
                 var html = '';

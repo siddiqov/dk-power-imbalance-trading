@@ -34,22 +34,30 @@ def index():
     active_tab = request.args.get('tab', 'live')
     raw_mode = request.args.get('mode', 'day_ahead')  # 'day_ahead' or 'intraday'
     market_mode = "DAY_AHEAD_D1" if raw_mode == 'day_ahead' else "INTRADAY_D0"
+    selected_date = request.args.get('date', '2026-08-31')
 
     # Load 96-quarter genuine table from Energi Data Service
     table_gen = TournamentTableGenerator(price_area=price_area)
-    df_future = table_gen.get_future_table()
-    df_backtest = table_gen.get_backtest_table()
+    if active_tab == 'backtest':
+        target_df = table_gen.get_backtest_table(date_str=selected_date)
+    else:
+        target_df = table_gen.get_future_table()
 
     # Run V3 Strategy Engine with selected Market Mode
     strategy = V3CommercialStrategyEngine(price_area=price_area, capital=initial_capital, base_volume_mwh=trade_volume)
     
     # Evaluate for default / winner model
-    target_df = df_future if active_tab == 'live' else df_backtest
     ledger_summary = strategy.evaluate_trading_ledger(target_df, model_name="Transformer-TFT", market_mode=market_mode)
     
     # Generate Optimeering Predictions & Chart
     preds = strategy.model_suite.predict_day_ahead_quantiles(target_df)
-    chart_path = plot_v3_optimeering_dashboard(target_df, preds, ledger_summary, price_area=price_area)
+    chart_path = plot_v3_optimeering_dashboard(
+        target_df, preds, ledger_summary, 
+        price_area=price_area, 
+        date_str=selected_date if active_tab == 'backtest' else None, 
+        is_backtest=(active_tab == 'backtest')
+    )
+    chart_filename = os.path.basename(chart_path)
     chart_exists = os.path.exists(chart_path)
 
     # Build multi-model leaderboard for V3
@@ -91,9 +99,11 @@ def index():
         active_tab=active_tab,
         raw_mode=raw_mode,
         market_mode=market_mode,
+        selected_date=selected_date,
         leaderboard=leaderboard,
         top_model=top_model,
         summary=ledger_summary,
+        chart_filename=chart_filename,
         chart_exists=chart_exists,
         today_str=datetime.now().strftime("%d %B %Y"),
         ts=ts
@@ -112,9 +122,10 @@ def api_model_trades_ledger():
     tab = request.args.get('tab', 'live')
     raw_mode = request.args.get('mode', 'day_ahead')
     market_mode = "DAY_AHEAD_D1" if raw_mode == 'day_ahead' else "INTRADAY_D0"
+    selected_date = request.args.get('date', '2026-08-31')
 
     table_gen = TournamentTableGenerator(price_area=price_area)
-    target_df = table_gen.get_future_table() if tab == 'live' else table_gen.get_backtest_table()
+    target_df = table_gen.get_future_table() if tab == 'live' else table_gen.get_backtest_table(date_str=selected_date)
 
     strategy = V3CommercialStrategyEngine(price_area=price_area, capital=capital, base_volume_mwh=trade_volume)
     summary = strategy.evaluate_trading_ledger(target_df, model_name=model_name, market_mode=market_mode)

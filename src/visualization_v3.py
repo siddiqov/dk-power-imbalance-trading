@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 
-def plot_v3_optimeering_dashboard(df_day_d, preds, ledger_summary, price_area='DK1', date_str=None):
+def plot_v3_optimeering_dashboard(df_day_d, preds, ledger_summary, price_area='DK1', date_str=None, is_backtest=False):
     """
     Generates the V3 Optimeering Commercial Dashboard Chart:
     - Panel 1: Quantile Horizon Fan Chart (q10 to q90 cloud) vs Day-Ahead Spot & Actual
@@ -58,7 +58,8 @@ def plot_v3_optimeering_dashboard(df_day_d, preds, ledger_summary, price_area='D
     if np.any(valid_idx):
         ax1.plot(quarters[valid_idx], actual_vals[valid_idx], label="Actual Energinet Settlement (EUR/MWh)", color="#10b981", linewidth=2.6, marker='o', markersize=3, zorder=6)
 
-    ax1.set_title(f"PANEL 1: OPTIMEERING QUANTILE HORIZON & SPREAD UNCERTAINTY ENVELOPE ({price_area}){title_date}", fontsize=12, fontweight="bold")
+    mode_label = "BACKTEST" if is_backtest else "LIVE DAY D"
+    ax1.set_title(f"PANEL 1: OPTIMEERING QUANTILE HORIZON & SPREAD ENVELOPE [{mode_label}] ({price_area}){title_date}", fontsize=12, fontweight="bold")
     ax1.set_ylabel("Price (EUR/MWh)", fontweight="bold")
     ax1.set_xlim(1, 96)
     ax1.grid(True, alpha=0.3)
@@ -111,7 +112,7 @@ def plot_v3_optimeering_dashboard(df_day_d, preds, ledger_summary, price_area='D
     ax3.legend(loc="upper left", frameon=True)
 
     # -------------------------------------------------------------------------
-    # PANEL 4: Intraday Cumulative Equity Curve (€)
+    # PANEL 4: Cumulative Portfolio Capital Curve (€)
     # -------------------------------------------------------------------------
     ax4 = axes[3]
     cap_curve = []
@@ -119,7 +120,7 @@ def plot_v3_optimeering_dashboard(df_day_d, preds, ledger_summary, price_area='D
     for t in trades:
         run_cap_str = t.get("running_capital", "--")
         if run_cap_str != "--":
-            val = float(run_cap_str.replace("€", "").replace(",", "").strip())
+            val = float(str(run_cap_str).replace("€", "").replace(",", "").strip())
             cap_curve.append(val)
         else:
             cap_curve.append(c if not cap_curve else cap_curve[-1])
@@ -135,7 +136,10 @@ def plot_v3_optimeering_dashboard(df_day_d, preds, ledger_summary, price_area='D
     ax4.legend(loc="upper left", frameon=True)
 
     os.makedirs("results", exist_ok=True)
-    save_path = f"results/v3_optimeering_dashboard_{price_area}.png"
+    if is_backtest and date_str:
+        save_path = f"results/v3_backtest_{price_area}_{date_str}.png"
+    else:
+        save_path = f"results/v3_optimeering_dashboard_{price_area}.png"
     plt.savefig(save_path, bbox_inches='tight', dpi=120)
     plt.close()
     return save_path

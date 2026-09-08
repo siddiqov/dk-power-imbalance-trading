@@ -27,22 +27,34 @@ class TournamentTableGenerator:
         self.engine = V2DataEngine()
         self.fe = V2FeatureEngineer()
 
-    def get_backtest_table(self):
-        csv_path = f"results/96Q_backtest_table_{self.price_area}.csv"
+    def get_backtest_table(self, date_str="2026-08-31"):
+        if not date_str:
+            date_str = "2026-08-31"
+        csv_path = f"results/96Q_backtest_table_{self.price_area}_{date_str}.csv"
         if os.path.exists(csv_path):
             return pd.read_csv(csv_path)
-        return self.generate_and_save_backtest_table()
+        # Fallback to standard if exists and date is default
+        legacy_path = f"results/96Q_backtest_table_{self.price_area}.csv"
+        if date_str == "2026-08-31" and os.path.exists(legacy_path):
+            return pd.read_csv(legacy_path)
+        return self.generate_and_save_backtest_table(date_str=date_str)
 
     def get_future_table(self):
         # Always dynamically generate to pull the latest 15-minute settled quarters from Energinet
         return self.generate_and_save_future_table()
 
-    def generate_and_save_backtest_table(self):
+    def generate_and_save_backtest_table(self, date_str="2026-08-31"):
         """
-        Builds 96-quarter backtest table for 31st August strictly using real Energi Data Service API rows.
+        Builds 96-quarter backtest table for selected date strictly using real Energi Data Service API rows.
         """
-        start_dt = datetime(2026, 8, 31, 0, 0)
-        end_dt = datetime(2026, 9, 1, 0, 0)
+        if not date_str:
+            date_str = "2026-08-31"
+        try:
+            start_dt = datetime.strptime(date_str, "%Y-%m-%d")
+        except Exception:
+            start_dt = datetime(2026, 8, 31, 0, 0)
+            date_str = "2026-08-31"
+        end_dt = start_dt + timedelta(days=1)
 
         # Pull real historical 15m dataset from Energi Data Service API
         df_raw = self.engine.fetch_api_dataset(
@@ -67,8 +79,8 @@ class TournamentTableGenerator:
         df_zone["direction"] = np.sign(df_zone["spread_eur"])
         df_zone.sort_values("time_dk", inplace=True)
 
-        # Filter strictly to 31st August Danish Day (00:00 to 23:45)
-        mask = (df_zone["time_dk"] >= "2026-08-31 00:00:00") & (df_zone["time_dk"] <= "2026-08-31 23:45:00")
+        # Filter strictly to Danish Day (00:00 to 23:45)
+        mask = (df_zone["time_dk"] >= f"{date_str} 00:00:00") & (df_zone["time_dk"] <= f"{date_str} 23:45:00")
         df_31 = df_zone[mask].copy().reset_index(drop=True)
 
         if df_31.empty:
@@ -136,6 +148,7 @@ class TournamentTableGenerator:
 
         df_out = pd.DataFrame(rows)
         os.makedirs("results", exist_ok=True)
+        df_out.to_csv(f"results/96Q_backtest_table_{self.price_area}_{date_str}.csv", index=False)
         df_out.to_csv(f"results/96Q_backtest_table_{self.price_area}.csv", index=False)
         return df_out
 
