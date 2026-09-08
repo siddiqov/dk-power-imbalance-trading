@@ -70,41 +70,57 @@ class V3CommercialStrategyEngine:
             vol_multiplier = 1.0
 
             # 1. LONG SIGNAL (Expecting Up-Regulation / Imbalance > Spot)
-            if pred_spread > 1.2 and p_up > 0.45:
+            if pred_spread > 1.2:
                 action = "BUY Spot (Long)"
                 direction = "UP-REGULATION (+1)"
-                # Conviction sizing: scale up if high probability
-                if p_up >= 0.70 and pred_spread >= 5.0:
+                # Conviction sizing: scale up if high probability / wide quantile upside
+                if p_up >= 0.65 or pred_spread >= 5.0:
                     vol_multiplier = 2.5  # Scale to max growth sizing
-                elif p_up >= 0.55:
+                elif p_up >= 0.45 or pred_spread >= 2.5:
                     vol_multiplier = 1.5
+                else:
+                    vol_multiplier = 1.0
 
             # 2. SHORT SIGNAL (Expecting Down-Regulation / Imbalance < Spot)
-            elif pred_spread < -1.2 and p_down > 0.45:
+            elif pred_spread < -1.2:
                 # ASYMMETRIC SPIKE SHIELD GATE
-                # If upper quantile q90 indicates upside deficit risk, DO NOT SHORT!
-                if q90_s > 20.0 or p_up_spike > 0.15:
+                # If upper quantile q90 indicates severe upside deficit risk, DO NOT SHORT!
+                if q90_s > 25.0 or p_up_spike > 0.20:
                     action = "HOLD (Spike Shield Protected)"
                     direction = "BALANCED (Shield)"
                 else:
                     action = "SELL Spot (Short)"
                     direction = "DOWN-REGULATION (-1)"
-                    if p_down >= 0.70 and pred_spread <= -5.0:
+                    if p_down >= 0.65 or pred_spread <= -5.0:
                         vol_multiplier = 2.0
-                    elif p_down >= 0.55:
+                    elif p_down >= 0.45 or pred_spread <= -2.5:
                         vol_multiplier = 1.2
+                    else:
+                        vol_multiplier = 1.0
 
             trade_vol = self.base_volume_mwh * vol_multiplier if "BUY" in action or "SELL" in action else 0.0
 
             # -----------------------------------------------------------------
             # SETTLEMENT & CASH FLOW EVALUATION
             # -----------------------------------------------------------------
-            actual_imb = row.get("actual_imbalance_eur") or row.get("imbalance_price_eur")
-            is_settled = pd.notnull(actual_imb) and str(actual_imb) != "--"
+            raw_act = row.get("actual_settled_imbalance_eur")
+            if raw_act is None:
+                raw_act = row.get("actual_imbalance_eur")
+            if raw_act is None:
+                raw_act = row.get("imbalance_price_eur")
+
+            is_settled = False
+            p_actual = None
+            if pd.notnull(raw_act) and str(raw_act).strip() not in ["--", "None", "nan", ""]:
+                try:
+                    cleaned_act = str(raw_act).replace("€", "").replace("EUR", "").replace(",", "").strip()
+                    p_actual = float(cleaned_act)
+                    is_settled = True
+                except Exception:
+                    is_settled = False
 
             if is_settled:
                 occurred_count += 1
-                p_actual = float(actual_imb)
                 actual_str = f"€ {p_actual:.2f}"
                 status = "✅ Settled"
 

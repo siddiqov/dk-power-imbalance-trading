@@ -351,12 +351,27 @@
                     <div class="tab-pane fade {% if active_tab == 'backtest' %}show active{% endif %}" id="backtest-content" role="tabpanel">
                         <div class="p-3 bg-dark bg-opacity-50 d-flex justify-content-between align-items-center border-bottom border-secondary">
                             <div>
-                                <span class="fw-bold text-white fs-6"><i class="fa-solid fa-list-check text-success me-2"></i>96-Quarter Model Comparison vs. Actual Settled Imbalance Prices ({{ price_area }})</span>
-                                <span class="badge bg-secondary ms-2 text-light">Test Dataset: 31st August (00:00 - 23:45 Danish Time)</span>
+                                <span class="fw-bold text-white fs-6"><i class="fa-solid fa-list-check text-success me-2"></i>Historical Backtesting Tournament ({{ price_area }})</span>
                             </div>
-                            <a href="/api/export_csv?area={{ price_area }}&type=backtest" class="btn btn-sm btn-outline-info fw-bold">
-                                <i class="fa-solid fa-file-csv me-1"></i> Export 96Q Backtest CSV
-                            </a>
+                            <div class="d-flex align-items-center gap-3">
+                                {% if backtest_total_pnl != None %}
+                                <div class="text-end me-2">
+                                    <span class="text-muted small d-block">Daily Net Benefit:</span>
+                                    <span class="fs-6 fw-bold {% if backtest_total_pnl > 0 %}text-success{% else %}text-danger{% endif %}">
+                                        {{ '{0:+.2f}'.format(backtest_total_pnl) }} €
+                                    </span>
+                                </div>
+                                {% endif %}
+                                <div class="d-flex align-items-center gap-2">
+                                    <input type="date" id="backtestDate" class="form-control form-control-sm bg-dark text-white border-secondary" value="{{ date_str or '2026-08-31' }}">
+                                    <button onclick="runHistoricalBacktest()" class="btn btn-sm btn-primary fw-bold">
+                                        <i class="fa-solid fa-play"></i> Run Date
+                                    </button>
+                                </div>
+                                <a href="/api/export_csv?area={{ price_area }}&type=backtest" class="btn btn-sm btn-outline-info fw-bold ms-2">
+                                    <i class="fa-solid fa-file-csv me-1"></i> Export 96Q Backtest CSV
+                                </a>
+                            </div>
                         </div>
                         <div class="table-responsive" style="max-height: 540px; overflow-y: auto;">
                             <table class="table table-dark table-striped table-hover mb-0 text-center align-middle">
@@ -375,6 +390,8 @@
                                         <th style="min-width: 135px;" class="text-info bg-primary bg-opacity-25 border-start border-end border-info">Actual Settled<br>Imbalance (€)</th>
                                         <th>Error<br>Spread</th>
                                         <th>Trading Agent<br>Action</th>
+                                        <th>Net PnL<br>(€)</th>
+                                        <th>Running<br>Net PnL (€)</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -394,9 +411,13 @@
                                             <span class="val-actual">€ {{ row['actual_settled_imbalance_eur'] }}</span>
                                         </td>
                                         <td>
+                                            {% if row['error_spread_eur'] == '--' %}
+                                            <span class="badge bg-secondary fw-bold">Pending</span>
+                                            {% else %}
                                             <span class="badge {% if row['error_spread_eur'] < 5.0 %}bg-success{% elif row['error_spread_eur'] < 15.0 %}bg-warning text-dark{% else %}bg-danger{% endif %} fw-bold">
                                                 ±€ {{ row['error_spread_eur'] }}
                                             </span>
+                                            {% endif %}
                                         </td>
                                         <td>
                                             {% if 'BUY' in row['agent_action'] %}
@@ -405,6 +426,21 @@
                                             <span class="badge bg-danger px-2 py-1"><i class="fa-solid fa-arrow-trend-down me-1"></i> SELL Spot</span>
                                             {% else %}
                                             <span class="badge bg-secondary px-2 py-1">HOLD</span>
+                                            {% endif %}
+                                        </td>
+                                        <td class="fw-bold {% if row.get('net_pnl_eur', 0) > 0 %}text-success{% elif row.get('net_pnl_eur', 0) < 0 %}text-danger{% else %}text-muted{% endif %}">
+                                            {% if row.get('net_pnl_eur') != None %}
+                                                {{ '{0:+.2f}'.format(row['net_pnl_eur']) }}
+                                            {% else %}
+                                                --
+                                            {% endif %}
+                                        </td>
+                                        <td class="fw-bold {% if row.get('running_net_pnl_eur', 0) > 0 %}text-success{% elif row.get('running_net_pnl_eur', 0) < 0 %}text-danger{% else %}text-muted{% endif %}">
+                                            <!-- KEYS: {{ row.keys() }} | TYPE: {{ row.get('running_net_pnl_eur').__class__.__name__ }} | VAL: {{ row.get('running_net_pnl_eur') }} -->
+                                            {% if row.get('running_net_pnl_eur') != None %}
+                                                {{ '{0:+.2f}'.format(row['running_net_pnl_eur']) }}
+                                            {% else %}
+                                                --
                                             {% endif %}
                                         </td>
                                     </tr>
@@ -416,6 +452,19 @@
                                 </tbody>
                             </table>
                         </div>
+                    <div class="p-3 mt-3">
+                        <h6 class="fw-bold text-white mb-2"><i class="fa-solid fa-chart-line text-primary me-2"></i> Historical Backtest 4-Panel Visualization</h6>
+                        <div class="chart-container text-center">
+                            {% if chart_exists %}
+                            <img src="/static/results/backtest_{{ price_area }}_{{ date_str or '2026-08-31' }}.png?t={{ ts }}" 
+                                 class="img-fluid rounded border border-secondary"
+                                 alt="Historical Backtest Chart"
+                                 onerror="this.src='/static/results/v2_commercial_backtest_{{ price_area }}.png?t={{ ts }}';">
+                            {% else %}
+                            <div class="text-muted py-4"><i class="fa-solid fa-image fs-2 mb-2"></i><br>Select a date and click "Run Date" to generate historical graphs.</div>
+                            {% endif %}
+                        </div>
+                    </div>
                     </div>
 
                     <!-- TAB 2: FUTURE 96-QUARTER DAY-AHEAD FORECAST TABLE -->
@@ -499,39 +548,25 @@
                                     {% endfor %}
                                 </tbody>
                             </table>
+                    <div class="p-3 mt-3 border-top border-secondary">
+                        <h6 class="fw-bold text-white mb-2"><i class="fa-solid fa-chart-line text-warning me-2"></i> Live Real-Time Execution Visualization (Rolling Horizon)</h6>
+                        <div class="chart-container text-center">
+                            <img src="/static/results/live_commercial_dashboard_{{ price_area }}.png?t={{ ts }}" 
+                                 class="img-fluid rounded border border-secondary"
+                                 alt="Live Real-Time Dashboard"
+                                 onerror="this.src=''; this.alt='No live data available yet for today.';">
                         </div>
+                    </div>
                     </div>
 
                 </div>
             </div>
         </div>
 
-        <!-- Enhanced 4-Panel 96-Quarter Backtest Dashboard Visuals -->
-        <div class="row">
-            <div class="col-12">
-                <div class="card p-3">
-                    <div class="d-flex justify-content-between align-items-center mb-3">
-                        <h5 class="fw-bold text-white mb-0">
-                            <i class="fa-solid fa-chart-line text-primary me-2"></i>
-                            Enhanced 4-Panel 96-Quarter Diagnostic & Arbitrage Dashboard ({{ price_area }})
-                        </h5>
-                        <span class="text-light small">Panel 1: Forecast Overlay | Panel 2: Buy/Sell Actions | Panel 3: Equity Growth | Panel 4: Fee Waterfall</span>
-                    </div>
-                    <div class="chart-container">
-                        {% if chart_exists %}
-                        <img src="/static/results/v2_commercial_backtest_{{ price_area }}.png?t={{ range(1, 100000)|random }}" 
-                             alt="Enhanced 4-Panel 96-Quarter Backtest Dashboard"
-                             onerror="this.src='/results/v2_commercial_backtest_{{ price_area }}.png';">
-                        {% else %}
-                        <div class="text-center py-5 text-muted">
-                            <i class="fa-solid fa-image fs-1 mb-2"></i>
-                            <p>Dashboard image generating... Click "Run Tournament & Backtest" to render 4-panel visuals.</p>
-                        </div>
-                        {% endif %}
-                    </div>
-                </div>
-            </div>
-        </div>
+    </div>
+
+    <!-- Trade Audit Ledger Modal -->
+
 
     </div>
 
@@ -729,6 +764,40 @@
                     window.location.href = '/?area={{ price_area }}&capital=' + capitalVal + '&volume={{ trade_volume }}';
                 } else {
                     alert('Error running tournament: ' + data.message);
+                }
+            })
+            .catch(err => {
+                document.getElementById('spinnerOverlay').style.display = 'none';
+                alert('Request failed: ' + err);
+            });
+        }
+
+        function runHistoricalBacktest() {
+            var dateVal = document.getElementById('backtestDate').value;
+            if(!dateVal) {
+                alert("Please select a date first.");
+                return;
+            }
+            var capitalVal = parseFloat(document.getElementById('capitalInput').value) || 100000.0;
+            document.getElementById('spinnerOverlay').style.display = 'flex';
+            
+            fetch('/api/run_historical_backtest', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    area: '{{ price_area }}',
+                    date: dateVal,
+                    capital: capitalVal,
+                    volume: {{ trade_volume }}
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('spinnerOverlay').style.display = 'none';
+                if (data.status === 'success') {
+                    window.location.href = '/?area={{ price_area }}&capital=' + capitalVal + '&volume={{ trade_volume }}&date=' + dateVal + '&tab=backtest';
+                } else {
+                    alert('Error running backtest: ' + data.message);
                 }
             })
             .catch(err => {

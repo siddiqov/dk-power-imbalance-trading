@@ -45,12 +45,18 @@ def plot_v3_optimeering_dashboard(df_day_d, preds, ledger_summary, price_area='D
     ax1.plot(quarters, q50_price, label="Median Imbalance Forecast q50 (EUR/MWh)", color="#f59e0b", linestyle="--", linewidth=2.0, zorder=5)
 
     # If actual imbalance prices are available, plot them
-    actual_col = "actual_imbalance_eur" if "actual_imbalance_eur" in df_day_d.columns else "imbalance_price_eur"
-    if actual_col in df_day_d.columns:
-        actual_vals = df_day_d[actual_col].replace("--", np.nan).astype(float).values
-        valid_idx = ~np.isnan(actual_vals)
-        if np.any(valid_idx):
-            ax1.plot(quarters[valid_idx], actual_vals[valid_idx], label="Actual Energinet Settlement (EUR/MWh)", color="#10b981", linewidth=2.6, marker='o', markersize=3, zorder=6)
+    actual_vals = np.full(n_q, np.nan)
+    for i, row in df_day_d.iterrows():
+        raw_val = row.get("actual_settled_imbalance_eur") or row.get("actual_imbalance_eur") or row.get("imbalance_price_eur")
+        if pd.notnull(raw_val) and str(raw_val).strip() not in ["--", "None", "nan", ""]:
+            try:
+                actual_vals[i] = float(str(raw_val).replace("€", "").replace("EUR", "").replace(",", "").strip())
+            except Exception:
+                pass
+
+    valid_idx = ~np.isnan(actual_vals)
+    if np.any(valid_idx):
+        ax1.plot(quarters[valid_idx], actual_vals[valid_idx], label="Actual Energinet Settlement (EUR/MWh)", color="#10b981", linewidth=2.6, marker='o', markersize=3, zorder=6)
 
     ax1.set_title(f"PANEL 1: OPTIMEERING QUANTILE HORIZON & SPREAD UNCERTAINTY ENVELOPE ({price_area}){title_date}", fontsize=12, fontweight="bold")
     ax1.set_ylabel("Price (EUR/MWh)", fontweight="bold")

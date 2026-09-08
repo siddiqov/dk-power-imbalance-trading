@@ -100,6 +100,8 @@ def api_model_trades_ledger():
     """Returns quarter-by-quarter financial ledger with Quantiles & Spike Shield statuses."""
     price_area = request.args.get('area', 'DK1')
     model_name = request.args.get('model', 'Transformer-TFT')
+    if ' ' in model_name:
+        model_name = model_name.replace(' ', '+')
     capital = float(request.args.get('capital', 100000.0))
     trade_volume = float(request.args.get('volume', 2.0))
     tab = request.args.get('tab', 'live')

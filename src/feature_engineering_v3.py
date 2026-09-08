@@ -70,19 +70,20 @@ class V3DeskFeatureEngine:
         df["imb_acceleration_1q"] = 0.0
         df["imb_roll_std_4q"] = 0.0
 
-        if "imbalance_price" in df.columns or "imbalance_price_eur" in df.columns or "actual_imbalance_eur" in df.columns:
-            imb_col = "imbalance_price" if "imbalance_price" in df.columns else ("imbalance_price_eur" if "imbalance_price_eur" in df.columns else "actual_imbalance_eur")
-            
-            # Check if there are valid non-null records
-            valid_imb = pd.to_numeric(df[imb_col].replace("--", np.nan), errors='coerce')
-            if valid_imb.notnull().any():
-                df["imbalance_price_eur"] = valid_imb.fillna(df["spot_price_eur"])
-                df["actual_spread_eur"] = df["imbalance_price_eur"] - df["spot_price_eur"]
+        for candidate in ["actual_settled_imbalance_eur", "actual_imbalance_eur", "imbalance_price_eur", "imbalance_price"]:
+            if candidate in df.columns:
+                cleaned = df[candidate].astype(str).str.replace("€", "").str.replace("EUR", "").str.replace(",", "").str.strip()
+                valid_num = pd.to_numeric(cleaned.replace("--", np.nan), errors='coerce')
+                if valid_num.notnull().any():
+                    df["imbalance_price_eur"] = valid_num.fillna(df["spot_price_eur"])
+                    df["actual_spread_eur"] = df["imbalance_price_eur"] - df["spot_price_eur"]
+                    break
 
-                # Lags (t-1, t-2, t-3, t-4, t-8)
-                for lag in [1, 2, 3, 4, 8]:
-                    df[f"imb_spread_lag_{lag}"] = df["actual_spread_eur"].shift(lag).fillna(0.0)
-                    df[f"imb_price_lag_{lag}"] = df["imbalance_price_eur"].shift(lag).fillna(df["spot_price_eur"])
+        if "actual_spread_eur" in df.columns:
+            # Lags (t-1, t-2, t-3, t-4, t-8)
+            for lag in [1, 2, 3, 4, 8]:
+                df[f"imb_spread_lag_{lag}"] = df["actual_spread_eur"].shift(lag).fillna(0.0)
+                df[f"imb_price_lag_{lag}"] = df["imbalance_price_eur"].shift(lag).fillna(df["spot_price_eur"])
 
                 # Regulation Direction (+1 Up, -1 Down, 0 Balanced)
                 df["reg_direction"] = np.where(df["actual_spread_eur"] > 1.2, 1, np.where(df["actual_spread_eur"] < -1.2, -1, 0))
