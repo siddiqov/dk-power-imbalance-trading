@@ -144,7 +144,8 @@ class TournamentTableGenerator:
         Fetches the exact 96-quarter Day-Ahead Spot prices released on D-1 from Energi Data Service (DayAheadPrices).
         Guarantees 100% genuine Nord Pool auction clearing prices for all 96 quarters of Day D.
         """
-        import requests, json
+        import requests, json, urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
         url = "https://api.energidataservice.dk/dataset/DayAheadPrices"
         params = {
@@ -156,7 +157,7 @@ class TournamentTableGenerator:
         }
         spot_dict = {}
         try:
-            res = requests.get(url, params=params, timeout=10).json()
+            res = requests.get(url, params=params, verify=False, timeout=10).json()
             records = res.get("records", [])
             for r in records:
                 if r.get("PriceArea") == self.price_area and pd.notnull(r.get("DayAheadPriceEUR")):
@@ -174,7 +175,7 @@ class TournamentTableGenerator:
                     "start": start_dt.strftime("%Y-%m-%dT00:00"),
                     "end": start_dt.strftime("%Y-%m-%dT23:59"),
                     "limit": 200
-                }, timeout=10).json()
+                }, verify=False, timeout=10).json()
                 for r in res_imb.get("records", []):
                     if r.get("PriceArea") == self.price_area and pd.notnull(r.get("SpotPriceEUR")):
                         t_str = pd.to_datetime(r["TimeDK"]).strftime("%Y-%m-%d %H:%M")
@@ -189,7 +190,8 @@ class TournamentTableGenerator:
         """
         Fetches settled actual imbalance prices from Energi Data Service (ImbalancePrice).
         """
-        import requests, json
+        import requests, json, urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
         url_imb = "https://api.energidataservice.dk/dataset/ImbalancePrice"
         settled_dict = {}
@@ -200,7 +202,7 @@ class TournamentTableGenerator:
                 "end": start_dt.strftime("%Y-%m-%dT23:59"),
                 "sort": "TimeDK ASC",
                 "limit": 200
-            }, timeout=10).json()
+            }, verify=False, timeout=10).json()
             for r in res_imb.get("records", []):
                 if r.get("PriceArea") == self.price_area and pd.notnull(r.get("ImbalancePriceEUR")):
                     t_str = pd.to_datetime(r["TimeDK"]).strftime("%Y-%m-%d %H:%M")
