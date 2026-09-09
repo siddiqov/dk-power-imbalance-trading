@@ -172,6 +172,11 @@
                     <i class="fa-solid fa-ranking-star text-warning me-2"></i> 
                     V3 Optimeering Model Suite Leaderboard 
                     <span class="badge bg-dark border border-secondary text-info ms-2">Area: {{ price_area }} | Volume: {{ trade_volume }} MWh</span>
+                    {% if active_tab == 'live' %}
+                        <span class="badge bg-success ms-2"><i class="fa-solid fa-satellite-dish me-1"></i> Live Market: {{ today_str }}</span>
+                    {% else %}
+                        <span class="badge bg-warning text-dark ms-2"><i class="fa-solid fa-clock-rotate-left me-1"></i> Historical Backtest: {{ selected_date }}</span>
+                    {% endif %}
                 </h5>
                 <div class="small text-muted">
                     Mode: <span class="badge {% if raw_mode == 'day_ahead' %}bg-success{% else %}bg-warning text-dark{% endif %} fw-bold">{{ market_mode }}</span>
@@ -375,15 +380,26 @@
             <div class="modal-dialog modal-fullscreen modal-dialog-scrollable p-3">
                 <div class="modal-content bg-dark text-light border-secondary shadow-lg">
                     <div class="modal-header border-secondary bg-black py-3 px-4">
-                        <h5 class="modal-title fw-bold">
-                            <i class="fa-solid fa-file-invoice-dollar text-warning me-2"></i>
+                        <h5 class="modal-title fw-bold d-flex align-items-center flex-wrap gap-2">
+                            <i class="fa-solid fa-file-invoice-dollar text-warning me-1"></i>
                             V3 Commercial Trade Audit Ledger: <span id="modalModelName" class="text-warning"></span> ({{ price_area }})
+                            {% if active_tab == 'live' %}
+                                <span class="badge bg-success fs-6"><i class="fa-solid fa-satellite-dish me-1"></i> Live Market: {{ today_str }}</span>
+                            {% else %}
+                                <span class="badge bg-warning text-dark fs-6"><i class="fa-solid fa-clock-rotate-left me-1"></i> Backtest Date: {{ selected_date }}</span>
+                            {% endif %}
                         </h5>
                         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
                         <div class="d-flex justify-content-between align-items-center mb-3">
-                            <div class="small text-muted">All orders locked at Gate Closure to prevent retroactive signal mutation.</div>
+                            <div class="small text-muted">
+                                {% if active_tab == 'live' %}
+                                    <i class="fa-solid fa-circle-info text-info me-1"></i> Showing <strong>Today's Live Orders</strong> locked at Gate Closure against rolling Energinet settlements.
+                                {% else %}
+                                    <i class="fa-solid fa-clock-rotate-left text-warning me-1"></i> Showing <strong>Historical Backtest Audit</strong> for <strong>{{ selected_date }}</strong> (All 96 quarters settled). To view today, switch to the <em>Live Real-Time Market</em> tab.
+                                {% endif %}
+                            </div>
                             <span class="badge bg-success">Friction: €0.51/MWh | Tax: 22%</span>
                         </div>
                         <table class="table table-dark table-sm table-striped text-center align-middle" style="font-size: 0.85rem;">
