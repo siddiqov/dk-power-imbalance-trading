@@ -45,7 +45,7 @@ class V3CommercialStrategyEngine:
         delivery_date_str = first_dt.strftime("%Y-%m-%d")
 
         # Generate predictions tailored to the market mode
-        preds = self.model_suite.predict_day_ahead_quantiles(df_day_d)
+        preds = self.model_suite.predict_day_ahead_quantiles(df_day_d, market_mode=market_mode)
         point_preds = preds.get(model_name, {}).get("pred_spread", np.zeros(len(df_day_d)))
         quantiles = preds["quantiles"]
         probs = preds["probabilities"]
@@ -97,7 +97,8 @@ class V3CommercialStrategyEngine:
                         vol_multiplier = 1.0
 
                 elif pred_spread < -1.2:
-                    if q90_s > 25.0 or p_up_spike > 0.20:
+                    # Asymmetric Spike Shield: abort shorting only if tail risk of an extreme upward squeeze (>+€80/MWh) is elevated
+                    if (q90_s > 80.0 and p_up_spike > 0.35) or p_up_spike > 0.45:
                         action = "HOLD (Spike Shield Protected)"
                         direction = "BALANCED (Shield)"
                     else:

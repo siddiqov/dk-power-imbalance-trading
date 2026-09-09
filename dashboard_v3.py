@@ -50,7 +50,7 @@ def index():
     ledger_summary = strategy.evaluate_trading_ledger(target_df, model_name="Transformer-TFT", market_mode=market_mode)
     
     # Generate Optimeering Predictions & Chart
-    preds = strategy.model_suite.predict_day_ahead_quantiles(target_df)
+    preds = strategy.model_suite.predict_day_ahead_quantiles(target_df, market_mode=market_mode)
     chart_path = plot_v3_optimeering_dashboard(
         target_df, preds, ledger_summary, 
         price_area=price_area, 
