@@ -1,4 +1,4 @@
-﻿# Python Cache & Bytecode
+# Python Cache & Bytecode
 __pycache__/
 *.py[cod]
 *$py.class
@@ -43,12 +43,13 @@ lightning_logs/
 runs/
 *.log
 
-# Heavy Trained Model Artifacts (Stored on Google Drive)
 models/*.pkl
 models/*.pt
 models/*.h5
 models/*.onnx
 models/*.bin
+models_v3/
+models_v3/*.pkl
 *.pkl
 *.pt
 
@@ -62,6 +63,12 @@ models/*.bin
 forecast_ledger.db
 forecast_ledger.db-shm
 forecast_ledger.db-wal
+trades_journal.db
+trades_journal.db-shm
+trades_journal.db-wal
+trading_history.db
+trading_history.db-shm
+trading_history.db-wal
 
 # Environment Variables & Secrets
 .env
