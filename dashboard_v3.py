@@ -159,7 +159,8 @@ def trade_ledger_v3():
         trade_volume=trade_volume,
         active_tab=tab,
         raw_mode=raw_mode,
-        selected_date=selected_date
+        selected_date=selected_date,
+        today_str=datetime.now().strftime("%d %B %Y")
     )
 
 if __name__ == '__main__':
