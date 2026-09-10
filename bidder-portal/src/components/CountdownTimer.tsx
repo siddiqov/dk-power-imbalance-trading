@@ -16,9 +16,9 @@ export function CountdownTimer({ nextQuarter }: CountdownTimerProps) {
     }
 
     const calculateTimeLeft = () => {
-      // Gate closure is 240 mins (4 hours) before delivery start (for 4h testing window)
+      // Gate closure is exactly 120 mins (2 hours) before delivery start (Nord Pool Close time)
       const deliveryStart = new Date(nextQuarter.time_dk).getTime();
-      const gateClosure = deliveryStart - 240 * 60 * 1000;
+      const gateClosure = deliveryStart - 120 * 60 * 1000;
       const now = Date.now();
       
       const difference = gateClosure - now;

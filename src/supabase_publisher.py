@@ -53,14 +53,29 @@ class SupabasePublisher:
             delivery_date: 'YYYY-MM-DD' string
             model_name: Model identifier, default 'Transformer-TFT'
         """
+        import zoneinfo
+        cph_tz = zoneinfo.ZoneInfo("Europe/Copenhagen")
+
         rows = []
         for trade in trades:
+            raw_time = trade["time_dk"]
+            if isinstance(raw_time, str):
+                try:
+                    dt = datetime.strptime(raw_time[:16], "%Y-%m-%d %H:%M").replace(tzinfo=cph_tz)
+                    time_dk_iso = dt.isoformat()
+                except Exception:
+                    time_dk_iso = raw_time
+            elif hasattr(raw_time, "replace"):
+                time_dk_iso = raw_time.replace(tzinfo=cph_tz).isoformat()
+            else:
+                time_dk_iso = str(raw_time)
+
             row = {
                 "price_area": price_area,
                 "delivery_date": delivery_date,
                 "quarter_index": int(trade["quarter"].replace("Q", "")),
                 "quarter_label": trade["quarter"],
-                "time_dk": trade["time_dk"],
+                "time_dk": time_dk_iso,
                 "spot_price_eur": trade["spot_price_eur"],
                 "pred_imbalance_eur": trade["pred_imbalance_eur"],
                 "pred_spread_eur": trade["pred_spread_eur"],
