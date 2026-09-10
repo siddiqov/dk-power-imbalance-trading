@@ -7,9 +7,10 @@ interface QuarterRowProps {
 }
 
 export function QuarterRow({ prediction }: QuarterRowProps) {
-  const formatTime = (isoString: string) => {
-    const date = new Date(isoString);
-    return date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Copenhagen' });
+  const formatTime = (quarterIndex: number) => {
+    const hour = Math.floor((quarterIndex - 1) / 4).toString().padStart(2, '0');
+    const minute = (((quarterIndex - 1) % 4) * 15).toString().padStart(2, '0');
+    return `${hour}:${minute}`;
   };
 
   const formatCurrency = (val: number) => `€ ${val.toFixed(2)}`;
@@ -31,8 +32,8 @@ export function QuarterRow({ prediction }: QuarterRowProps) {
           </span>
         </div>
       </td>
-      <td className="px-4 py-4 text-slate-300">
-        {formatTime(prediction.time_dk)}
+      <td className="px-4 py-4 text-slate-300 font-mono">
+        {formatTime(prediction.quarter_index)}
       </td>
       <td className="px-4 py-4 text-right text-slate-300 font-mono">
         {formatCurrency(prediction.spot_price_eur)}

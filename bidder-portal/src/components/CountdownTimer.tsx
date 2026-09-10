@@ -4,9 +4,10 @@ import { Timer } from 'lucide-react';
 
 interface CountdownTimerProps {
   nextQuarter?: QuarterPrediction;
+  onExpire?: () => void;
 }
 
-export function CountdownTimer({ nextQuarter }: CountdownTimerProps) {
+export function CountdownTimer({ nextQuarter, onExpire }: CountdownTimerProps) {
   const [timeLeft, setTimeLeft] = useState<{ hours: number; minutes: number; seconds: number; isNegative: boolean } | null>(null);
 
   useEffect(() => {
@@ -15,6 +16,8 @@ export function CountdownTimer({ nextQuarter }: CountdownTimerProps) {
       return;
     }
 
+    let hasExpired = false;
+
     const calculateTimeLeft = () => {
       // Gate closure is exactly 120 mins (2 hours) before delivery start (Nord Pool Close time)
       const deliveryStart = new Date(nextQuarter.time_dk).getTime();
@@ -22,8 +25,13 @@ export function CountdownTimer({ nextQuarter }: CountdownTimerProps) {
       const now = Date.now();
       
       const difference = gateClosure - now;
-      const isNegative = difference < 0;
+      const isNegative = difference <= 0;
       const absDiff = Math.abs(difference);
+
+      if (isNegative && !hasExpired) {
+        hasExpired = true;
+        onExpire?.();
+      }
 
       const hours = Math.floor((absDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
       const minutes = Math.floor((absDiff % (1000 * 60 * 60)) / (1000 * 60));

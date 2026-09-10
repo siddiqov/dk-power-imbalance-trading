@@ -13,7 +13,8 @@ export function usePredictions(priceArea: 'DK1' | 'DK2') {
       setLoading(true);
       setError(null);
 
-      // Gate closure logic: 2 hours (120 minutes) before delivery start (Nord Pool contract Close time)
+      // Gate closure is exactly 120 minutes (2 hours) before physical delivery start.
+      // Shows the next 4 tradeable quarters whose gate closure has not yet passed.
       const threshold = new Date(Date.now() + 120 * 60 * 1000).toISOString();
 
       const { data, error: supabaseError } = await supabase
@@ -22,7 +23,7 @@ export function usePredictions(priceArea: 'DK1' | 'DK2') {
         .eq('price_area', priceArea)
         .gt('time_dk', threshold)
         .order('time_dk', { ascending: true })
-        .limit(8);
+        .limit(4);
 
       if (supabaseError) throw supabaseError;
 
@@ -64,5 +65,5 @@ export function usePredictions(priceArea: 'DK1' | 'DK2') {
     };
   }, [fetchPredictions, priceArea]);
 
-  return { predictions, loading, error, lastUpdated };
+  return { predictions, loading, error, lastUpdated, refetch: fetchPredictions };
 }
