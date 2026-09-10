@@ -52,6 +52,7 @@ models_v3/
 models_v3/*.pkl
 *.pkl
 *.pt
+*.part
 
 # Keep Python code in models directory
 !models/*.py
@@ -74,3 +75,8 @@ trading_history.db-wal
 .env
 .env.*
 !.env.example
+
+# Bidder Portal (React)
+bidder-portal/node_modules/
+bidder-portal/dist/
+bidder-portal/.env

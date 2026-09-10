@@ -1,4 +1,4 @@
-﻿# Core Data & Numerical Computing
+# Core Data & Numerical Computing
 numpy>=1.24.0
 pandas>=2.0.0
 scipy>=1.10.0
@@ -23,3 +23,7 @@ requests>=2.31.0
 tqdm>=4.66.0
 tabulate>=0.9.0
 gdown>=5.1.0
+
+# Supabase (Bidder Portal publisher)
+supabase>=2.0.0
+python-dotenv>=1.0.0
