@@ -5,11 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trade Ledger: {{ model_name }}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root {
             --bg-dark: #090d16;
             --card-bg: #111827;
             --card-border: #1f2937;
+            --accent-blue: #38bdf8;
+            --accent-green: #10b981;
+            --accent-yellow: #f59e0b;
         }
         body {
             background-color: var(--bg-dark);
@@ -19,47 +23,218 @@
         }
         .table-dark {
             --bs-table-bg: var(--card-bg);
-            --bs-table-striped-bg: #1f2937;
+            --bs-table-striped-bg: #141d2e;
+            --bs-table-hover-bg: #1e293b;
             border-color: var(--card-border);
+        }
+        thead th {
+            position: sticky;
+            top: 0;
+            background-color: #0b1120 !important;
+            z-index: 10;
+            border-bottom: 2px solid var(--card-border) !important;
+            padding: 8px 6px !important;
+            vertical-align: middle;
+            white-space: nowrap;
+        }
+        .copy-col-btn {
+            color: #38bdf8;
+            opacity: 0.7;
+            border: none;
+            background: transparent;
+            padding: 2px 5px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.15s ease-in-out;
+        }
+        .copy-col-btn:hover {
+            opacity: 1;
+            background-color: rgba(56, 189, 248, 0.15);
+            color: #7dd3fc;
+            transform: scale(1.1);
+        }
+        .copy-col-btn:active {
+            transform: scale(0.95);
+        }
+        .toast-container-custom {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            z-index: 9999;
+        }
+        .toolbar-panel {
+            background-color: #0f172a;
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            padding: 10px 16px;
         }
     </style>
 </head>
 <body>
     <div class="container-fluid">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-            <h4 class="text-warning mb-0">V3 Commercial Trade Audit Ledger: {{ model_name }} ({{ price_area }})</h4>
-            <span class="badge bg-success fs-6">Friction: €0.51/MWh | Tax: 22%</span>
+        <!-- Header Title Bar -->
+        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+            <div>
+                <h4 class="text-warning mb-1">
+                    <i class="fa-solid fa-file-invoice-dollar me-2"></i>
+                    V3 Commercial Trade Audit Ledger: <span class="text-info">{{ model_name }}</span> ({{ price_area }})
+                </h4>
+                <div class="small text-muted">All orders locked at Gate Closure to prevent retroactive signal mutation.</div>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge bg-success fs-6"><i class="fa-solid fa-shield-halved me-1"></i> Friction: €0.51/MWh | Tax: 22%</span>
+            </div>
         </div>
-        <div class="small text-muted mb-3">All orders locked at Gate Closure to prevent retroactive signal mutation.</div>
+
+        <!-- Excel Export & Copy Toolbar -->
+        <div class="toolbar-panel mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div class="d-flex align-items-center gap-3 flex-wrap">
+                <span class="text-light small fw-bold"><i class="fa-solid fa-file-excel text-success me-1"></i> Excel Copy Settings:</span>
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" id="optIncludeHeader" checked>
+                    <label class="form-check-label small text-light" for="optIncludeHeader">Include Header</label>
+                </div>
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" id="optCleanNumbers" checked>
+                    <label class="form-check-label small text-light" for="optCleanNumbers">Clean numbers for Excel (strip € / +)</label>
+                </div>
+            </div>
+            <div class="d-flex gap-2">
+                <button type="button" class="btn btn-sm btn-outline-success" onclick="copyEntireTable(this)">
+                    <i class="fa-regular fa-copy me-1"></i> Copy Entire Table (Excel)
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-info" onclick="downloadCSV()">
+                    <i class="fa-solid fa-download me-1"></i> Export CSV
+                </button>
+            </div>
+        </div>
         
-        <table class="table table-dark table-sm table-striped text-center align-middle" style="font-size: 0.85rem;">
-            <thead>
-                <tr class="text-muted small">
-                    <th>Quarter</th>
-                    <th>Time (DK)</th>
-                    <th>Spot (€)</th>
-                    <th>Pred Imbalance (€)</th>
-                    <th>Pred Spread (€)</th>
-                    <th>Quantiles (q10-q90)</th>
-                    <th>P(Up) / P(Down)</th>
-                    <th>Decision</th>
-                    <th>Volume</th>
-                    <th>DA Cash Flow</th>
-                    <th>Actual Settled (€)</th>
-                    <th>Settlement Flow</th>
-                    <th>Fees (€)</th>
-                    <th>Net PnL (€)</th>
-                    <th>Running Capital</th>
-                    <th>Status</th>
-                </tr>
-            </thead>
-            <tbody id="modalLedgerBody">
-                <tr><td colspan="16" class="text-center py-4 text-muted"><div class="spinner-border spinner-border-sm text-info me-2"></div>Loading V3 genuine ledger for {{ model_name }}...</td></tr>
-            </tbody>
-        </table>
+        <!-- Table with Sticky Header and Copy Buttons -->
+        <div class="table-responsive rounded border border-secondary" style="max-height: calc(100vh - 170px); overflow-y: auto;">
+            <table class="table table-dark table-sm table-striped table-hover text-center align-middle mb-0" style="font-size: 0.85rem;">
+                <thead>
+                    <tr class="text-muted small">
+                        <th>
+                            <div class="d-flex align-items-center justify-content-center gap-1">
+                                <span>Quarter</span>
+                                <button type="button" class="copy-col-btn" onclick="copyColumn(0, 'Quarter', this)" title="Copy Quarter column to Excel"><i class="fa-regular fa-copy"></i></button>
+                            </div>
+                        </th>
+                        <th>
+                            <div class="d-flex align-items-center justify-content-center gap-1">
+                                <span>Time (DK)</span>
+                                <button type="button" class="copy-col-btn" onclick="copyColumn(1, 'Time (DK)', this)" title="Copy Time column to Excel"><i class="fa-regular fa-copy"></i></button>
+                            </div>
+                        </th>
+                        <th>
+                            <div class="d-flex align-items-center justify-content-center gap-1">
+                                <span>Spot (€)</span>
+                                <button type="button" class="copy-col-btn" onclick="copyColumn(2, 'Spot (€)', this)" title="Copy Spot column to Excel"><i class="fa-regular fa-copy"></i></button>
+                            </div>
+                        </th>
+                        <th>
+                            <div class="d-flex align-items-center justify-content-center gap-1">
+                                <span>Pred Imbalance (€)</span>
+                                <button type="button" class="copy-col-btn" onclick="copyColumn(3, 'Pred Imbalance (€)', this)" title="Copy Pred Imbalance column to Excel"><i class="fa-regular fa-copy"></i></button>
+                            </div>
+                        </th>
+                        <th>
+                            <div class="d-flex align-items-center justify-content-center gap-1">
+                                <span>Pred Spread (€)</span>
+                                <button type="button" class="copy-col-btn" onclick="copyColumn(4, 'Pred Spread (€)', this)" title="Copy Pred Spread column to Excel"><i class="fa-regular fa-copy"></i></button>
+                            </div>
+                        </th>
+                        <th>
+                            <div class="d-flex align-items-center justify-content-center gap-1">
+                                <span>Quantiles (q10-q90)</span>
+                                <button type="button" class="copy-col-btn" onclick="copyColumn(5, 'Quantiles', this)" title="Copy Quantiles column to Excel"><i class="fa-regular fa-copy"></i></button>
+                            </div>
+                        </th>
+                        <th>
+                            <div class="d-flex align-items-center justify-content-center gap-1">
+                                <span>P(Up) / P(Down)</span>
+                                <button type="button" class="copy-col-btn" onclick="copyColumn(6, 'P(Up)/P(Down)', this)" title="Copy Probabilities to Excel"><i class="fa-regular fa-copy"></i></button>
+                            </div>
+                        </th>
+                        <th>
+                            <div class="d-flex align-items-center justify-content-center gap-1">
+                                <span>Decision</span>
+                                <button type="button" class="copy-col-btn" onclick="copyColumn(7, 'Decision', this)" title="Copy Decision column to Excel"><i class="fa-regular fa-copy"></i></button>
+                            </div>
+                        </th>
+                        <th>
+                            <div class="d-flex align-items-center justify-content-center gap-1">
+                                <span>Volume</span>
+                                <button type="button" class="copy-col-btn" onclick="copyColumn(8, 'Volume', this)" title="Copy Volume column to Excel"><i class="fa-regular fa-copy"></i></button>
+                            </div>
+                        </th>
+                        <th>
+                            <div class="d-flex align-items-center justify-content-center gap-1">
+                                <span>DA Cash Flow</span>
+                                <button type="button" class="copy-col-btn" onclick="copyColumn(9, 'DA Cash Flow', this)" title="Copy DA Cash Flow column to Excel"><i class="fa-regular fa-copy"></i></button>
+                            </div>
+                        </th>
+                        <th>
+                            <div class="d-flex align-items-center justify-content-center gap-1">
+                                <span>Actual Settled (€)</span>
+                                <button type="button" class="copy-col-btn" onclick="copyColumn(10, 'Actual Settled (€)', this)" title="Copy Actual Settled column to Excel"><i class="fa-regular fa-copy"></i></button>
+                            </div>
+                        </th>
+                        <th>
+                            <div class="d-flex align-items-center justify-content-center gap-1">
+                                <span>Settlement Flow</span>
+                                <button type="button" class="copy-col-btn" onclick="copyColumn(11, 'Settlement Flow', this)" title="Copy Settlement Flow column to Excel"><i class="fa-regular fa-copy"></i></button>
+                            </div>
+                        </th>
+                        <th>
+                            <div class="d-flex align-items-center justify-content-center gap-1">
+                                <span>Fees (€)</span>
+                                <button type="button" class="copy-col-btn" onclick="copyColumn(12, 'Fees (€)', this)" title="Copy Fees column to Excel"><i class="fa-regular fa-copy"></i></button>
+                            </div>
+                        </th>
+                        <th>
+                            <div class="d-flex align-items-center justify-content-center gap-1">
+                                <span>Net PnL (€)</span>
+                                <button type="button" class="copy-col-btn" onclick="copyColumn(13, 'Net PnL (€)', this)" title="Copy Net PnL column to Excel"><i class="fa-regular fa-copy"></i></button>
+                            </div>
+                        </th>
+                        <th>
+                            <div class="d-flex align-items-center justify-content-center gap-1">
+                                <span>Running Capital</span>
+                                <button type="button" class="copy-col-btn" onclick="copyColumn(14, 'Running Capital', this)" title="Copy Running Capital column to Excel"><i class="fa-regular fa-copy"></i></button>
+                            </div>
+                        </th>
+                        <th>
+                            <div class="d-flex align-items-center justify-content-center gap-1">
+                                <span>Status</span>
+                                <button type="button" class="copy-col-btn" onclick="copyColumn(15, 'Status', this)" title="Copy Status column to Excel"><i class="fa-regular fa-copy"></i></button>
+                            </div>
+                        </th>
+                    </tr>
+                </thead>
+                <tbody id="modalLedgerBody">
+                    <tr><td colspan="16" class="text-center py-4 text-muted"><div class="spinner-border spinner-border-sm text-info me-2"></div>Loading V3 genuine ledger for {{ model_name }}...</td></tr>
+                </tbody>
+            </table>
+        </div>
     </div>
 
+    <!-- Notification Toast -->
+    <div class="toast-container-custom">
+        <div id="copyToast" class="toast align-items-center text-bg-dark border-info shadow-lg" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="d-flex">
+                <div class="toast-body py-2 px-3 small" id="toastMessage">
+                    <i class="fa-solid fa-check text-success me-2"></i> Copied to clipboard!
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        var rawTradesData = [];
+
         document.addEventListener('DOMContentLoaded', function() {
             var modelName = "{{ model_name }}";
             var priceArea = "{{ price_area }}";
@@ -72,8 +247,9 @@
             fetch(`/api/model_trades_ledger?area=${priceArea}&model=${encodeURIComponent(modelName)}&capital=${capital}&volume=${tradeVolume}&tab=${tab}&mode=${mode}&date=${date}`)
             .then(res => res.json())
             .then(data => {
+                rawTradesData = data.trades || [];
                 var html = '';
-                data.trades.forEach(function(t) {
+                rawTradesData.forEach(function(t) {
                     var actionBadge = 'bg-secondary';
                     if (t.action.includes('BUY')) actionBadge = 'bg-success';
                     else if (t.action.includes('SELL')) actionBadge = 'bg-danger';
@@ -106,6 +282,200 @@
                 document.getElementById('modalLedgerBody').innerHTML = `<tr><td colspan="16" class="text-danger">Failed to load data: ${err}</td></tr>`;
             });
         });
+
+        // Clean cell values for Excel math
+        function cleanForExcel(val) {
+            if (!val) return '';
+            val = val.trim();
+            var cleanNumbers = document.getElementById('optCleanNumbers')?.checked ?? true;
+            if (!cleanNumbers) return val;
+
+            if (val === '--' || val === '-') return '';
+
+            // Check if value is formatted currency or volume like "+€ 45.20", "-€ 12.50", "€ 100,000.00", "2.0 MWh"
+            var isNegative = (val.includes('-') && !val.includes(' - '));
+            var cleaned = val.replace(/[+€$MWh\s]/gi, '');
+            // Strip thousand commas
+            cleaned = cleaned.replace(/,/g, '');
+
+            // If it parses cleanly as float, return the clean number string
+            if (!isNaN(parseFloat(cleaned)) && isFinite(cleaned)) {
+                return (isNegative && !cleaned.startsWith('-')) ? ('-' + cleaned) : cleaned;
+            }
+            return val;
+        }
+
+        // Copy a single column to clipboard (formatted as rows separated by newlines for Excel column pasting)
+        function copyColumn(colIdx, colName, btn) {
+            var rows = document.querySelectorAll('#modalLedgerBody tr');
+            if (!rows || rows.length === 0 || rows[0].querySelectorAll('td').length <= 1) {
+                showToast('No data available to copy yet.', 'warning');
+                return;
+            }
+
+            var includeHeader = document.getElementById('optIncludeHeader')?.checked ?? true;
+            var values = [];
+
+            if (includeHeader) {
+                values.push(colName);
+            }
+
+            rows.forEach(function(row) {
+                var cells = row.querySelectorAll('td');
+                if (cells.length > colIdx) {
+                    var cellText = cells[colIdx].innerText.trim();
+                    values.push(cleanForExcel(cellText));
+                }
+            });
+
+            var clipboardText = values.join('\r\n');
+            copyTextToClipboard(clipboardText, function() {
+                animateButtonSuccess(btn);
+                var rowCount = values.length - (includeHeader ? 1 : 0);
+                showToast(`<i class="fa-solid fa-check text-success me-2"></i> Copied <strong>${rowCount} rows</strong> for <strong>"${colName}"</strong> to clipboard! Paste in Excel with <kbd>Ctrl+V</kbd>.`);
+            });
+        }
+
+        // Copy entire table to clipboard formatted as TSV for native Excel multi-column paste
+        function copyEntireTable(btn) {
+            var table = document.querySelector('table');
+            var rows = table.querySelectorAll('tr');
+            if (!rows || rows.length <= 1) {
+                showToast('No data available to copy yet.', 'warning');
+                return;
+            }
+
+            var includeHeader = document.getElementById('optIncludeHeader')?.checked ?? true;
+            var tsvLines = [];
+
+            // Extract Header
+            if (includeHeader) {
+                var headerCells = table.querySelectorAll('thead th');
+                var headerVals = [];
+                headerCells.forEach(function(th) {
+                    var clone = th.cloneNode(true);
+                    clone.querySelectorAll('button').forEach(b => b.remove());
+                    headerVals.push(clone.innerText.trim());
+                });
+                tsvLines.push(headerVals.join('\t'));
+            }
+
+            // Extract Body Rows
+            var bodyRows = document.querySelectorAll('#modalLedgerBody tr');
+            bodyRows.forEach(function(row) {
+                var cells = row.querySelectorAll('td');
+                if (cells.length > 1) {
+                    var rowVals = [];
+                    cells.forEach(function(td) {
+                        rowVals.push(cleanForExcel(td.innerText.trim()));
+                    });
+                    tsvLines.push(rowVals.join('\t'));
+                }
+            });
+
+            var clipboardText = tsvLines.join('\r\n');
+            copyTextToClipboard(clipboardText, function() {
+                animateButtonSuccess(btn);
+                showToast(`<i class="fa-solid fa-check text-success me-2"></i> Copied entire 16-column table! Select cell A1 in Excel and press <kbd>Ctrl+V</kbd>.`);
+            });
+        }
+
+        // Export table as CSV file download
+        function downloadCSV() {
+            var table = document.querySelector('table');
+            var rows = table.querySelectorAll('tr');
+            if (!rows || rows.length <= 1) {
+                showToast('No data available to export.', 'warning');
+                return;
+            }
+
+            var csvLines = [];
+            var headerCells = table.querySelectorAll('thead th');
+            var headerVals = [];
+            headerCells.forEach(function(th) {
+                var clone = th.cloneNode(true);
+                clone.querySelectorAll('button').forEach(b => b.remove());
+                headerVals.push('"' + clone.innerText.trim().replace(/"/g, '""') + '"');
+            });
+            csvLines.push(headerVals.join(','));
+
+            var bodyRows = document.querySelectorAll('#modalLedgerBody tr');
+            bodyRows.forEach(function(row) {
+                var cells = row.querySelectorAll('td');
+                if (cells.length > 1) {
+                    var rowVals = [];
+                    cells.forEach(function(td) {
+                        var cleaned = cleanForExcel(td.innerText.trim());
+                        rowVals.push('"' + cleaned.replace(/"/g, '""') + '"');
+                    });
+                    csvLines.push(rowVals.join(','));
+                }
+            });
+
+            var csvContent = "data:text/csv;charset=utf-8," + encodeURIComponent(csvLines.join("\r\n"));
+            var link = document.createElement("a");
+            link.setAttribute("href", csvContent);
+            link.setAttribute("download", `trade_ledger_{{ price_area }}_{{ model_name }}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            showToast(`<i class="fa-solid fa-download text-info me-2"></i> Downloaded CSV file!`);
+        }
+
+        // Clipboard Copy Helper with ExecCommand Fallback
+        function copyTextToClipboard(text, onSuccess) {
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(onSuccess).catch(function(err) {
+                    fallbackCopy(text, onSuccess);
+                });
+            } else {
+                fallbackCopy(text, onSuccess);
+            }
+        }
+
+        function fallbackCopy(text, onSuccess) {
+            var textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-999999px";
+            textArea.style.top = "-999999px";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                var successful = document.execCommand('copy');
+                if (successful && onSuccess) onSuccess();
+            } catch (err) {
+                showToast('Copy failed: ' + err, 'danger');
+            }
+            document.body.removeChild(textArea);
+        }
+
+        // Button Click Animation
+        function animateButtonSuccess(btn) {
+            if (!btn) return;
+            var originalHTML = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-check text-success"></i>';
+            btn.disabled = true;
+            setTimeout(function() {
+                btn.innerHTML = originalHTML;
+                btn.disabled = false;
+            }, 1400);
+        }
+
+        // Toast feedback
+        var toastInstance = null;
+        function showToast(message) {
+            var toastEl = document.getElementById('copyToast');
+            var msgEl = document.getElementById('toastMessage');
+            if (msgEl) msgEl.innerHTML = message;
+            if (!toastInstance && window.bootstrap) {
+                toastInstance = new bootstrap.Toast(toastEl, { delay: 3500 });
+            }
+            if (toastInstance) {
+                toastInstance.show();
+            }
+        }
     </script>
 </body>
 </html>
