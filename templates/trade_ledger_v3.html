@@ -73,41 +73,23 @@
 </head>
 <body>
     <div class="container-fluid">
-        <!-- Header Title Bar -->
-        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-            <div>
-                <h4 class="text-warning mb-1">
-                    <i class="fa-solid fa-file-invoice-dollar me-2"></i>
-                    V3 Commercial Trade Audit Ledger: <span class="text-info">{{ model_name }}</span> ({{ price_area }})
-                </h4>
-                <div class="small text-muted">All orders locked at Gate Closure to prevent retroactive signal mutation.</div>
-            </div>
-            <div class="d-flex align-items-center gap-2">
-                <span class="badge bg-success fs-6"><i class="fa-solid fa-shield-halved me-1"></i> Friction: €0.51/MWh | Tax: 22%</span>
-            </div>
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+            <h4 class="text-warning mb-0 d-flex align-items-center flex-wrap gap-2">
+                <span>V3 Commercial Trade Audit Ledger: <strong class="text-light">{{ model_name }}</strong> ({{ price_area }})</span>
+                {% if active_tab == 'live' %}
+                    <span class="badge bg-success fs-6"><i class="fa-solid fa-satellite-dish me-1"></i> Live Market: {{ today_str }}</span>
+                {% else %}
+                    <span class="badge bg-warning text-dark fs-6"><i class="fa-solid fa-clock-rotate-left me-1"></i> Backtest Date: {{ selected_date }}</span>
+                {% endif %}
+            </h4>
+            <span class="badge bg-success fs-6">Friction: €0.51/MWh | Tax: 22%</span>
         </div>
-
-        <!-- Excel Export & Copy Toolbar -->
-        <div class="toolbar-panel mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
-            <div class="d-flex align-items-center gap-3 flex-wrap">
-                <span class="text-light small fw-bold"><i class="fa-solid fa-file-excel text-success me-1"></i> Excel Copy Settings:</span>
-                <div class="form-check form-switch mb-0">
-                    <input class="form-check-input" type="checkbox" id="optIncludeHeader" checked>
-                    <label class="form-check-label small text-light" for="optIncludeHeader">Include Header</label>
-                </div>
-                <div class="form-check form-switch mb-0">
-                    <input class="form-check-input" type="checkbox" id="optCleanNumbers" checked>
-                    <label class="form-check-label small text-light" for="optCleanNumbers">Clean numbers for Excel (strip € / +)</label>
-                </div>
-            </div>
-            <div class="d-flex gap-2">
-                <button type="button" class="btn btn-sm btn-outline-success" onclick="copyEntireTable(this)">
-                    <i class="fa-regular fa-copy me-1"></i> Copy Entire Table (Excel)
-                </button>
-                <button type="button" class="btn btn-sm btn-outline-info" onclick="downloadCSV()">
-                    <i class="fa-solid fa-download me-1"></i> Export CSV
-                </button>
-            </div>
+        <div class="small text-muted mb-3">
+            {% if active_tab == 'live' %}
+                Showing <strong>Today's Live Orders ({{ today_str }})</strong> locked at Gate Closure against rolling Energinet settlements.
+            {% else %}
+                Showing <strong>Historical Backtest Audit</strong> for <strong>{{ selected_date }}</strong> (All 96 quarters settled).
+            {% endif %}
         </div>
         
         <!-- Table with Sticky Header and Copy Buttons -->
