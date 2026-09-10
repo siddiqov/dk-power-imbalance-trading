@@ -15,7 +15,7 @@ export function Header({ priceArea, onPriceAreaChange }: HeaderProps) {
         </div>
         <div>
           <h1 className="text-3xl font-bold text-white tracking-tight">Intraday Quarter Signals</h1>
-          <p className="text-slate-400 font-medium mt-1">Transformer-TFT Model — Next 4 Tradeable Quarters</p>
+          <p className="text-slate-400 font-medium mt-1">Transformer-TFT Model — Next 8 Tradeable Quarters (4h Window)</p>
         </div>
       </div>
       

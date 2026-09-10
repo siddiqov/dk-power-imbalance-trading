@@ -66,8 +66,8 @@ def push_predictions(delivery_date: str = None, price_areas=("DK1", "DK2")):
             tomorrow_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
 
             if delivery_date in (today_str, tomorrow_str):
-                logger.info(f"  Fetching live future table for {area}...")
-                df = table_gen.get_future_table()
+                logger.info(f"  Fetching live future table for {area} ({delivery_date})...")
+                df = table_gen.get_future_table(date_str=delivery_date)
             else:
                 logger.info(f"  Fetching backtest table for {area} ({delivery_date})...")
                 df = table_gen.get_backtest_table(date_str=delivery_date)

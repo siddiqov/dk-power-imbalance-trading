@@ -39,9 +39,9 @@ class TournamentTableGenerator:
             return pd.read_csv(legacy_path)
         return self.generate_and_save_backtest_table(date_str=date_str)
 
-    def get_future_table(self):
+    def get_future_table(self, date_str=None):
         # Always dynamically generate to pull the latest 15-minute settled quarters from Energinet
-        return self.generate_and_save_future_table()
+        return self.generate_and_save_future_table(date_str=date_str)
 
     def generate_and_save_backtest_table(self, date_str="2026-08-31"):
         """

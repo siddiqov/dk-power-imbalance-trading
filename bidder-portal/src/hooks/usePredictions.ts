@@ -13,8 +13,8 @@ export function usePredictions(priceArea: 'DK1' | 'DK2') {
       setLoading(true);
       setError(null);
 
-      // Gate closure logic: 2 hours (120 minutes) before delivery start (Nord Pool contract Close time)
-      const threshold = new Date(Date.now() + 120 * 60 * 1000).toISOString();
+      // Gate closure / lookahead logic: 4 hours (240 minutes) before delivery start
+      const threshold = new Date(Date.now() + 240 * 60 * 1000).toISOString();
 
       const { data, error: supabaseError } = await supabase
         .from('quarter_predictions')
@@ -22,7 +22,7 @@ export function usePredictions(priceArea: 'DK1' | 'DK2') {
         .eq('price_area', priceArea)
         .gt('time_dk', threshold)
         .order('time_dk', { ascending: true })
-        .limit(4);
+        .limit(8);
 
       if (supabaseError) throw supabaseError;
 
