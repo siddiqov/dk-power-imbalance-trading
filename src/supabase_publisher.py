@@ -57,18 +57,13 @@ class SupabasePublisher:
         cph_tz = zoneinfo.ZoneInfo("Europe/Copenhagen")
 
         rows = []
+        d_parts = [int(p) for p in delivery_date.split("-")]
         for trade in trades:
-            raw_time = trade["time_dk"]
-            if isinstance(raw_time, str):
-                try:
-                    dt = datetime.strptime(raw_time[:16], "%Y-%m-%d %H:%M").replace(tzinfo=cph_tz)
-                    time_dk_iso = dt.isoformat()
-                except Exception:
-                    time_dk_iso = raw_time
-            elif hasattr(raw_time, "replace"):
-                time_dk_iso = raw_time.replace(tzinfo=cph_tz).isoformat()
-            else:
-                time_dk_iso = str(raw_time)
+            q_idx = int(trade["quarter"].replace("Q", ""))
+            hour = (q_idx - 1) // 4
+            minute = ((q_idx - 1) % 4) * 15
+            dt = datetime(d_parts[0], d_parts[1], d_parts[2], hour, minute, tzinfo=cph_tz)
+            time_dk_iso = dt.isoformat()
 
             row = {
                 "price_area": price_area,
