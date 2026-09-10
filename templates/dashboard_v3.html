@@ -370,51 +370,7 @@
             </div>
         </div>
 
-        <!-- Modal: Trade Execution Ledger -->
-        <div class="modal fade" id="tradeLedgerModal" tabindex="-1" aria-hidden="true">
-            <div class="modal-dialog modal-fullscreen modal-dialog-scrollable p-3">
-                <div class="modal-content bg-dark text-light border-secondary shadow-lg">
-                    <div class="modal-header border-secondary bg-black py-3 px-4">
-                        <h5 class="modal-title fw-bold">
-                            <i class="fa-solid fa-file-invoice-dollar text-warning me-2"></i>
-                            V3 Commercial Trade Audit Ledger: <span id="modalModelName" class="text-warning"></span> ({{ price_area }})
-                        </h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="d-flex justify-content-between align-items-center mb-3">
-                            <div class="small text-muted">All orders locked at Gate Closure to prevent retroactive signal mutation.</div>
-                            <span class="badge bg-success">Friction: €0.51/MWh | Tax: 22%</span>
-                        </div>
-                        <table class="table table-dark table-sm table-striped text-center align-middle" style="font-size: 0.85rem;">
-                            <thead>
-                                <tr class="text-muted small">
-                                    <th>Quarter</th>
-                                    <th>Time (DK)</th>
-                                    <th>Spot (€)</th>
-                                    <th>Pred Imbalance (€)</th>
-                                    <th>Pred Spread (€)</th>
-                                    <th>Quantiles (q10-q90)</th>
-                                    <th>P(Up) / P(Down)</th>
-                                    <th>Decision</th>
-                                    <th>Volume</th>
-                                    <th>DA Cash Flow</th>
-                                    <th>Actual Settled (€)</th>
-                                    <th>Settlement Flow</th>
-                                    <th>Fees (€)</th>
-                                    <th>Net PnL (€)</th>
-                                    <th>Running Capital</th>
-                                    <th>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody id="modalLedgerBody">
-                                <!-- Populated dynamically -->
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
+
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -429,46 +385,8 @@
         updateLiveClock();
 
         function openTradeLedger(modelName) {
-            document.getElementById('modalModelName').innerText = modelName;
-            var modalEl = new bootstrap.Modal(document.getElementById('tradeLedgerModal'));
-            modalEl.show();
-
-            var tbody = document.getElementById('modalLedgerBody');
-            tbody.innerHTML = `<tr><td colspan="16" class="text-center py-4 text-muted"><div class="spinner-border spinner-border-sm text-info me-2"></div>Loading V3 genuine ledger for ${modelName}...</td></tr>`;
-
-            fetch(`/api/model_trades_ledger?area={{ price_area }}&model=${encodeURIComponent(modelName)}&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}`)
-            .then(res => res.json())
-            .then(data => {
-                var html = '';
-                data.trades.forEach(function(t) {
-                    var actionBadge = 'bg-secondary';
-                    if (t.action.includes('BUY')) actionBadge = 'bg-success';
-                    else if (t.action.includes('SELL')) actionBadge = 'bg-danger';
-                    else if (t.action.includes('Shield')) actionBadge = 'bg-warning text-dark';
-
-                    var pnlClass = t.net_pnl_eur.startsWith('+€') ? 'text-success fw-bold' : (t.net_pnl_eur.startsWith('-€') ? 'text-danger fw-bold' : 'text-muted');
-
-                    html += `<tr>
-                        <td class="fw-bold text-warning">${t.quarter}</td>
-                        <td class="font-monospace text-light small">${t.time_dk}</td>
-                        <td class="text-light">€ ${t.spot_price_eur.toFixed(2)}</td>
-                        <td class="text-info">€ ${t.pred_imbalance_eur.toFixed(2)}</td>
-                        <td class="${t.pred_spread_eur >= 0 ? 'text-success' : 'text-danger'} fw-bold">${t.pred_spread_eur >= 0 ? '+' : ''}€ ${t.pred_spread_eur.toFixed(2)}</td>
-                        <td class="small text-muted font-monospace">€${t.q10_price_eur.toFixed(0)} - €${t.q90_price_eur.toFixed(0)}</td>
-                        <td class="small font-monospace"><span class="text-success">${t.p_up}%</span> / <span class="text-danger">${t.p_down}%</span></td>
-                        <td><span class="badge ${actionBadge}">${t.action}</span></td>
-                        <td class="text-light">${t.volume_mwh > 0 ? t.volume_mwh.toFixed(1) + ' MWh' : '--'}</td>
-                        <td class="small font-monospace ${t.da_cash_flow.startsWith('-') ? 'text-danger' : (t.da_cash_flow.startsWith('+') ? 'text-success' : 'text-muted')}">${t.da_cash_flow}</td>
-                        <td class="text-info fw-bold">${t.actual_settled_eur}</td>
-                        <td class="small font-monospace ${t.settle_cash_flow.startsWith('+') ? 'text-success' : (t.settle_cash_flow.startsWith('-') ? 'text-danger' : 'text-muted')}">${t.settle_cash_flow}</td>
-                        <td class="text-danger small">${t.roundtrip_fees_eur > 0 ? '-€ ' + t.roundtrip_fees_eur.toFixed(2) : '--'}</td>
-                        <td class="${pnlClass}">${t.net_pnl_eur}</td>
-                        <td class="fw-bold text-light">${t.running_capital}</td>
-                        <td><span class="badge ${t.status.includes('Settled') ? 'bg-success' : (t.status.includes('Locked') ? 'bg-primary' : 'bg-dark border border-secondary text-muted')}">${t.status}</span></td>
-                    </tr>`;
-                });
-                tbody.innerHTML = html;
-            });
+            const url = `/trade_ledger_v3?area={{ price_area }}&model=${encodeURIComponent(modelName)}&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}`;
+            window.open(url, '_blank');
         }
     </script>
 </body>

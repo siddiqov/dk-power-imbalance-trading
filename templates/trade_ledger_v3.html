@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trade Ledger: {{ model_name }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #090d16;
+            --card-bg: #111827;
+            --card-border: #1f2937;
+        }
+        body {
+            background-color: var(--bg-dark);
+            color: #f3f4f6;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            padding: 20px;
+        }
+        .table-dark {
+            --bs-table-bg: var(--card-bg);
+            --bs-table-striped-bg: #1f2937;
+            border-color: var(--card-border);
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h4 class="text-warning mb-0">V3 Commercial Trade Audit Ledger: {{ model_name }} ({{ price_area }})</h4>
+            <span class="badge bg-success fs-6">Friction: €0.51/MWh | Tax: 22%</span>
+        </div>
+        <div class="small text-muted mb-3">All orders locked at Gate Closure to prevent retroactive signal mutation.</div>
+        
+        <table class="table table-dark table-sm table-striped text-center align-middle" style="font-size: 0.85rem;">
+            <thead>
+                <tr class="text-muted small">
+                    <th>Quarter</th>
+                    <th>Time (DK)</th>
+                    <th>Spot (€)</th>
+                    <th>Pred Imbalance (€)</th>
+                    <th>Pred Spread (€)</th>
+                    <th>Quantiles (q10-q90)</th>
+                    <th>P(Up) / P(Down)</th>
+                    <th>Decision</th>
+                    <th>Volume</th>
+                    <th>DA Cash Flow</th>
+                    <th>Actual Settled (€)</th>
+                    <th>Settlement Flow</th>
+                    <th>Fees (€)</th>
+                    <th>Net PnL (€)</th>
+                    <th>Running Capital</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody id="modalLedgerBody">
+                <tr><td colspan="16" class="text-center py-4 text-muted"><div class="spinner-border spinner-border-sm text-info me-2"></div>Loading V3 genuine ledger for {{ model_name }}...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            var modelName = "{{ model_name }}";
+            var priceArea = "{{ price_area }}";
+            var capital = "{{ capital }}";
+            var tradeVolume = "{{ trade_volume }}";
+            var tab = "{{ active_tab }}";
+            var mode = "{{ raw_mode }}";
+            var date = "{{ selected_date }}";
+            
+            fetch(`/api/model_trades_ledger?area=${priceArea}&model=${encodeURIComponent(modelName)}&capital=${capital}&volume=${tradeVolume}&tab=${tab}&mode=${mode}&date=${date}`)
+            .then(res => res.json())
+            .then(data => {
+                var html = '';
+                data.trades.forEach(function(t) {
+                    var actionBadge = 'bg-secondary';
+                    if (t.action.includes('BUY')) actionBadge = 'bg-success';
+                    else if (t.action.includes('SELL')) actionBadge = 'bg-danger';
+                    else if (t.action.includes('Shield')) actionBadge = 'bg-warning text-dark';
+
+                    var pnlClass = t.net_pnl_eur.startsWith('+€') ? 'text-success fw-bold' : (t.net_pnl_eur.startsWith('-€') ? 'text-danger fw-bold' : 'text-muted');
+
+                    html += `<tr>
+                        <td class="fw-bold text-warning">${t.quarter}</td>
+                        <td class="font-monospace text-light small">${t.time_dk}</td>
+                        <td class="text-light">€ ${t.spot_price_eur.toFixed(2)}</td>
+                        <td class="text-info">€ ${t.pred_imbalance_eur.toFixed(2)}</td>
+                        <td class="${t.pred_spread_eur >= 0 ? 'text-success' : 'text-danger'} fw-bold">${t.pred_spread_eur >= 0 ? '+' : ''}€ ${t.pred_spread_eur.toFixed(2)}</td>
+                        <td class="small text-muted font-monospace">€${t.q10_price_eur.toFixed(0)} - €${t.q90_price_eur.toFixed(0)}</td>
+                        <td class="small font-monospace"><span class="text-success">${t.p_up}%</span> / <span class="text-danger">${t.p_down}%</span></td>
+                        <td><span class="badge ${actionBadge}">${t.action}</span></td>
+                        <td class="text-light">${t.volume_mwh > 0 ? t.volume_mwh.toFixed(1) + ' MWh' : '--'}</td>
+                        <td class="small font-monospace ${t.da_cash_flow.startsWith('-') ? 'text-danger' : (t.da_cash_flow.startsWith('+') ? 'text-success' : 'text-muted')}">${t.da_cash_flow}</td>
+                        <td class="text-info fw-bold">${t.actual_settled_eur}</td>
+                        <td class="small font-monospace ${t.settle_cash_flow.startsWith('+') ? 'text-success' : (t.settle_cash_flow.startsWith('-') ? 'text-danger' : 'text-muted')}">${t.settle_cash_flow}</td>
+                        <td class="text-danger small">${t.roundtrip_fees_eur > 0 ? '-€ ' + t.roundtrip_fees_eur.toFixed(2) : '--'}</td>
+                        <td class="${pnlClass}">${t.net_pnl_eur}</td>
+                        <td class="fw-bold text-light">${t.running_capital}</td>
+                        <td><span class="badge ${t.status.includes('Settled') ? 'bg-success' : (t.status.includes('Locked') ? 'bg-primary' : 'bg-dark border border-secondary text-muted')}">${t.status}</span></td>
+                    </tr>`;
+                });
+                document.getElementById('modalLedgerBody').innerHTML = html;
+            })
+            .catch(err => {
+                document.getElementById('modalLedgerBody').innerHTML = `<tr><td colspan="16" class="text-danger">Failed to load data: ${err}</td></tr>`;
+            });
+        });
+    </script>
+</body>
+</html>

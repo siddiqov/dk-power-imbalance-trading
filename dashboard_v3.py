@@ -141,6 +141,27 @@ def api_model_trades_ledger():
     return jsonify(summary)
 
 
+@app.route('/trade_ledger_v3')
+def trade_ledger_v3():
+    model_name = request.args.get('model', 'Transformer-TFT')
+    price_area = request.args.get('area', 'DK1')
+    capital = float(request.args.get('capital', 100000.0))
+    trade_volume = float(request.args.get('volume', 2.0))
+    tab = request.args.get('tab', 'live')
+    raw_mode = request.args.get('mode', 'day_ahead')
+    selected_date = request.args.get('date', '2026-08-31')
+
+    return render_template(
+        'trade_ledger_v3.html',
+        model_name=model_name,
+        price_area=price_area,
+        capital=capital,
+        trade_volume=trade_volume,
+        active_tab=tab,
+        raw_mode=raw_mode,
+        selected_date=selected_date
+    )
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
     print("\n" + "=" * 80)
