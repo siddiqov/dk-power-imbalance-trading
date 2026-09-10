@@ -8,7 +8,7 @@
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import pandas as pd
 from flask import Flask, render_template, request, jsonify, send_from_directory
 
@@ -43,7 +43,8 @@ def index():
     active_tab = request.args.get('tab', 'live')
     raw_mode = request.args.get('mode', 'day_ahead')  # 'day_ahead' or 'intraday'
     market_mode = "DAY_AHEAD_D1" if raw_mode == 'day_ahead' else "INTRADAY_D0"
-    selected_date = request.args.get('date', '2026-08-31')
+    default_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    selected_date = request.args.get('date', default_date)
 
     # Load 96-quarter genuine table from Energi Data Service
     table_gen = TournamentTableGenerator(price_area=price_area)
@@ -131,7 +132,8 @@ def api_model_trades_ledger():
     tab = request.args.get('tab', 'live')
     raw_mode = request.args.get('mode', 'day_ahead')
     market_mode = "DAY_AHEAD_D1" if raw_mode == 'day_ahead' else "INTRADAY_D0"
-    selected_date = request.args.get('date', '2026-08-31')
+    default_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    selected_date = request.args.get('date', default_date)
 
     table_gen = TournamentTableGenerator(price_area=price_area)
     target_df = table_gen.get_future_table() if tab == 'live' else table_gen.get_backtest_table(date_str=selected_date)
@@ -149,7 +151,8 @@ def trade_ledger_v3():
     trade_volume = float(request.args.get('volume', 2.0))
     tab = request.args.get('tab', 'live')
     raw_mode = request.args.get('mode', 'day_ahead')
-    selected_date = request.args.get('date', '2026-08-31')
+    default_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    selected_date = request.args.get('date', default_date)
 
     return render_template(
         'trade_ledger_v3.html',
