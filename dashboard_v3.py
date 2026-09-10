@@ -35,6 +35,15 @@ def download_technical_report():
     return send_from_directory('results', 'V3_Intraday_Technical_Report.pdf', as_attachment=True)
 
 
+@app.route('/download/dispatch_workflow_guide')
+def download_dispatch_workflow_guide():
+    pdf_path = "results/Intraday_2Hour_Dispatch_Workflow_Guide.pdf"
+    if not os.path.exists(pdf_path):
+        import generate_intraday_technical_report
+        generate_intraday_technical_report.build_2hour_dispatch_workflow_pdf(pdf_path)
+    return send_from_directory('results', 'Intraday_2Hour_Dispatch_Workflow_Guide.pdf', as_attachment=True)
+
+
 @app.route('/')
 def index():
     price_area = request.args.get('area', 'DK1')

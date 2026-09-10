@@ -452,6 +452,246 @@ def build_pdf(filename="results/V3_Intraday_Technical_Report.pdf"):
     return filename
 
 
+def build_2hour_dispatch_workflow_pdf(filename="results/Intraday_2Hour_Dispatch_Workflow_Guide.pdf"):
+    """
+    Generates a publication-grade SOP and operational manual for 2-hour (8-quarter) forward
+    intraday dispatch respecting strict T-2h gate closure constraints.
+    """
+    os.makedirs(os.path.dirname(filename), exist_ok=True)
+    doc = SimpleDocTemplate(
+        filename,
+        pagesize=letter,
+        leftMargin=54,
+        rightMargin=54,
+        topMargin=54,
+        bottomMargin=54
+    )
+
+    styles = getSampleStyleSheet()
+    c_primary = colors.HexColor("#0f172a")
+    c_secondary = colors.HexColor("#1e293b")
+    c_accent = colors.HexColor("#2563eb")
+    c_border = colors.HexColor("#cbd5e1")
+    c_bg_light = colors.HexColor("#f8fafc")
+    c_callout_bg = colors.HexColor("#eff6ff")
+    c_callout_border = colors.HexColor("#93c5fd")
+
+    title_style = ParagraphStyle('DocTitle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=18, leading=22, textColor=c_primary, spaceAfter=4)
+    subtitle_style = ParagraphStyle('DocSubTitle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, leading=14, textColor=c_accent, spaceAfter=10)
+    h1_style = ParagraphStyle('Heading1_Custom', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=12, leading=16, textColor=c_secondary, spaceBefore=10, spaceAfter=4, keepWithNext=True)
+    h2_style = ParagraphStyle('Heading2_Custom', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9.5, leading=13, textColor=colors.HexColor('#334155'), spaceBefore=6, spaceAfter=3, keepWithNext=True)
+    body_style = ParagraphStyle('Body_Custom', parent=styles['Normal'], fontName='Helvetica', fontSize=8.5, leading=12, textColor=colors.HexColor('#334155'), spaceAfter=5)
+    callout_style = ParagraphStyle('CalloutText', parent=styles['Normal'], fontName='Helvetica', fontSize=8.5, leading=12, textColor=colors.HexColor('#1e3a8a'))
+    table_cell = ParagraphStyle('TableCell', parent=styles['Normal'], fontName='Helvetica', fontSize=7.5, leading=10, textColor=c_primary)
+    table_cell_bold = ParagraphStyle('TableCellBold', parent=table_cell, fontName='Helvetica-Bold')
+    table_cell_center = ParagraphStyle('TableCellCenter', parent=table_cell, alignment=1)
+    table_cell_center_bold = ParagraphStyle('TableCellCenterBold', parent=table_cell_bold, alignment=1)
+    table_hdr = ParagraphStyle('TableHdr', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=7.5, leading=10, textColor=colors.white, alignment=1)
+
+    story = []
+
+    # Title Block
+    story.append(Paragraph('V3 Commercial Operational Desk Manual', title_style))
+    story.append(Paragraph('Standard Operating Procedure (SOP): 2-Hour (8-Quarter) Forward Intraday Dispatch under Strict T-2h Gate Closure', subtitle_style))
+    story.append(HRFlowable(width='100%', thickness=2, color=c_accent, spaceBefore=2, spaceAfter=8))
+
+    # Meta Table
+    meta_data = [
+        [Paragraph('<b>Market & Asset Class:</b> Danish Imbalance Trading (DK1 / DK2)', table_cell), Paragraph('<b>Execution Horizon:</b> 96 Quarters (Full 24-Hour Day D)', table_cell)],
+        [Paragraph('<b>Dispatch Cadence:</b> 2-Hour Batches (8 Quarters / Batch)', table_cell), Paragraph('<b>Gate Closure Rule:</b> T - 2 Hours Prior to Delivery Block', table_cell)],
+        [Paragraph('<b>Source Dashboard:</b> Port 5001 (V3 Optimeering)', table_cell), Paragraph('<b>Audit Platform:</b> Shared Client Google Sheet (Immutable Version History)', table_cell)]
+    ]
+    t_meta = Table(meta_data, colWidths=[250, 254])
+    t_meta.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f1f5f9')),
+        ('BOX', (0,0), (-1,-1), 1, c_border),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING', (0,0), (-1,-1), 3),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+        ('LEFTPADDING', (0,0), (-1,-1), 8),
+        ('RIGHTPADDING', (0,0), (-1,-1), 8),
+    ]))
+    story.append(t_meta)
+    story.append(Spacer(1, 8))
+
+    # Section 1: Executive Overview
+    story.append(Paragraph('1. Executive Summary & Core Dispatch Architecture', h1_style))
+    story.append(Paragraph(
+        'This Standard Operating Procedure outlines the operational workflow for providing forward intraday trading decisions '
+        'to client dispatch desks in <b>2-hour discrete blocks (8 quarters per batch)</b>. To satisfy utility operational constraints, '
+        'all trade orders (direction, volume, and spread targets) are frozen and transmitted <b>exactly 2 hours prior to the physical delivery block</b> (T-2h). '
+        'Because the V3 machine learning engine generates point-in-time quantile predictions across all 96 forward quarters dynamically, '
+        '<b>zero code changes, retraining, or model modifications are required</b>. This document governs the manual transmission protocol via Google Sheets.',
+        body_style
+    ))
+
+    # Callout Box
+    callout_data = [[
+        Paragraph(
+            '<b>THE GOLDEN RULE OF T-2H GATE CLOSURE:</b><br/>'
+            'For any 2-hour delivery block starting at hour <b>T_start</b>, the predictions and committed trade decisions for all 8 quarters '
+            'must be pasted into the shared Google Sheet <b>at or before T_start - 2 Hours</b>. Once posted, Pre-Trade signals must NEVER be modified.',
+            callout_style
+        )
+    ]]
+    t_callout = Table(callout_data, colWidths=[504])
+    t_callout.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), c_callout_bg),
+        ('BOX', (0,0), (-1,-1), 1, c_callout_border),
+        ('TOPPADDING', (0,0), (-1,-1), 5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+        ('LEFTPADDING', (0,0), (-1,-1), 8),
+        ('RIGHTPADDING', (0,0), (-1,-1), 8),
+    ]))
+    story.append(t_callout)
+    story.append(Spacer(1, 8))
+
+    # Section 2: Master Timetable
+    story.append(Paragraph('2. Master 24-Hour Dispatch Timetable (All 96 Quarters / 12 Batches)', h1_style))
+    story.append(Paragraph(
+        'The 24-hour trading day is divided into 12 discrete 2-hour delivery batches. Each batch consists of 8 consecutive 15-minute quarters:',
+        body_style
+    ))
+
+    sched_headers = ['Batch #', 'Quarters', 'Physical Delivery Window', 'Send Deadline (T-2h)', 'Input Cutoff', 'Operator Action']
+    sched_rows = [
+        ['Batch 1', 'Q1 - Q8', '00:00 - 02:00', '22:00 (Evening D-1)', '21:45 (D-1)', 'Post Q1-Q8 signals to Sheet'],
+        ['Batch 2', 'Q9 - Q16', '02:00 - 04:00', '00:00 (Midnight)', '23:45 (D-1)', 'Post Q9-Q16 signals to Sheet'],
+        ['Batch 3', 'Q17 - Q24', '04:00 - 06:00', '02:00 (Early AM)', '01:45 (Day D)', 'Post Q17-Q24 signals to Sheet'],
+        ['Batch 4', 'Q25 - Q32', '06:00 - 08:00', '04:00 (Early AM)', '03:45 (Day D)', 'Post Q25-Q32 signals to Sheet'],
+        ['Batch 5', 'Q33 - Q40', '08:00 - 10:00', '06:00 (Morning)', '05:45 (Day D)', 'Post Q33-Q40 signals to Sheet'],
+        ['Batch 6', 'Q41 - Q48', '10:00 - 12:00', '08:00 (Morning)', '07:45 (Day D)', 'Post Q41-Q48; Reconcile B1-B3'],
+        ['Batch 7', 'Q49 - Q56', '12:00 - 14:00', '10:00 (Midday)', '09:45 (Day D)', 'Post Q49-Q56; Reconcile B4'],
+        ['Batch 8', 'Q57 - Q64', '14:00 - 16:00', '12:00 (Noon)', '11:45 (Day D)', 'Post Q57-Q64; Reconcile B5'],
+        ['Batch 9', 'Q65 - Q72', '16:00 - 18:00', '14:00 (Afternoon)', '13:45 (Day D)', 'Post Q65-Q72; Reconcile B6'],
+        ['Batch 10', 'Q73 - Q80', '18:00 - 20:00', '16:00 (Evening)', '15:45 (Day D)', 'Post Q73-Q80; Reconcile B7'],
+        ['Batch 11', 'Q81 - Q88', '20:00 - 22:00', '18:00 (Evening)', '17:45 (Day D)', 'Post Q81-Q88; Reconcile B8'],
+        ['Batch 12', 'Q89 - Q96', '22:00 - 24:00', '20:00 (Night)', '19:45 (Day D)', 'Post Q89-Q96; Reconcile B9-B10']
+    ]
+
+    table_data = [[Paragraph(h, table_hdr) for h in sched_headers]]
+    for r in sched_rows:
+        table_data.append([
+            Paragraph(r[0], table_cell_center_bold),
+            Paragraph(r[1], table_cell_center),
+            Paragraph(r[2], table_cell_center),
+            Paragraph(r[3], table_cell_center_bold),
+            Paragraph(r[4], table_cell_center),
+            Paragraph(r[5], table_cell)
+        ])
+
+    t_sched = Table(table_data, colWidths=[50, 50, 95, 105, 74, 130])
+    t_sched.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), c_secondary),
+        ('GRID', (0,0), (-1,-1), 0.5, c_border),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING', (0,0), (-1,-1), 2.5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 2.5),
+        ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, c_bg_light])
+    ]))
+    story.append(t_sched)
+    story.append(Spacer(1, 10))
+
+    # Page Break for Step-by-Step Guide
+    story.append(PageBreak())
+
+    # Section 3: Operator Step-by-Step Manual
+    story.append(Paragraph('3. Step-by-Step Operator Action Manual', h1_style))
+    story.append(Paragraph(
+        'Follow this precise 4-step sequence at each 2-hour dispatch milestone:',
+        body_style
+    ))
+
+    steps = [
+        ('Step 1: Open V3 Trade Ledger on Port 5001', 
+         'Navigate to <b>http://127.0.0.1:5001/</b>. Ensure the price area is set to the client bidding zone (<b>DK1</b> or <b>DK2</b>) '
+         'and market mode is set to <b>Continuous Intraday (D-0 Rolling)</b>. Click <b>Trade Ledger</b> on the winning model architecture (e.g. <em>Transformer-TFT</em> or <em>Hierarchical-LGBM+XGB</em>).'),
+        ('Step 2: Locate the 8 Target Quarters', 
+         'Identify the 8 rows corresponding to the target delivery block. For example, if it is <b>06:00 AM</b>, locate <b>Q33 to Q40 (08:00 to 10:00)</b>.'),
+        ('Step 3: Extract and Paste Pre-Trade Orders (Section A)', 
+         'Copy the 6 pre-trade order columns: <b>Quarter, Time (DK), Day-Ahead Spot (EUR), Model Pred Imbalance (EUR), Trading Decision, and Sized Volume (MWh)</b>. '
+         'Paste these rows into <b>Section A</b> of the shared Google Sheet. <em>Do this at least 5 minutes before the T-2h deadline.</em>'),
+        ('Step 4: Post-Delivery Settlement Reconciliation (Section B)', 
+         'After the delivery window has concluded (e.g. at 10:45 AM for the 08:00-10:00 block), Energinet publishes the official <em>ImbalancePrice</em> dataset. '
+         'Re-open the V3 Trade Ledger, copy the newly populated <b>Actual Settled (EUR), Settlement Cash Flow, Roundtrip Fees (EUR), and Realized Net PnL (EUR)</b>, '
+         'and paste them into <b>Section B</b> of the client Google Sheet.')
+    ]
+
+    for title, desc in steps:
+        story.append(Paragraph(f'<b>{title}</b>', h2_style))
+        story.append(Paragraph(desc, body_style))
+        story.append(Spacer(1, 2))
+
+    story.append(Spacer(1, 6))
+
+    # Section 4: Google Sheet Layout Structure
+    story.append(Paragraph('4. Shared Google Sheet Template Design & Audit Separation', h1_style))
+    story.append(Paragraph(
+        'To maintain strict zero-leakage credibility, the client Google Sheet must be structured with two clearly separated halves:',
+        body_style
+    ))
+
+    sample_headers = [
+        'Qtr', 'Time (DK)', 'Spot (EUR)', 'Pred Imb', 'Decision', 'Vol', 'Settled', 'Fees', 'Net PnL', 'Status'
+    ]
+    sample_rows = [
+        ['Q33', '08:00-08:15', '148.93', '147.21', 'HOLD', '--', '180.50', '--', '+0.00', 'Settled'],
+        ['Q34', '08:15-08:30', '127.50', '125.63', 'HOLD', '--', '192.10', '--', '+0.00', 'Settled'],
+        ['Q35', '08:30-08:45', '116.08', '118.99', 'BUY Spot', '3.0 MWh', '145.80', '-1.53', '+87.63', 'Settled'],
+        ['Q36', '08:45-09:00', '195.67', '198.84', 'BUY Spot', '3.0 MWh', '220.40', '-1.53', '+72.66', 'Settled'],
+        ['Q37', '09:00-09:15', '215.99', '216.98', 'HOLD', '--', '215.00', '--', '+0.00', 'Settled'],
+        ['Q38', '09:15-09:30', '195.01', '197.90', 'BUY Spot', '3.0 MWh', '230.10', '-1.53', '+103.74', 'Settled'],
+        ['Q39', '09:30-09:45', '173.79', '176.57', 'BUY Spot', '3.0 MWh', '210.00', '-1.53', '+107.10', 'Settled'],
+        ['Q40', '09:45-10:00', '155.09', '157.82', 'BUY Spot', '3.0 MWh', '190.50', '-1.53', '+104.70', 'Settled']
+    ]
+
+    sample_table_data = [[Paragraph(h, table_hdr) for h in sample_headers]]
+    for r in sample_rows:
+        sample_table_data.append([
+            Paragraph(r[0], table_cell_center_bold),
+            Paragraph(r[1], table_cell_center),
+            Paragraph(r[2], table_cell_center),
+            Paragraph(r[3], table_cell_center),
+            Paragraph(f'<font color=\"#15803d\"><b>{r[4]}</b></font>' if 'BUY' in r[4] else (f'<font color=\"#b91c1c\"><b>{r[4]}</b></font>' if 'SELL' in r[4] else r[4]), table_cell_center),
+            Paragraph(r[5], table_cell_center),
+            Paragraph(r[6], table_cell_center),
+            Paragraph(r[7], table_cell_center),
+            Paragraph(f'<font color=\"#15803d\"><b>{r[8]}</b></font>' if '+' in r[8] else r[8], table_cell_center_bold),
+            Paragraph(r[9], table_cell_center)
+        ])
+
+    t_sample = Table(sample_table_data, colWidths=[34, 68, 52, 58, 56, 48, 56, 44, 52, 46])
+    t_sample.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (5,0), colors.HexColor('#1e40af')), # Section A Header (Blue)
+        ('BACKGROUND', (6,0), (-1,0), colors.HexColor('#065f46')), # Section B Header (Green)
+        ('GRID', (0,0), (-1,-1), 0.5, c_border),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING', (0,0), (-1,-1), 2),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+        ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, c_bg_light])
+    ]))
+    story.append(t_sample)
+    story.append(Spacer(1, 8))
+
+    # Section 5: Exploiting Google Version History
+    story.append(Paragraph('5. Immutable Audit Verification via Google Version History', h1_style))
+    story.append(Paragraph(
+        'Google Sheets automatically creates an <b>immutable, server-side timestamped Version History</b> for every cell edit. '
+        'This provides undeniable mathematical proof of compliance: '
+        '<br/>• When you paste Section A at <b>05:55 AM</b>, Google records an unalterable timestamp showing the trade orders were placed 2h 5m ahead of delivery. '
+        '<br/>• When you fill Section B at <b>10:45 AM</b>, Google records the secondary reconciliation timestamp. '
+        '<br/>• This completely eliminates any possibility of client disputes regarding retroactive hindsight mutation.',
+        body_style
+    ))
+
+    doc.build(story, canvasmaker=NumberedCanvas)
+    print(f"[SUCCESS] Generated 2-Hour Dispatch SOP at: {filename}")
+    return filename
+
+
 if __name__ == '__main__':
     out_file = build_pdf()
-    print(f"Report generated successfully: {out_file}")
+    sop_file = build_2hour_dispatch_workflow_pdf()
+    print(f"Technical Report: {out_file}")
+    print(f"Dispatch Workflow SOP: {sop_file}")
+
