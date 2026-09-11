@@ -41,12 +41,19 @@ class V2DataEngine:
         self.session.headers.update({"User-Agent": "V2ImbalanceTradingEngine/2.0"})
         self._initialize_schema()
 
-    def _get_connection(self):
-        return duckdb.connect(self.db_path)
+    def _get_connection(self, read_only=False):
+        try:
+            return duckdb.connect(self.db_path, read_only=read_only)
+        except Exception:
+            return duckdb.connect(self.db_path, read_only=True)
 
     def _initialize_schema(self):
         """Initializes tables for both historical hourly and 15-minute eras."""
-        conn = self._get_connection()
+        try:
+            conn = duckdb.connect(self.db_path, read_only=False)
+        except Exception:
+            # Schema already initialized or DB locked by another running process
+            return
         try:
             # 1. Historical Hourly Imbalance & Balancing Table (1999 - March 2025)
             conn.execute("""

@@ -64,6 +64,24 @@ def load_leaderboard(price_area="DK1", capital=100000.0, trade_volume_mwh=2.0, m
 
 from src.visualization_v2 import generate_live_dashboard_plot, plot_enhanced_4panel_dashboard
 import time
+from flask import send_from_directory
+
+@app.route('/download/technical_report')
+def download_technical_report():
+    pdf_path = "results/V3_Intraday_Technical_Report.pdf"
+    if not os.path.exists(pdf_path):
+        import generate_intraday_technical_report
+        generate_intraday_technical_report.build_pdf(pdf_path)
+    return send_from_directory('results', 'V3_Intraday_Technical_Report.pdf', as_attachment=True)
+
+@app.route('/download/dispatch_workflow_guide')
+def download_dispatch_workflow_guide():
+    pdf_path = "results/Intraday_2Hour_Dispatch_Workflow_Guide.pdf"
+    if not os.path.exists(pdf_path):
+        import generate_intraday_technical_report
+        generate_intraday_technical_report.build_2hour_dispatch_workflow_pdf(pdf_path)
+    return send_from_directory('results', 'Intraday_2Hour_Dispatch_Workflow_Guide.pdf', as_attachment=True)
+
 
 @app.route('/')
 def index():
