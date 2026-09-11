@@ -232,7 +232,12 @@ class TournamentTableGenerator:
         Locks Day-Ahead spot and model imbalance into a frozen baseline.
         """
         if date_str is None:
-            date_str = datetime.now().strftime("%Y-%m-%d")
+            try:
+                from zoneinfo import ZoneInfo
+                date_str = datetime.now(ZoneInfo("Europe/Copenhagen")).strftime("%Y-%m-%d")
+            except Exception:
+                from datetime import timezone
+                date_str = (datetime.now(timezone.utc) + timedelta(hours=2)).strftime("%Y-%m-%d")
 
         start_dt = datetime.strptime(date_str, "%Y-%m-%d")
         end_dt = start_dt + timedelta(days=1)

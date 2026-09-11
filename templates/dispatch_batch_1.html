@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Batch 1 Intraday Dispatch (Q1–Q9) | {{ price_area }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg-dark: #090d16;
+            --card-bg: #111827;
+            --card-border: #1f2937;
+            --accent-blue: #38bdf8;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --accent-yellow: #f59e0b;
+        }
+        body {
+            background-color: var(--bg-dark);
+            color: #f3f4f6;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            padding: 20px 25px;
+        }
+        .card, .metric-card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 10px;
+        }
+        .metric-card {
+            padding: 1.1rem 1.25rem;
+        }
+        .table-dark {
+            --bs-table-bg: var(--card-bg);
+            --bs-table-striped-bg: #141d2e;
+            --bs-table-hover-bg: #1e293b;
+            border-color: var(--card-border);
+        }
+        thead th {
+            position: sticky;
+            top: 0;
+            background-color: #0b1120 !important;
+            z-index: 10;
+            border-bottom: 2px solid var(--card-border) !important;
+            padding: 10px 8px !important;
+            text-align: center;
+        }
+        .btn-zone {
+            font-weight: 600;
+            border-radius: 6px;
+        }
+        .pulse-circle {
+            display: inline-block;
+            width: 9px; height: 9px;
+            border-radius: 50%;
+            background-color: #10b981;
+            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header Navigation Bar -->
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+        <div class="d-flex align-items-center gap-3">
+            <a href="/?area={{ price_area }}&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}" class="btn btn-outline-secondary btn-sm" title="Back to Dashboard">
+                <i class="fa-solid fa-arrow-left me-1"></i> Back to Dashboard
+            </a>
+            <div>
+                <h4 class="fw-bold text-white mb-0 d-flex align-items-center gap-2">
+                    <i class="fa-solid fa-paper-plane text-warning"></i>
+                    Batch 1 Intraday Dispatch (Q1–Q9: 00:00–02:15 CET)
+                    <span class="badge bg-warning text-dark fs-6">{{ price_area }}</span>
+                </h4>
+                <div class="small text-muted mt-1">
+                    Target Delivery Date: <span class="text-warning fw-bold" id="b1TargetDate">{{ selected_date }}</span> | Gate Closure Protocol: <span class="text-success fw-bold">D-1 21:45 CET Cutoff</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <!-- Price Area Switcher -->
+            <div class="btn-group" role="group">
+                <a href="/dispatch_batch_1?area=DK1&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}&num_quarters={{ num_quarters }}" class="btn btn-sm btn-zone {% if price_area == 'DK1' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
+                    <i class="fa-solid fa-wind me-1"></i> DK1 (West)
+                </a>
+                <a href="/dispatch_batch_1?area=DK2&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}&num_quarters={{ num_quarters }}" class="btn btn-sm btn-zone {% if price_area == 'DK2' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
+                    <i class="fa-solid fa-city me-1"></i> DK2 (East)
+                </a>
+            </div>
+
+            <!-- Copy for Google Docs / Sheets Button -->
+            <button class="btn btn-sm btn-success fw-bold px-3 shadow" id="btnCopyBatch1" onclick="copyBatch1ToClipboard()">
+                <i class="fa-solid fa-copy me-1"></i> <span id="copyBtnText">Copy for Google Docs / Sheets</span>
+            </button>
+
+            <!-- Export CSV -->
+            <button class="btn btn-sm btn-outline-info fw-bold" onclick="downloadBatch1Csv()">
+                <i class="fa-solid fa-file-csv me-1"></i> Export CSV
+            </button>
+
+            <!-- Refresh Button -->
+            <button class="btn btn-sm btn-outline-warning fw-bold" onclick="loadBatch1Data()" title="Refresh Live Predictions">
+                <i class="fa-solid fa-arrows-rotate me-1"></i> Refresh
+            </button>
+        </div>
+    </div>
+
+    <!-- Alert Context Banner -->
+    <div class="alert alert-warning bg-black border-warning py-2 px-3 mb-4 d-flex justify-content-between align-items-center">
+        <div class="small">
+            <i class="fa-solid fa-shield-halved text-warning me-2"></i>
+            <strong>Gate Closure Protocol:</strong> This dispatch covers delivery from 00:00 to 02:15 CET (Quarters Q1 through Q9). Tab-formatted for direct <code>Ctrl+V</code> paste into Google Docs and Google Sheets.
+        </div>
+        <div class="small text-muted">
+            <span class="pulse-circle me-1"></span> <span class="text-success fw-bold">LIVE TELEMETRY READY</span>
+        </div>
+    </div>
+
+    <!-- Summary Metrics Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="metric-card text-center">
+                <div class="text-muted small text-uppercase fw-bold">Total Dispatched Volume</div>
+                <div class="fw-bold text-warning fs-4 mt-1" id="b1TotalVolume">-- MW</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="metric-card text-center">
+                <div class="text-muted small text-uppercase fw-bold">BUY (Up-Reg) Signals</div>
+                <div class="fw-bold text-success fs-4 mt-1" id="b1BuyCount">--</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="metric-card text-center">
+                <div class="text-muted small text-uppercase fw-bold">SELL (Down-Reg) Signals</div>
+                <div class="fw-bold text-danger fs-4 mt-1" id="b1SellCount">--</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="metric-card text-center">
+                <div class="text-muted small text-uppercase fw-bold">HOLD / Balanced</div>
+                <div class="fw-bold text-muted fs-4 mt-1" id="b1HoldCount">--</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dispatch Table Card -->
+    <div class="card p-3 shadow border-secondary mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h6 class="fw-bold text-white mb-0">
+                <i class="fa-solid fa-list-check text-warning me-2"></i>
+                Q1–Q9 Order Execution Matrix
+            </h6>
+            <div class="small text-muted">
+                Model Architecture: <span class="badge bg-info text-dark fw-bold">Transformer-TFT</span> | Sizing: <span class="badge bg-dark border border-secondary text-warning fw-bold">{{ trade_volume }} MWh Base</span>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-dark table-sm table-striped text-center align-middle mb-0">
+                <thead>
+                    <tr class="text-muted small text-uppercase">
+                        <th>Quarter</th>
+                        <th>Delivery Time (CET)</th>
+                        <th>Spot Price (€/MWh)</th>
+                        <th>Pred Imbalance (€/MWh)</th>
+                        <th>Pred Spread (€/MWh)</th>
+                        <th>Quantiles (q10 - q90)</th>
+                        <th>P(Up) / P(Dn)</th>
+                        <th>Recommended Action</th>
+                        <th>Volume (MW)</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="batch1TableBody">
+                    <tr>
+                        <td colspan="10" class="py-5 text-muted">
+                            <div class="spinner-border text-warning mb-2"></div><br>Calculating Q1–Q9 Trade Decisions...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        let currentBatch1Data = null;
+
+        function loadBatch1Data() {
+            const tbody = document.getElementById('batch1TableBody');
+            tbody.innerHTML = `<tr><td colspan="10" class="py-5 text-muted"><div class="spinner-border text-warning mb-2"></div><br>Calculating Q1–Q9 Trade Decisions for {{ selected_date }}...</td></tr>`;
+
+            const apiUrl = `/api/dispatch_batch_1?area={{ price_area }}&tab={{ active_tab }}&date={{ selected_date }}&volume={{ trade_volume }}&capital={{ capital }}&num_quarters={{ num_quarters }}`;
+
+            fetch(apiUrl)
+                .then(res => res.json())
+                .then(data => {
+                    if (!data.success) {
+                        tbody.innerHTML = `<tr><td colspan="10" class="py-5 text-danger">Failed to generate batch 1 data.</td></tr>`;
+                        return;
+                    }
+                    currentBatch1Data = data;
+                    document.getElementById('b1TargetDate').innerText = data.date + ('{{ active_tab }}' === 'live' ? ' (Tomorrow Day D)' : '');
+                    renderBatch1Table(data);
+                })
+                .catch(err => {
+                    console.error(err);
+                    tbody.innerHTML = `<tr><td colspan="10" class="py-5 text-danger">Network Error: Could not connect to dispatch API.</td></tr>`;
+                });
+        }
+
+        function renderBatch1Table(data) {
+            const tbody = document.getElementById('batch1TableBody');
+            tbody.innerHTML = '';
+
+            let buyCount = 0;
+            let sellCount = 0;
+            let holdCount = 0;
+            let totalVol = 0;
+
+            data.trades.forEach(t => {
+                let badgeClass = 'bg-secondary';
+                if (t.action.includes('BUY')) {
+                    badgeClass = 'bg-success';
+                    buyCount++;
+                    totalVol += t.volume_mwh;
+                } else if (t.action.includes('SELL')) {
+                    badgeClass = 'bg-danger';
+                    sellCount++;
+                    totalVol += t.volume_mwh;
+                } else {
+                    holdCount++;
+                }
+
+                const spreadClass = t.pred_spread_eur >= 0 ? 'text-success' : 'text-danger';
+                const spreadSign = t.pred_spread_eur >= 0 ? '+' : '';
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="fw-bold text-warning">${t.quarter}</td>
+                    <td class="font-monospace text-light small">${t.time_dk}</td>
+                    <td class="text-light">€ ${t.spot_price_eur.toFixed(2)}</td>
+                    <td class="text-info fw-bold">€ ${t.pred_imbalance_eur.toFixed(2)}</td>
+                    <td class="${spreadClass} fw-bold">${spreadSign}€ ${t.pred_spread_eur.toFixed(2)}</td>
+                    <td class="small text-muted font-monospace">€${t.q10_price_eur.toFixed(0)} - €${t.q90_price_eur.toFixed(0)}</td>
+                    <td class="small font-monospace"><span class="text-success">${t.p_up}% Up</span> / <span class="text-danger">${t.p_down}% Dn</span></td>
+                    <td><span class="badge ${badgeClass} fs-6 px-3 py-1">${t.action}</span></td>
+                    <td class="text-light fw-bold">${t.volume_mwh > 0 ? t.volume_mwh.toFixed(1) + ' MW' : '--'}</td>
+                    <td><span class="badge bg-primary px-2 py-1"><i class="fa-solid fa-check me-1"></i>Ready</span></td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            document.getElementById('b1TotalVolume').innerText = totalVol.toFixed(1) + ' MW';
+            document.getElementById('b1BuyCount').innerText = buyCount + ' Quarters';
+            document.getElementById('b1SellCount').innerText = sellCount + ' Quarters';
+            document.getElementById('b1HoldCount').innerText = holdCount + ' Quarters';
+        }
+
+        function copyBatch1ToClipboard() {
+            if (!currentBatch1Data || !currentBatch1Data.tsv_payload) {
+                alert('No data available to copy.');
+                return;
+            }
+
+            navigator.clipboard.writeText(currentBatch1Data.tsv_payload).then(() => {
+                const btnText = document.getElementById('copyBtnText');
+                const originalText = btnText.innerText;
+                btnText.innerHTML = '✅ Copied to Clipboard!';
+                setTimeout(() => {
+                    btnText.innerText = originalText;
+                }, 3000);
+            }).catch(err => {
+                console.error('Clipboard copy failed:', err);
+                prompt('Copy the table below (Ctrl+C):', currentBatch1Data.tsv_payload);
+            });
+        }
+
+        function downloadBatch1Csv() {
+            if (!currentBatch1Data || !currentBatch1Data.csv_payload) {
+                alert('No data available to export.');
+                return;
+            }
+
+            const blob = new Blob([currentBatch1Data.csv_payload], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.setAttribute('href', url);
+            link.setAttribute('download', `Batch_1_Q1_Q9_${currentBatch1Data.price_area}_${currentBatch1Data.date}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        // Auto-load on page render
+        document.addEventListener('DOMContentLoaded', loadBatch1Data);
+    </script>
+</body>
+</html>

@@ -111,6 +111,21 @@
                 <a href="/download/technical_report" class="btn btn-sm btn-outline-info text-info fw-bold shadow-sm ms-1" title="Download Zero-Leakage & Horizon Architecture Technical Whitepaper (PDF)">
                     <i class="fa-solid fa-file-pdf me-1"></i> Technical Whitepaper (PDF)
                 </a>
+
+                <!-- Download Decision Hierarchy & 14D Features PDF Button -->
+                <a href="/download/decision_feature_guide" class="btn btn-sm btn-outline-success text-success fw-bold shadow-sm ms-1" title="Download Decision Hierarchy, Softmax Probabilities & 14-D Telemetry Feature Guide (PDF)">
+                    <i class="fa-solid fa-file-shield me-1"></i> Decision & 14-D Features (PDF)
+                </a>
+
+                <!-- Day-Ahead Auction (96Q) Bidding Sheet Button (Opens in New Tab) -->
+                <a href="/day_ahead_auction?area={{ price_area }}&capital={{ capital }}&volume={{ trade_volume }}" target="_blank" class="btn btn-sm btn-info text-dark fw-bold shadow-sm ms-1" title="Open Fixed 96-Quarter Day-Ahead Auction Bidding Sheet (11:00 CET Pre-Auction Commitment)">
+                    <i class="fa-solid fa-file-signature me-1"></i> Day-Ahead Auction (96Q)
+                </a>
+
+                <!-- Dispatch Batch 1 (Q1-Q9) Button (Opens in New Tab) -->
+                <a href="/dispatch_batch_1?area={{ price_area }}&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ tomorrow_str if active_tab == 'live' else selected_date }}&num_quarters=9" target="_blank" class="btn btn-sm btn-warning text-dark fw-bold shadow-sm ms-1" title="Open Q1-Q9 Intraday Dispatch in a New Tab (D-1 21:45 Cutoff)">
+                    <i class="fa-solid fa-arrow-up-right-from-square me-1"></i> Dispatch Batch 1 (Q1–Q9)
+                </a>
             </div>
         </div>
     </nav>
@@ -381,6 +396,106 @@
         </div>
     </div>
 
+    <!-- Batch 1 (Q1-Q9) Dispatch Modal -->
+    <div class="modal fade" id="batch1Modal" tabindex="-1" aria-labelledby="batch1ModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered">
+            <div class="modal-content bg-dark text-light border border-warning shadow-lg">
+                <div class="modal-header border-secondary bg-black py-3">
+                    <div class="d-flex align-items-center gap-3">
+                        <i class="fa-solid fa-paper-plane text-warning fs-3"></i>
+                        <div>
+                            <h5 class="modal-title fw-bold text-white mb-0" id="batch1ModalLabel">
+                                Batch 1 Intraday Dispatch (Q1–Q9: 00:00–02:15 CET)
+                            </h5>
+                            <div class="small text-muted">
+                                Target Date: <span class="text-warning fw-bold" id="b1TargetDate">{{ selected_date }}</span> | Area: <span class="text-info fw-bold" id="b1Area">{{ price_area }}</span> | Generated for: <span class="text-success fw-bold">D-1 21:45 CET Cutoff</span>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <!-- Context Notice -->
+                    <div class="alert alert-warning bg-black border-warning py-2 px-3 mb-3 d-flex justify-content-between align-items-center">
+                        <div class="small">
+                            <i class="fa-solid fa-shield-halved text-warning me-2"></i>
+                            <strong>Gate Closure Protocol:</strong> This dispatch covers delivery from 00:00 to 02:15 CET (Q1–Q9). Tab-formatted for direct copy-pasting into Google Docs & Google Sheets.
+                        </div>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-sm btn-success fw-bold shadow-sm" id="btnCopyBatch1" onclick="copyBatch1ToClipboard()">
+                                <i class="fa-solid fa-copy me-1"></i> <span id="copyBtnText">Copy for Google Docs / Sheets</span>
+                            </button>
+                            <button class="btn btn-sm btn-outline-info fw-bold" onclick="downloadBatch1Csv()">
+                                <i class="fa-solid fa-file-csv me-1"></i> Export CSV
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Summary Chips -->
+                    <div class="row g-2 mb-3" id="batch1SummaryRow">
+                        <div class="col-md-3">
+                            <div class="p-2 rounded bg-black border border-secondary text-center">
+                                <div class="text-muted small">Total Dispatched Volume</div>
+                                <div class="fw-bold text-warning fs-6" id="b1TotalVolume">-- MW</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="p-2 rounded bg-black border border-secondary text-center">
+                                <div class="text-muted small">BUY (Up-Reg) Signals</div>
+                                <div class="fw-bold text-success fs-6" id="b1BuyCount">--</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="p-2 rounded bg-black border border-secondary text-center">
+                                <div class="text-muted small">SELL (Down-Reg) Signals</div>
+                                <div class="fw-bold text-danger fs-6" id="b1SellCount">--</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="p-2 rounded bg-black border border-secondary text-center">
+                                <div class="text-muted small">HOLD / Balanced</div>
+                                <div class="fw-bold text-muted fs-6" id="b1HoldCount">--</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Dispatch Table -->
+                    <div class="table-responsive" style="max-height: 420px; overflow-y: auto;">
+                        <table class="table table-dark table-sm table-striped text-center align-middle mb-0" id="batch1Table">
+                            <thead class="sticky-top bg-black">
+                                <tr class="text-muted small">
+                                    <th>Quarter</th>
+                                    <th>Delivery Time (CET)</th>
+                                    <th>Spot Price (€/MWh)</th>
+                                    <th>Pred Imbalance (€/MWh)</th>
+                                    <th>Pred Spread (€/MWh)</th>
+                                    <th>Quantiles (q10 - q90)</th>
+                                    <th>P(Up) / P(Dn)</th>
+                                    <th>Recommended Action</th>
+                                    <th>Volume (MW)</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="batch1TableBody">
+                                <tr>
+                                    <td colspan="10" class="py-4 text-muted">
+                                        <div class="spinner-border spinner-border-sm text-warning me-2"></div> Loading Batch 1 Trade Data...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer border-secondary bg-black py-2 d-flex justify-content-between">
+                    <span class="text-muted small">
+                        <i class="fa-solid fa-clock me-1 text-info"></i> Immutable record generated from genuine Energinet API Spot & AR Lags.
+                    </span>
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         function updateLiveClock() {
@@ -395,6 +510,121 @@
         function openTradeLedger(modelName) {
             const url = `/trade_ledger_v3?area={{ price_area }}&model=${encodeURIComponent(modelName)}&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}`;
             window.open(url, '_blank');
+        }
+
+        let currentBatch1Data = null;
+
+        function openBatch1Dispatch() {
+            const modalEl = document.getElementById('batch1Modal');
+            const bsModal = new bootstrap.Modal(modalEl);
+            bsModal.show();
+
+            const targetDate = '{{ tomorrow_str if active_tab == 'live' else selected_date }}';
+            const targetTab = '{{ active_tab }}';
+            const tbody = document.getElementById('batch1TableBody');
+            tbody.innerHTML = `<tr><td colspan="10" class="py-4 text-muted"><div class="spinner-border spinner-border-sm text-warning me-2"></div> Calculating Q1–Q9 Intraday Trade Decisions for ${targetDate}...</td></tr>`;
+
+            const apiUrl = `/api/dispatch_batch_1?area={{ price_area }}&tab=${targetTab}&date=${targetDate}&volume={{ trade_volume }}&capital={{ capital }}&num_quarters=9`;
+
+            fetch(apiUrl)
+                .then(res => res.json())
+                .then(data => {
+                    if (!data.success) {
+                        tbody.innerHTML = `<tr><td colspan="10" class="py-4 text-danger">Failed to generate batch 1 data.</td></tr>`;
+                        return;
+                    }
+                    currentBatch1Data = data;
+                    document.getElementById('b1TargetDate').innerText = data.date + (targetTab === 'live' ? ' (Tomorrow Day D)' : '');
+                    renderBatch1Table(data);
+                })
+                .catch(err => {
+                    console.error(err);
+                    tbody.innerHTML = `<tr><td colspan="10" class="py-4 text-danger">Network Error: Could not connect to dispatch API.</td></tr>`;
+                });
+        }
+
+        function renderBatch1Table(data) {
+            const tbody = document.getElementById('batch1TableBody');
+            tbody.innerHTML = '';
+
+            let buyCount = 0;
+            let sellCount = 0;
+            let holdCount = 0;
+            let totalVol = 0;
+
+            data.trades.forEach(t => {
+                let badgeClass = 'bg-secondary';
+                if (t.action.includes('BUY')) {
+                    badgeClass = 'bg-success';
+                    buyCount++;
+                    totalVol += t.volume_mwh;
+                } else if (t.action.includes('SELL')) {
+                    badgeClass = 'bg-danger';
+                    sellCount++;
+                    totalVol += t.volume_mwh;
+                } else {
+                    holdCount++;
+                }
+
+                const spreadClass = t.pred_spread_eur >= 0 ? 'text-success' : 'text-danger';
+                const spreadSign = t.pred_spread_eur >= 0 ? '+' : '';
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="fw-bold text-warning">${t.quarter}</td>
+                    <td class="font-monospace text-light small">${t.time_dk}</td>
+                    <td class="text-light">€ ${t.spot_price_eur.toFixed(2)}</td>
+                    <td class="text-info fw-bold">€ ${t.pred_imbalance_eur.toFixed(2)}</td>
+                    <td class="${spreadClass} fw-bold">${spreadSign}€ ${t.pred_spread_eur.toFixed(2)}</td>
+                    <td class="small text-muted font-monospace">€${t.q10_price_eur.toFixed(0)} - €${t.q90_price_eur.toFixed(0)}</td>
+                    <td class="small font-monospace"><span class="text-success">${t.p_up}% Up</span> / <span class="text-danger">${t.p_down}% Dn</span></td>
+                    <td><span class="badge ${badgeClass} fs-6 px-2 py-1">${t.action}</span></td>
+                    <td class="text-light fw-bold">${t.volume_mwh > 0 ? t.volume_mwh.toFixed(1) + ' MW' : '--'}</td>
+                    <td><span class="badge bg-primary"><i class="fa-solid fa-check me-1"></i>Ready</span></td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            document.getElementById('b1TotalVolume').innerText = totalVol.toFixed(1) + ' MW';
+            document.getElementById('b1BuyCount').innerText = buyCount + ' Quarters';
+            document.getElementById('b1SellCount').innerText = sellCount + ' Quarters';
+            document.getElementById('b1HoldCount').innerText = holdCount + ' Quarters';
+        }
+
+        function copyBatch1ToClipboard() {
+            if (!currentBatch1Data || !currentBatch1Data.tsv_payload) {
+                alert('No data available to copy.');
+                return;
+            }
+
+            navigator.clipboard.writeText(currentBatch1Data.tsv_payload).then(() => {
+                const btnText = document.getElementById('copyBtnText');
+                const originalText = btnText.innerText;
+                btnText.innerHTML = '✅ Copied to Clipboard!';
+                setTimeout(() => {
+                    btnText.innerText = originalText;
+                }, 3000);
+            }).catch(err => {
+                console.error('Clipboard copy failed:', err);
+                // Fallback prompt
+                prompt('Copy the table below (Ctrl+C):', currentBatch1Data.tsv_payload);
+            });
+        }
+
+        function downloadBatch1Csv() {
+            if (!currentBatch1Data || !currentBatch1Data.csv_payload) {
+                alert('No data available to export.');
+                return;
+            }
+
+            const blob = new Blob([currentBatch1Data.csv_payload], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.setAttribute('href', url);
+            link.setAttribute('download', `Batch_1_Q1_Q9_${currentBatch1Data.price_area}_${currentBatch1Data.date}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
         }
     </script>
 </body>

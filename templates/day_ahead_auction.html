@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day-Ahead Auction (96Q) | Fixed Pre-Auction Bidding Curve</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- FontAwesome 6 -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #0b0f19;
+            color: #f1f5f9;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        .navbar-custom {
+            background-color: #111827;
+            border-bottom: 1px solid #1f2937;
+        }
+        .card-custom {
+            background-color: #111827;
+            border: 1px solid #1f2937;
+            border-radius: 8px;
+        }
+        .metric-box {
+            background: linear-gradient(145deg, #161f30, #0f172a);
+            border: 1px solid #1e293b;
+            border-radius: 8px;
+            padding: 16px;
+        }
+        .table-custom {
+            background-color: #111827;
+            color: #cbd5e1;
+            font-size: 0.88rem;
+        }
+        .table-custom thead th {
+            background-color: #1e293b;
+            color: #94a3b8;
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 2px solid #334155;
+            padding: 12px 10px;
+        }
+        .table-custom tbody tr:hover {
+            background-color: #1a2333;
+        }
+        .badge-buy {
+            background-color: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.4);
+            font-weight: 600;
+        }
+        .badge-sell {
+            background-color: rgba(239, 68, 68, 0.15);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.4);
+            font-weight: 600;
+        }
+        .badge-hold {
+            background-color: rgba(148, 163, 184, 0.15);
+            color: #94a3b8;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            font-weight: 600;
+        }
+        .badge-status {
+            background-color: rgba(59, 130, 246, 0.15);
+            color: #60a5fa;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            font-size: 0.78rem;
+        }
+        .pulse-timer {
+            animation: pulse-glow 2s infinite;
+        }
+        @keyframes pulse-glow {
+            0% { box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.4); }
+            70% { box-shadow: 0 0 0 8px rgba(234, 179, 8, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(234, 179, 8, 0); }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Navigation Header -->
+    <nav class="navbar navbar-expand-lg navbar-dark navbar-custom px-4 py-3">
+        <div class="container-fluid">
+            <span class="navbar-brand fw-bold text-white d-flex align-items-center">
+                <i class="fa-solid fa-file-signature text-warning me-2 fs-4"></i>
+                <span>Day-Ahead Auction Bidding Sheet (96 Quarters)</span>
+                <span class="badge bg-warning text-dark fw-bold ms-3 fs-6">11:00 CET FIXED COMMITMENT</span>
+            </span>
+            <div class="d-flex align-items-center gap-3">
+                <!-- Area Selector -->
+                <div class="btn-group" role="group">
+                    <a href="/day_ahead_auction?area=DK1&volume={{ base_volume }}&date={{ delivery_date }}" class="btn btn-sm {% if price_area == 'DK1' %}btn-primary fw-bold{% else %}btn-outline-secondary text-white{% endif %}">
+                        <i class="fa-solid fa-wind me-1"></i> DK1 (West)
+                    </a>
+                    <a href="/day_ahead_auction?area=DK2&volume={{ base_volume }}&date={{ delivery_date }}" class="btn btn-sm {% if price_area == 'DK2' %}btn-primary fw-bold{% else %}btn-outline-secondary text-white{% endif %}">
+                        <i class="fa-solid fa-city me-1"></i> DK2 (East)
+                    </a>
+                </div>
+
+                <!-- Volume Selector -->
+                <div class="btn-group" role="group">
+                    <span class="input-group-text bg-dark border-secondary text-muted small px-2">Volume:</span>
+                    <a href="/day_ahead_auction?area={{ price_area }}&volume=2.0&date={{ delivery_date }}" class="btn btn-sm {% if base_volume == 2.0 %}btn-warning fw-bold text-dark{% else %}btn-outline-secondary text-light{% endif %}">2.0 MW</a>
+                    <a href="/day_ahead_auction?area={{ price_area }}&volume=5.0&date={{ delivery_date }}" class="btn btn-sm {% if base_volume == 5.0 %}btn-warning fw-bold text-dark{% else %}btn-outline-secondary text-light{% endif %}">5.0 MW</a>
+                    <a href="/day_ahead_auction?area={{ price_area }}&volume=10.0&date={{ delivery_date }}" class="btn btn-sm {% if base_volume == 10.0 %}btn-warning fw-bold text-dark{% else %}btn-outline-secondary text-light{% endif %}">10.0 MW</a>
+                </div>
+
+                <a href="/" class="btn btn-sm btn-outline-info text-info ms-2">
+                    <i class="fa-solid fa-arrow-left me-1"></i> Back to Live Trader
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid px-4 py-4">
+
+        <!-- Top Commitment Banner -->
+        <div class="card card-custom p-3 mb-4 shadow-sm">
+            <div class="row align-items-center">
+                <div class="col-md-7">
+                    <div class="d-flex align-items-center gap-2 mb-1">
+                        <h4 class="fw-bold text-white mb-0">
+                            Fixed Day-Ahead Auction Bidding Matrix (Q1–Q96: 00:00–24:00 CET)
+                        </h4>
+                    </div>
+                    <p class="text-muted small mb-0">
+                        <i class="fa-solid fa-calendar-day text-info me-1"></i> <b>Target Delivery Date:</b> <span class="text-white fw-bold">{{ delivery_date }}</span> | 
+                        <i class="fa-solid fa-location-dot text-info me-1"></i> <b>Zone:</b> <span class="text-info fw-bold">{{ price_area }}</span> | 
+                        <i class="fa-solid fa-lock text-warning me-1"></i> <b>Commitment Protocol:</b> Pre-Auction Fixed Orders locked at 11:00 CET.
+                    </p>
+                </div>
+                <div class="col-md-5 text-md-end mt-3 mt-md-0">
+                    <div class="d-inline-flex flex-column align-items-end">
+                        <div class="badge bg-dark border border-warning text-warning p-2 px-3 fs-6 pulse-timer mb-2">
+                            <i class="fa-regular fa-clock me-2"></i><b>Gate Closure:</b> <span id="gateCountdown">12:00:00 CET</span>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-success fw-bold px-3 shadow" id="copyTsvBtn" onclick="copyAuctionTsv()">
+                                <i class="fa-solid fa-copy me-2"></i>Copy 96Q Bid Sheet (Google Docs / Excel)
+                            </button>
+                            <button class="btn btn-outline-secondary text-light fw-bold px-3" onclick="downloadAuctionCsv()">
+                                <i class="fa-solid fa-download me-1"></i>CSV
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Metric Summary Cards -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-3">
+                <div class="metric-box">
+                    <div class="text-muted small text-uppercase fw-bold">Total Dispatched Volume</div>
+                    <div class="fs-3 fw-bold text-warning mt-1">{{ summary.total_bidded_mw }} MW</div>
+                    <div class="text-muted small mt-1">96 Quarters Covered (100% Day D)</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-box">
+                    <div class="text-muted small text-uppercase fw-bold">BUY (Up-Reg) Signals</div>
+                    <div class="fs-3 fw-bold text-success mt-1">{{ summary.buy_quarters }} Quarters</div>
+                    <div class="text-muted small mt-1">Total Long Volume: {{ summary.total_buy_mw }} MW</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-box">
+                    <div class="text-muted small text-uppercase fw-bold">SELL (Down-Reg) Signals</div>
+                    <div class="fs-3 fw-bold text-danger mt-1">{{ summary.sell_quarters }} Quarters</div>
+                    <div class="text-muted small mt-1">Total Short Volume: {{ summary.total_sell_mw }} MW</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-box">
+                    <div class="text-muted small text-uppercase fw-bold">HOLD / Balanced</div>
+                    <div class="fs-3 fw-bold text-muted mt-1">{{ summary.hold_quarters }} Quarters</div>
+                    <div class="text-muted small mt-1">Avg Expected Spread: {{ summary.avg_expected_spread_eur }} €/MWh</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 96-Quarter Bidding Table -->
+        <div class="card card-custom p-3 shadow-sm">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h6 class="fw-bold text-white mb-0">
+                    <i class="fa-solid fa-table-list text-info me-2"></i>
+                    Complete 96-Quarter Auction Bid Schedule ({{ price_area }} — {{ delivery_date }})
+                </h6>
+                <div class="small text-muted">
+                    <span class="badge bg-secondary me-2">Format: Tab-Delimited TSV Ready</span>
+                    <span class="badge bg-success"><i class="fa-solid fa-check me-1"></i>Locked on Disk</span>
+                </div>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-custom table-hover align-middle mb-0" id="auctionTable">
+                    <thead>
+                        <tr>
+                            <th>Quarter</th>
+                            <th>Delivery Time (CET)</th>
+                            <th>Spot Reference (€)</th>
+                            <th>Pred Imbalance (€)</th>
+                            <th>Expected Spread (€)</th>
+                            <th>Quantiles (q10 - q90)</th>
+                            <th>P(Up) / P(Dn)</th>
+                            <th>Auction Bid Action</th>
+                            <th>Bid Limit Price (€)</th>
+                            <th>Volume (MW)</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for b in bids %}
+                        <tr>
+                            <td class="fw-bold text-white">{{ b.quarter }}</td>
+                            <td><i class="fa-regular fa-clock me-1 text-muted"></i>{{ b.time_dk }}</td>
+                            <td>€ {{ b.spot_price_eur }}</td>
+                            <td class="text-info fw-bold">€ {{ b.pred_imbalance_eur }}</td>
+                            <td class="{% if b.pred_spread_eur > 0 %}text-success fw-bold{% elif b.pred_spread_eur < 0 %}text-danger fw-bold{% else %}text-muted{% endif %}">
+                                {% if b.pred_spread_eur > 0 %}+{% endif %}€ {{ b.pred_spread_eur }}
+                            </td>
+                            <td class="text-muted small">{{ b.quantile_range }}</td>
+                            <td class="small">{{ b.p_ratio }}</td>
+                            <td>
+                                {% if 'BUY' in b.bid_action %}
+                                    <span class="badge badge-buy p-2 px-3"><i class="fa-solid fa-arrow-trend-up me-1"></i> BUY Spot (Long)</span>
+                                {% elif 'SELL' in b.bid_action %}
+                                    <span class="badge badge-sell p-2 px-3"><i class="fa-solid fa-arrow-trend-down me-1"></i> SELL Spot (Short)</span>
+                                {% else %}
+                                    <span class="badge badge-hold p-2 px-3">HOLD (No Bid)</span>
+                                {% endif %}
+                            </td>
+                            <td class="fw-bold text-warning">€ {{ b.bid_limit_price_eur }}</td>
+                            <td class="fw-bold text-white">{% if b.bid_volume_mw > 0 %}{{ b.bid_volume_mw }} MW{% else %}--{% endif %}</td>
+                            <td><span class="badge badge-status p-1 px-2"><i class="fa-solid fa-lock me-1"></i>Fixed Bid</span></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Hidden TSV & CSV Payload Holders -->
+    <textarea id="tsvData" style="display:none;">{{ tsv_payload }}</textarea>
+    <textarea id="csvData" style="display:none;">{{ csv_payload }}</textarea>
+
+    <!-- Bootstrap JS & Copy Logic -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function copyAuctionTsv() {
+            const tsv = document.getElementById("tsvData").value;
+            navigator.clipboard.writeText(tsv).then(() => {
+                const btn = document.getElementById("copyTsvBtn");
+                const originalHtml = btn.innerHTML;
+                btn.innerHTML = '<i class="fa-solid fa-check me-2"></i>Copied 96 Quarters!';
+                btn.classList.remove("btn-success");
+                btn.classList.add("btn-warning", "text-dark");
+                setTimeout(() => {
+                    btn.innerHTML = originalHtml;
+                    btn.classList.remove("btn-warning", "text-dark");
+                    btn.classList.add("btn-success");
+                }, 2500);
+            }).catch(err => {
+                alert("Failed to copy clipboard: " + err);
+            });
+        }
+
+        function downloadAuctionCsv() {
+            const csv = document.getElementById("csvData").value;
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `DayAhead_96Q_Auction_Bids_{{ price_area }}_{{ delivery_date }}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
+        // Live 12:00 CET Countdown Timer
+        function updateGateTimer() {
+            const now = new Date();
+            // Convert to Danish CET (UTC+2 in summer, UTC+1 in winter)
+            const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+            const cetNow = new Date(utc + (3600000 * 2)); // CEST UTC+2
+            
+            const targetGate = new Date(cetNow);
+            targetGate.setHours(12, 0, 0, 0);
+
+            let diffMs = targetGate - cetNow;
+            if (diffMs < 0) {
+                // Gate closed for today's auction
+                document.getElementById("gateCountdown").innerText = "12:00 CET (Auction Gate Closed)";
+                return;
+            }
+
+            const hrs = Math.floor(diffMs / 3600000);
+            const mins = Math.floor((diffMs % 3600000) / 60000);
+            const secs = Math.floor((diffMs % 60000) / 1000);
+            
+            document.getElementById("gateCountdown").innerText = 
+                `${hrs.toString().padStart(2, '0')}h ${mins.toString().padStart(2, '0')}m ${secs.toString().padStart(2, '0')}s remaining`;
+        }
+
+        setInterval(updateGateTimer, 1000);
+        updateGateTimer();
+    </script>
+</body>
+</html>

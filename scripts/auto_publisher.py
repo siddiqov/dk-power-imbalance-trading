@@ -65,9 +65,17 @@ def main():
         logger.info(f"\n[Cycle #{iteration}] Starting prediction update at {cycle_start.strftime('%Y-%m-%d %H:%M:%S')}...")
 
         try:
-            # Push predictions for DK1 and DK2
+            # 1. Push predictions for DK1 and DK2 to Supabase
             push_predictions(delivery_date=None, price_areas=["DK1", "DK2"])
-            logger.info(f"[Cycle #{iteration}] Update successful! Supabase is up to date.")
+            
+            # 2. Generate and lock fixed 96-Quarter Day-Ahead Auction Bids for Tomorrow
+            from src.day_ahead_auction_engine import DayAheadAuctionEngine
+            for area in ["DK1", "DK2"]:
+                auction_engine = DayAheadAuctionEngine(price_area=area)
+                auction_res = auction_engine.generate_fixed_auction_bids()
+                logger.info(f"  📋 [Day-Ahead Auction] Locked 96Q Bids for {area} ({auction_res['delivery_date']}): {auction_res['summary_metrics']['total_bidded_mw']} MW bidded.")
+
+            logger.info(f"[Cycle #{iteration}] Update successful! Supabase & Local Auction Bids are up to date.")
         except KeyboardInterrupt:
             logger.info("\n🛑 Publisher stopped by user.")
             break
