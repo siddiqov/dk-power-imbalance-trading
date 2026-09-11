@@ -124,7 +124,7 @@ export function QuarterTable({ predictions, loading, error, isTodayMode = false 
   const [signalFilter, setSignalFilter] = useState<'ALL' | 'BUY' | 'SELL' | 'HOLD'>('ALL');
   const [copiedColKey, setCopiedColKey] = useState<string | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
-  const [includeHeader, setIncludeHeader] = useState<boolean>(false);
+  const [includeHeader, setIncludeHeader] = useState<boolean>(true);
 
   const hasMultipleDates = useMemo(() => {
     return new Set(predictions.map((p) => p.delivery_date)).size > 1;
