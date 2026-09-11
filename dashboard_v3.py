@@ -16,6 +16,7 @@ from src.tournament_tables_v2 import TournamentTableGenerator
 from src.commercial_strategy_v3 import V3CommercialStrategyEngine
 from src.model_trainer_v3 import V3QuantileModelSuite
 from src.visualization_v3 import plot_v3_optimeering_dashboard
+from src.deep_analysis_engine import V3DeepAnalysisEngine
 
 app = Flask(__name__)
 app.config['TEMPLATES_AUTO_RELOAD'] = True
@@ -171,6 +172,46 @@ def trade_ledger_v3():
         trade_volume=trade_volume,
         active_tab=tab,
         raw_mode=raw_mode,
+        selected_date=selected_date,
+        today_str=datetime.now().strftime("%d %B %Y")
+    )
+
+
+@app.route('/api/deep_analysis_data')
+def api_deep_analysis_data():
+    price_area = request.args.get('area', 'DK1')
+    capital = float(request.args.get('capital', 100000.0))
+    trade_volume = float(request.args.get('volume', 2.0))
+    tab = request.args.get('tab', 'live')
+    raw_mode = request.args.get('mode', 'day_ahead')
+    market_mode = "DAY_AHEAD_D1" if raw_mode == 'day_ahead' else "INTRADAY_D0"
+    default_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    selected_date = request.args.get('date', default_date)
+
+    engine = V3DeepAnalysisEngine(price_area=price_area, capital=capital, base_volume_mwh=trade_volume)
+    diagnostics = engine.compute_full_diagnostics(active_tab=tab, market_mode=market_mode, selected_date=selected_date)
+    return jsonify(diagnostics)
+
+
+@app.route('/deep_analysis')
+def deep_analysis():
+    price_area = request.args.get('area', 'DK1')
+    capital = float(request.args.get('capital', 100000.0))
+    trade_volume = float(request.args.get('volume', 2.0))
+    tab = request.args.get('tab', 'live')
+    raw_mode = request.args.get('mode', 'day_ahead')
+    market_mode = "DAY_AHEAD_D1" if raw_mode == 'day_ahead' else "INTRADAY_D0"
+    default_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    selected_date = request.args.get('date', default_date)
+
+    return render_template(
+        'deep_analysis.html',
+        price_area=price_area,
+        capital=capital,
+        trade_volume=trade_volume,
+        active_tab=tab,
+        raw_mode=raw_mode,
+        market_mode=market_mode,
         selected_date=selected_date,
         today_str=datetime.now().strftime("%d %B %Y")
     )

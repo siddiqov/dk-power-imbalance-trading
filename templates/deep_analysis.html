@@ -1,0 +1,1213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>V3 Deep Analysis & Quant Diagnostics | Optimeering Trader</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Plotly.js -->
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <style>
+        :root {
+            --bg-dark: #090d16;
+            --card-bg: #111827;
+            --card-surface: #172033;
+            --card-border: #1f2937;
+            --card-border-active: #38bdf8;
+            --accent-blue: #38bdf8;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --accent-yellow: #f59e0b;
+            --accent-purple: #a855f7;
+        }
+        body {
+            background-color: var(--bg-dark);
+            color: #f3f4f6;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            min-height: 100vh;
+        }
+        .navbar {
+            background-color: #0b1120;
+            border-bottom: 1px solid var(--card-border);
+        }
+        .card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+        }
+        .metric-card {
+            background: linear-gradient(145deg, #131d31, #0c1322);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 1.15rem;
+            position: relative;
+            overflow: hidden;
+        }
+        .metric-val {
+            font-size: 1.65rem;
+            font-weight: 700;
+        }
+        .view-panel-card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            transition: all 0.25s ease-in-out;
+        }
+        .view-panel-card:hover {
+            border-color: #334155;
+        }
+        .view-panel-header {
+            background-color: #0d1527;
+            border-bottom: 1px solid var(--card-border);
+            border-top-left-radius: 11px;
+            border-top-right-radius: 11px;
+            padding: 0.85rem 1.25rem;
+        }
+        .table-dark {
+            --bs-table-bg: var(--card-bg);
+            --bs-table-striped-bg: #141e33;
+            --bs-table-hover-bg: #1c2a47;
+            border-color: var(--card-border);
+        }
+        .table-dark th {
+            background-color: #0b1120 !important;
+            border-bottom: 2px solid #334155 !important;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            color: #cbd5e1;
+        }
+        .table-dark td {
+            font-size: 0.85rem;
+            vertical-align: middle;
+        }
+        .res-positive { color: #4ade80; font-weight: 600; }
+        .res-negative { color: #f87171; font-weight: 600; }
+        .consensus-pill-buy { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 0.75rem; border-radius: 4px; padding: 2px 6px; }
+        .consensus-pill-sell { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); font-size: 0.75rem; border-radius: 4px; padding: 2px 6px; }
+        .consensus-pill-hold { background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.3); font-size: 0.75rem; border-radius: 4px; padding: 2px 6px; }
+        .spinner-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 400px;
+            flex-direction: column;
+        }
+        .dropdown-menu-dark {
+            background-color: #0b1120;
+            border-color: #334155;
+        }
+        .form-check-input:checked {
+            background-color: var(--accent-blue);
+            border-color: var(--accent-blue);
+        }
+        .preset-badge {
+            cursor: pointer;
+            transition: all 0.15s ease-in-out;
+        }
+        .preset-badge:hover {
+            transform: translateY(-1px);
+            opacity: 0.9;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Top Navigation Bar -->
+    <nav class="navbar navbar-expand-lg px-4 py-3 mb-4">
+        <div class="container-fluid">
+            <div class="d-flex align-items-center">
+                <span class="navbar-brand text-white fw-bold d-flex align-items-center mb-0">
+                    <i class="fa-solid fa-microscope text-warning me-2 fs-3"></i>
+                    V3 Deep Analysis & Quant Diagnostics
+                </span>
+                <span class="badge bg-warning text-dark ms-3 fw-bold">PRO QUANT DESK</span>
+            </div>
+
+            <div class="d-flex align-items-center flex-wrap gap-2">
+                <!-- Market Mode Selector -->
+                <div class="btn-group" role="group">
+                    <button type="button" class="btn btn-sm btn-outline-secondary text-light" id="btnModeDayAhead" onclick="setParam('mode', 'day_ahead')">
+                        <i class="fa-solid fa-calendar-day me-1"></i> Day-Ahead (D-1)
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary text-light" id="btnModeIntraday" onclick="setParam('mode', 'intraday')">
+                        <i class="fa-solid fa-bolt me-1"></i> Intraday (D-0)
+                    </button>
+                </div>
+
+                <!-- Price Area Selector -->
+                <div class="btn-group" role="group">
+                    <button type="button" class="btn btn-sm btn-outline-secondary text-light" id="btnAreaDK1" onclick="setParam('area', 'DK1')">
+                        <i class="fa-solid fa-wind me-1"></i> DK1
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary text-light" id="btnAreaDK2" onclick="setParam('area', 'DK2')">
+                        <i class="fa-solid fa-city me-1"></i> DK2
+                    </button>
+                </div>
+
+                <!-- Volume Selector -->
+                <div class="btn-group" role="group">
+                    <span class="input-group-text bg-dark border-secondary text-warning fw-bold small px-2">Vol:</span>
+                    <button type="button" class="btn btn-sm btn-outline-secondary text-light" id="btnVol2" onclick="setParam('volume', '2.0')">2MWh</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary text-light" id="btnVol5" onclick="setParam('volume', '5.0')">5MWh</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary text-light" id="btnVol10" onclick="setParam('volume', '10.0')">10MWh</button>
+                </div>
+
+                <!-- Live / Backtest Switcher -->
+                <div class="btn-group" role="group">
+                    <button type="button" class="btn btn-sm btn-outline-info text-info" id="btnTabLive" onclick="setParam('tab', 'live')">
+                        <i class="fa-solid fa-satellite-dish me-1"></i> Live
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-warning text-warning" id="btnTabBacktest" onclick="setParam('tab', 'backtest')">
+                        <i class="fa-solid fa-clock-rotate-left me-1"></i> Backtest
+                    </button>
+                </div>
+
+                <!-- Date Picker (visible in backtest mode) -->
+                <div id="datePickerContainer" class="d-none align-items-center gap-1">
+                    <input type="date" id="analysisDatePicker" class="form-control form-control-sm bg-dark text-light border-secondary" style="width: 140px;">
+                    <button class="btn btn-sm btn-warning fw-bold text-dark" onclick="applyDate()">
+                        <i class="fa-solid fa-play"></i>
+                    </button>
+                </div>
+
+                <!-- Refresh Button -->
+                <button class="btn btn-sm btn-outline-secondary text-light" onclick="fetchDiagnosticsData()" title="Reload Data">
+                    <i class="fa-solid fa-rotate me-1"></i> Refresh
+                </button>
+
+                <!-- Back to Main Dashboard -->
+                <a id="backToDashBtn" href="/" class="btn btn-sm btn-primary fw-bold ms-1">
+                    <i class="fa-solid fa-arrow-left me-1"></i> Main Trader
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid px-4 pb-5">
+
+        <!-- Top Status Bar & Quant Summary Cards -->
+        <div class="row g-3 mb-4" id="kpiCardsContainer">
+            <div class="col-xl-3 col-md-6">
+                <div class="metric-card">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div class="text-muted small text-uppercase fw-bold">Multi-Model Consensus</div>
+                        <span class="badge bg-primary"><i class="fa-solid fa-people-group me-1"></i> 6 ARCHITECTURES</span>
+                    </div>
+                    <div class="metric-val text-info mt-1" id="kpiConsensus">-- %</div>
+                    <div class="text-muted small mt-1">Unanimous direction agreement rate across 96 quarters</div>
+                </div>
+            </div>
+
+            <div class="col-xl-3 col-md-6">
+                <div class="metric-card">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div class="text-muted small text-uppercase fw-bold">Avg Horizon Spread Cone</div>
+                        <span class="badge bg-dark border border-secondary text-warning">q10 - q90</span>
+                    </div>
+                    <div class="metric-val text-warning mt-1" id="kpiConeWidth">-- €/MWh</div>
+                    <div class="text-muted small mt-1">Probabilistic uncertainty bandwidth across day</div>
+                </div>
+            </div>
+
+            <div class="col-xl-3 col-md-6">
+                <div class="metric-card">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div class="text-muted small text-uppercase fw-bold">Spike Shield Mitigations</div>
+                        <span class="badge bg-success"><i class="fa-solid fa-shield me-1"></i> LOSS AVOIDED</span>
+                    </div>
+                    <div class="metric-val text-success mt-1" id="kpiSpikeShield">--</div>
+                    <div class="text-muted small mt-1" id="kpiShieldSaved">Saved: € -- from upward squeeze tail risk</div>
+                </div>
+            </div>
+
+            <div class="col-xl-3 col-md-6">
+                <div class="metric-card">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div class="text-muted small text-uppercase fw-bold">Value-at-Risk (VaR 90%)</div>
+                        <span class="badge bg-danger">TAIL SPREAD</span>
+                    </div>
+                    <div class="metric-val text-danger mt-1" id="kpiVaR">-- €/MWh</div>
+                    <div class="text-muted small mt-1">99% VaR: <span id="kpiVaR99" class="text-light fw-bold">-- €/MWh</span> | Max adverse down-tail</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================================================================= -->
+        <!-- MULTI-VIEW WORKSPACE CONTROLS & DROPDOWN TOOLBAR                  -->
+        <!-- ================================================================= -->
+        <div class="card p-3 mb-4 border-secondary">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+                <div class="d-flex align-items-center flex-wrap gap-2">
+                    
+                    <!-- Multi-Select Views Dropdown -->
+                    <div class="dropdown">
+                        <button class="btn btn-outline-info dropdown-toggle fw-bold d-flex align-items-center gap-2 shadow-sm" type="button" id="viewsDropdown" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+                            <i class="fa-solid fa-layer-group text-warning"></i>
+                            <span>Visible Analyses:</span>
+                            <span class="badge bg-info text-dark fw-bold" id="selectedViewsBadge">2 Active</span>
+                        </button>
+                        <div class="dropdown-menu dropdown-menu-dark p-3 shadow-lg border-secondary" style="min-width: 400px; z-index: 1050;">
+                            <div class="d-flex justify-content-between align-items-center mb-2 pb-2 border-bottom border-secondary">
+                                <span class="small text-muted fw-bold text-uppercase">Toggle Analytical Panels</span>
+                                <div class="btn-group btn-group-sm">
+                                    <button type="button" class="btn btn-xs btn-outline-info py-0 px-2" onclick="setAllViews(true)">All</button>
+                                    <button type="button" class="btn btn-xs btn-outline-secondary py-0 px-2" onclick="setAllViews(false)">Clear</button>
+                                </div>
+                            </div>
+                            
+                            <div class="form-check form-switch py-2 border-bottom border-secondary border-opacity-25">
+                                <input class="form-check-input view-toggle-cb" type="checkbox" id="cb-fan-chart" value="panel-fan-chart" checked onchange="onViewToggleChange()">
+                                <label class="form-check-label text-light small fw-bold d-flex align-items-center justify-content-between" for="cb-fan-chart">
+                                    <span><i class="fa-solid fa-chart-area text-info me-2"></i> 1. Quantile Fan & Direction Chart</span>
+                                    <span class="badge bg-dark border border-secondary text-muted ms-2">Plotly</span>
+                                </label>
+                            </div>
+
+                            <div class="form-check form-switch py-2 border-bottom border-secondary border-opacity-25">
+                                <input class="form-check-input view-toggle-cb" type="checkbox" id="cb-matrix" value="panel-matrix" onchange="onViewToggleChange()">
+                                <label class="form-check-label text-light small fw-bold d-flex align-items-center justify-content-between" for="cb-matrix">
+                                    <span><i class="fa-solid fa-table-columns text-success me-2"></i> 2. 6-Model Forecast & Residual Matrix</span>
+                                    <span class="badge bg-dark border border-secondary text-muted ms-2">96-Q Table</span>
+                                </label>
+                            </div>
+
+                            <div class="form-check form-switch py-2 border-bottom border-secondary border-opacity-25">
+                                <input class="form-check-input view-toggle-cb" type="checkbox" id="cb-shield" value="panel-shield" checked onchange="onViewToggleChange()">
+                                <label class="form-check-label text-light small fw-bold d-flex align-items-center justify-content-between" for="cb-shield">
+                                    <span><i class="fa-solid fa-shield-halved text-warning me-2"></i> 3. Spike Shield & Tail Risk Distribution</span>
+                                    <span class="badge bg-dark border border-secondary text-muted ms-2">Risk Audit</span>
+                                </label>
+                            </div>
+
+                            <div class="form-check form-switch py-2">
+                                <input class="form-check-input view-toggle-cb" type="checkbox" id="cb-volatility" value="panel-volatility" onchange="onViewToggleChange()">
+                                <label class="form-check-label text-light small fw-bold d-flex align-items-center justify-content-between" for="cb-volatility">
+                                    <span><i class="fa-solid fa-wave-square text-danger me-2"></i> 4. Intraday vs. Day-Ahead Volatility</span>
+                                    <span class="badge bg-dark border border-secondary text-muted ms-2">24h Regimes</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Quick Preset Badges -->
+                    <div class="d-flex align-items-center gap-1 ms-2">
+                        <span class="small text-muted me-1">Quick:</span>
+                        <span class="badge bg-dark border border-secondary text-light preset-badge" onclick="applyPreset('all')" title="Display all 4 graphs simultaneously">All 4</span>
+                        <span class="badge bg-dark border border-secondary text-info preset-badge" onclick="applyPreset('horizons')" title="Quantile Fan + Volatility">Horizons</span>
+                        <span class="badge bg-dark border border-secondary text-warning preset-badge" onclick="applyPreset('risk')" title="Fan Chart + Spike Shield">Risk Focus</span>
+                        <span class="badge bg-dark border border-secondary text-success preset-badge" onclick="applyPreset('matrix_only')" title="Matrix Table Only">Matrix Only</span>
+                    </div>
+
+                </div>
+
+                <!-- Layout Mode Switcher (Stacked vs Split 2x2 Grid) -->
+                <div class="d-flex align-items-center gap-2">
+                    <span class="small text-muted fw-bold text-uppercase">Layout:</span>
+                    <div class="btn-group btn-group-sm" role="group">
+                        <button type="button" class="btn btn-outline-secondary text-light active" id="layoutStackedBtn" onclick="setLayoutMode('stacked')" title="Stacked Full-Width (1 Column)">
+                            <i class="fa-solid fa-bars me-1"></i> Stacked (1-Col)
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary text-light" id="layoutGridBtn" onclick="setLayoutMode('grid')" title="Split Grid (2 Columns Side-by-Side)">
+                            <i class="fa-solid fa-table-cells-large me-1"></i> Split Grid (2-Col)
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading Spinner Container -->
+        <div id="loadingOverlay" class="spinner-container">
+            <div class="spinner-border text-info" style="width: 3rem; height: 3rem;" role="status"></div>
+            <div class="mt-3 text-light fw-bold fs-5">Calculating Quantitative Diagnostics & 6-Model Inferences...</div>
+            <div class="text-muted small">Ingesting genuine Energinet settlements and running dual market suites</div>
+        </div>
+
+        <!-- ================================================================= -->
+        <!-- MULTI-VIEW PANELS CONTAINER (DYNAMIC MULTI-SELECTION GRID)         -->
+        <!-- ================================================================= -->
+        <div class="row g-4 d-none" id="multiPanelsRow">
+
+            <!-- ------------------------------------------------------------- -->
+            <!-- PANEL 1: INTERACTIVE QUANTILE FAN & PROBABILITY CHART         -->
+            <!-- ------------------------------------------------------------- -->
+            <div class="col-12 view-panel-col" id="panel-fan-chart">
+                <div class="card view-panel-card shadow">
+                    <div class="view-panel-header d-flex justify-content-between align-items-center">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="badge bg-info text-dark fw-bold">#1</span>
+                            <h6 class="fw-bold text-white mb-0">
+                                <i class="fa-solid fa-chart-area text-info me-1"></i>
+                                Interactive Quantile Fan Chart & Direction Probabilities
+                            </h6>
+                            <span class="badge bg-dark border border-secondary text-muted small ms-2">q10 - q50 - q90 Cone</span>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <button class="btn btn-xs btn-outline-secondary text-light py-0 px-2" onclick="soloView('panel-fan-chart')" title="Solo this view">
+                                <i class="fa-solid fa-expand me-1"></i> Solo
+                            </button>
+                            <button class="btn btn-xs btn-outline-danger py-0 px-2" onclick="hideView('panel-fan-chart')" title="Hide view">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body p-3">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <div class="small text-muted">Double-click chart to reset zoom | Hover for unified crosshairs</div>
+                            <div class="small text-muted">Area: <span class="text-light fw-bold" id="panel1AreaBadge">DK1</span></div>
+                        </div>
+                        <div id="plotlyFanChart" style="width: 100%; height: 480px;"></div>
+
+                        <div class="d-flex justify-content-between align-items-center mt-3 mb-2">
+                            <h6 class="fw-bold text-white mb-0 small text-uppercase">
+                                <i class="fa-solid fa-arrows-split-up-and-left text-warning me-1"></i>
+                                Direction Probabilities: P(Up) / P(Down) / P(Balanced)
+                            </h6>
+                            <span class="badge bg-dark border border-secondary text-info">96 Quarters</span>
+                        </div>
+                        <div id="plotlyProbChart" style="width: 100%; height: 240px;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ------------------------------------------------------------- -->
+            <!-- PANEL 2: 6-MODEL COMPARISON MATRIX                            -->
+            <!-- ------------------------------------------------------------- -->
+            <div class="col-12 view-panel-col d-none" id="panel-matrix">
+                <div class="card view-panel-card shadow">
+                    <div class="view-panel-header d-flex justify-content-between align-items-center">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="badge bg-success text-white fw-bold">#2</span>
+                            <h6 class="fw-bold text-white mb-0">
+                                <i class="fa-solid fa-table-columns text-success me-1"></i>
+                                6-Model Forecast & Residual Comparison Matrix
+                            </h6>
+                            <span class="badge bg-dark border border-secondary text-muted small ms-2" id="settledCounterBadge">-- Settled</span>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <button class="btn btn-xs btn-outline-secondary text-light py-0 px-2" onclick="soloView('panel-matrix')" title="Solo this view">
+                                <i class="fa-solid fa-expand me-1"></i> Solo
+                            </button>
+                            <button class="btn btn-xs btn-outline-danger py-0 px-2" onclick="hideView('panel-matrix')" title="Hide view">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body p-3">
+                        <!-- Model MAE Cards -->
+                        <div class="row g-2 mb-3" id="modelMaeCardsContainer"></div>
+
+                        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                            <div class="d-flex align-items-center gap-2">
+                                <button class="btn btn-sm btn-outline-secondary text-light active" id="filterAllBtn" onclick="filterMatrix('all')">All (96)</button>
+                                <button class="btn btn-sm btn-outline-secondary text-light" id="filterSettledBtn" onclick="filterMatrix('settled')">Settled Only</button>
+                                <button class="btn btn-sm btn-outline-secondary text-light" id="filterDivergentBtn" onclick="filterMatrix('divergent')">High Disagreement</button>
+                            </div>
+                            <button class="btn btn-sm btn-success fw-bold text-white" onclick="exportMatrixCsv()">
+                                <i class="fa-solid fa-file-csv me-1"></i> Export Matrix CSV
+                            </button>
+                        </div>
+
+                        <div class="table-responsive" style="max-height: 520px; overflow-y: auto;">
+                            <table class="table table-dark table-striped table-hover text-center align-middle mb-0" id="matrixTable">
+                                <thead class="sticky-top">
+                                    <tr>
+                                        <th>Q</th>
+                                        <th>Time</th>
+                                        <th>Spot DA<br><span class="text-light">(€/MWh)</span></th>
+                                        <th class="text-info bg-primary bg-opacity-25 border-start border-end border-info">Actual Settled<br>(€/MWh)</th>
+                                        <th>Consensus</th>
+                                        <th class="text-warning">Transformer<br>TFT</th>
+                                        <th class="text-success">Hierarchical<br>LGBM+XGB</th>
+                                        <th class="text-primary">Transfer<br>LightGBM</th>
+                                        <th class="text-warning">Pure 15m<br>CatBoost</th>
+                                        <th class="text-danger">Deep<br>BiLSTM</th>
+                                        <th class="text-info">Meta<br>Ensemble</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="matrixTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ------------------------------------------------------------- -->
+            <!-- PANEL 3: SPIKE SHIELD & TAIL RISK DISTRIBUTION                -->
+            <!-- ------------------------------------------------------------- -->
+            <div class="col-12 view-panel-col" id="panel-shield">
+                <div class="card view-panel-card shadow">
+                    <div class="view-panel-header d-flex justify-content-between align-items-center">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="badge bg-warning text-dark fw-bold">#3</span>
+                            <h6 class="fw-bold text-white mb-0">
+                                <i class="fa-solid fa-shield-halved text-warning me-1"></i>
+                                Spike Shield & Tail Risk Distribution
+                            </h6>
+                            <span class="badge bg-dark border border-secondary text-success small ms-2">Loss Mitigation Audit</span>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <button class="btn btn-xs btn-outline-secondary text-light py-0 px-2" onclick="soloView('panel-shield')" title="Solo this view">
+                                <i class="fa-solid fa-expand me-1"></i> Solo
+                            </button>
+                            <button class="btn btn-xs btn-outline-danger py-0 px-2" onclick="hideView('panel-shield')" title="Hide view">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body p-3">
+                        <div class="row g-3">
+                            <div class="col-lg-6">
+                                <div class="card p-3 border-secondary h-100">
+                                    <h6 class="fw-bold text-white mb-2 small text-uppercase">
+                                        <i class="fa-solid fa-shield-virus text-warning me-1"></i>
+                                        Asymmetric Spike Shield Audit
+                                    </h6>
+                                    <p class="text-muted small mb-3">
+                                        Prevents dangerous shorting whenever upper tail risk exceeds safety thresholds ($q_{90} > 80$ €/MWh).
+                                    </p>
+                                    <div class="table-responsive" style="max-height: 340px; overflow-y: auto;">
+                                        <table class="table table-dark table-sm table-striped text-center align-middle" id="shieldTable">
+                                            <thead>
+                                                <tr class="small text-muted">
+                                                    <th>Quarter</th>
+                                                    <th>Time</th>
+                                                    <th>Spot DA</th>
+                                                    <th>q90 Spread</th>
+                                                    <th>P(Spike)</th>
+                                                    <th>Actual Settle</th>
+                                                    <th>Shield Action</th>
+                                                    <th>Preserved Capital</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="shieldTableBody"></tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-lg-6">
+                                <div class="card p-3 border-secondary h-100">
+                                    <h6 class="fw-bold text-white mb-2 small text-uppercase">
+                                        <i class="fa-solid fa-chart-column text-danger me-1"></i>
+                                        Empirical Spread Distribution & Tail Risk Cutoffs
+                                    </h6>
+                                    <div id="plotlyTailChart" style="width: 100%; height: 350px;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ------------------------------------------------------------- -->
+            <!-- PANEL 4: INTRADAY VS DAY-AHEAD SPREAD VOLATILITY              -->
+            <!-- ------------------------------------------------------------- -->
+            <div class="col-12 view-panel-col d-none" id="panel-volatility">
+                <div class="card view-panel-card shadow">
+                    <div class="view-panel-header d-flex justify-content-between align-items-center">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="badge bg-danger text-white fw-bold">#4</span>
+                            <h6 class="fw-bold text-white mb-0">
+                                <i class="fa-solid fa-wave-square text-danger me-1"></i>
+                                Intraday vs. Day-Ahead Spread Volatility Index
+                            </h6>
+                            <span class="badge bg-dark border border-secondary text-info small ms-2">Hourly Regimes</span>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <button class="btn btn-xs btn-outline-secondary text-light py-0 px-2" onclick="soloView('panel-volatility')" title="Solo this view">
+                                <i class="fa-solid fa-expand me-1"></i> Solo
+                            </button>
+                            <button class="btn btn-xs btn-outline-danger py-0 px-2" onclick="hideView('panel-volatility')" title="Hide view">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body p-3">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <div class="small text-muted">Highlights Peak Danish Wind/Solar Transitions across 24 Hours (CET)</div>
+                        </div>
+                        <div id="plotlyVolatilityChart" style="width: 100%; height: 420px;"></div>
+
+                        <div class="row g-3 mt-2">
+                            <div class="col-md-4">
+                                <div class="metric-card">
+                                    <div class="text-muted small text-uppercase fw-bold"><i class="fa-solid fa-sun text-warning me-1"></i> Morning Ramp (06:00 - 09:00)</div>
+                                    <div class="metric-val text-warning mt-1" id="kpiMorningRamp">--</div>
+                                    <div class="text-muted small mt-1">Solar injection ramp & European morning demand rise</div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="metric-card">
+                                    <div class="text-muted small text-uppercase fw-bold"><i class="fa-solid fa-city text-danger me-1"></i> Evening Peak (17:00 - 21:00)</div>
+                                    <div class="metric-val text-danger mt-1" id="kpiEveningPeak">--</div>
+                                    <div class="text-muted small mt-1">Solar ramp-down, residential peak & wind dependency</div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="metric-card">
+                                    <div class="text-muted small text-uppercase fw-bold"><i class="fa-solid fa-moon text-info me-1"></i> Night Base (22:00 - 05:00)</div>
+                                    <div class="metric-val text-info mt-1" id="kpiNightBase">--</div>
+                                    <div class="text-muted small mt-1">Baseline wind balancing & low domestic consumption</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Bootstrap Bundle JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Client-Side Diagnostics Manager -->
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        let currentArea = urlParams.get('area') || 'DK1';
+        let currentCapital = urlParams.get('capital') || '100000.0';
+        let currentVolume = urlParams.get('volume') || '2.0';
+        let currentTab = urlParams.get('tab') || 'live';
+        let currentMode = urlParams.get('mode') || 'day_ahead';
+        let currentDate = urlParams.get('date') || '2026-08-31';
+
+        let currentData = null;
+        let matrixFilter = 'all';
+        let layoutMode = 'stacked'; // 'stacked' or 'grid'
+
+        // Multi-selection state
+        const allPanelIds = ['panel-fan-chart', 'panel-matrix', 'panel-shield', 'panel-volatility'];
+        const panelCheckboxMap = {
+            'panel-fan-chart': 'cb-fan-chart',
+            'panel-matrix': 'cb-matrix',
+            'panel-shield': 'cb-shield',
+            'panel-volatility': 'cb-volatility'
+        };
+
+        function syncNavbarUI() {
+            document.getElementById('btnModeDayAhead').className = (currentMode === 'day_ahead') ? 'btn btn-sm btn-success fw-bold text-white shadow' : 'btn btn-sm btn-outline-secondary text-light';
+            document.getElementById('btnModeIntraday').className = (currentMode === 'intraday') ? 'btn btn-sm btn-warning fw-bold text-dark shadow' : 'btn btn-sm btn-outline-secondary text-light';
+
+            document.getElementById('btnAreaDK1').className = (currentArea === 'DK1') ? 'btn btn-sm btn-primary fw-bold text-white' : 'btn btn-sm btn-outline-secondary text-light';
+            document.getElementById('btnAreaDK2').className = (currentArea === 'DK2') ? 'btn btn-sm btn-primary fw-bold text-white' : 'btn btn-sm btn-outline-secondary text-light';
+
+            document.getElementById('btnVol2').className = (parseFloat(currentVolume) === 2.0) ? 'btn btn-sm btn-warning fw-bold text-dark' : 'btn btn-sm btn-outline-secondary text-light';
+            document.getElementById('btnVol5').className = (parseFloat(currentVolume) === 5.0) ? 'btn btn-sm btn-warning fw-bold text-dark' : 'btn btn-sm btn-outline-secondary text-light';
+            document.getElementById('btnVol10').className = (parseFloat(currentVolume) === 10.0) ? 'btn btn-sm btn-warning fw-bold text-dark' : 'btn btn-sm btn-outline-secondary text-light';
+
+            document.getElementById('btnTabLive').className = (currentTab === 'live') ? 'btn btn-sm btn-info fw-bold text-dark' : 'btn btn-sm btn-outline-secondary text-light';
+            document.getElementById('btnTabBacktest').className = (currentTab === 'backtest') ? 'btn btn-sm btn-warning fw-bold text-dark' : 'btn btn-sm btn-outline-secondary text-light';
+
+            const dateContainer = document.getElementById('datePickerContainer');
+            if (currentTab === 'backtest') {
+                dateContainer.classList.remove('d-none');
+                dateContainer.classList.add('d-flex');
+                document.getElementById('analysisDatePicker').value = currentDate;
+            } else {
+                dateContainer.classList.add('d-none');
+                dateContainer.classList.remove('d-flex');
+            }
+
+            document.getElementById('backToDashBtn').href = `/?area=${currentArea}&capital=${currentCapital}&volume=${currentVolume}&tab=${currentTab}&mode=${currentMode}&date=${currentDate}`;
+            const p1AreaBadge = document.getElementById('panel1AreaBadge');
+            if (p1AreaBadge) p1AreaBadge.innerText = currentArea;
+        }
+
+        function setParam(key, val) {
+            if (key === 'area') currentArea = val;
+            if (key === 'volume') currentVolume = val;
+            if (key === 'tab') currentTab = val;
+            if (key === 'mode') currentMode = val;
+            if (key === 'date') currentDate = val;
+
+            const newUrl = `${window.location.pathname}?area=${currentArea}&capital=${currentCapital}&volume=${currentVolume}&tab=${currentTab}&mode=${currentMode}&date=${currentDate}`;
+            window.history.pushState({}, '', newUrl);
+            syncNavbarUI();
+            fetchDiagnosticsData();
+        }
+
+        function applyDate() {
+            const pickerVal = document.getElementById('analysisDatePicker').value;
+            if (pickerVal) {
+                setParam('date', pickerVal);
+            }
+        }
+
+        // =====================================================================
+        // MULTI-VIEW SELECTION & LAYOUT CONTROLS
+        // =====================================================================
+
+        function updateVisiblePanels() {
+            let activeCount = 0;
+            allPanelIds.forEach(panelId => {
+                const cb = document.getElementById(panelCheckboxMap[panelId]);
+                const panelEl = document.getElementById(panelId);
+                if (cb && panelEl) {
+                    if (cb.checked) {
+                        panelEl.classList.remove('d-none');
+                        activeCount++;
+                    } else {
+                        panelEl.classList.add('d-none');
+                    }
+                }
+            });
+
+            document.getElementById('selectedViewsBadge').innerText = `${activeCount}/${allPanelIds.length} Active`;
+
+            // Adjust grid classes
+            applyLayoutClasses();
+
+            // Resize Plotly charts
+            triggerChartResize();
+        }
+
+        function onViewToggleChange() {
+            updateVisiblePanels();
+        }
+
+        function setAllViews(enable) {
+            allPanelIds.forEach(panelId => {
+                const cb = document.getElementById(panelCheckboxMap[panelId]);
+                if (cb) cb.checked = enable;
+            });
+            updateVisiblePanels();
+        }
+
+        function hideView(panelId) {
+            const cb = document.getElementById(panelCheckboxMap[panelId]);
+            if (cb) {
+                cb.checked = false;
+                updateVisiblePanels();
+            }
+        }
+
+        function soloView(panelId) {
+            allPanelIds.forEach(id => {
+                const cb = document.getElementById(panelCheckboxMap[id]);
+                if (cb) cb.checked = (id === panelId);
+            });
+            updateVisiblePanels();
+        }
+
+        function applyPreset(preset) {
+            if (preset === 'all') {
+                setAllViews(true);
+            } else if (preset === 'horizons') {
+                allPanelIds.forEach(id => {
+                    const cb = document.getElementById(panelCheckboxMap[id]);
+                    if (cb) cb.checked = (id === 'panel-fan-chart' || id === 'panel-volatility');
+                });
+                updateVisiblePanels();
+            } else if (preset === 'risk') {
+                allPanelIds.forEach(id => {
+                    const cb = document.getElementById(panelCheckboxMap[id]);
+                    if (cb) cb.checked = (id === 'panel-fan-chart' || id === 'panel-shield');
+                });
+                updateVisiblePanels();
+            } else if (preset === 'matrix_only') {
+                soloView('panel-matrix');
+            }
+        }
+
+        function setLayoutMode(mode) {
+            layoutMode = mode;
+            document.getElementById('layoutStackedBtn').classList.toggle('active', mode === 'stacked');
+            document.getElementById('layoutGridBtn').classList.toggle('active', mode === 'grid');
+            applyLayoutClasses();
+            triggerChartResize();
+        }
+
+        function applyLayoutClasses() {
+            const panelCols = document.querySelectorAll('.view-panel-col');
+            panelCols.forEach(col => {
+                if (layoutMode === 'grid') {
+                    col.classList.remove('col-12');
+                    col.classList.add('col-xl-6', 'col-12');
+                } else {
+                    col.classList.remove('col-xl-6');
+                    col.classList.add('col-12');
+                }
+            });
+        }
+
+        function triggerChartResize() {
+            setTimeout(() => {
+                Plotly.Plots.resize('plotlyFanChart');
+                Plotly.Plots.resize('plotlyProbChart');
+                Plotly.Plots.resize('plotlyTailChart');
+                Plotly.Plots.resize('plotlyVolatilityChart');
+            }, 100);
+        }
+
+        // =====================================================================
+        // DATA FETCHING & RENDERING
+        // =====================================================================
+
+        async function fetchDiagnosticsData() {
+            document.getElementById('loadingOverlay').classList.remove('d-none');
+            document.getElementById('multiPanelsRow').classList.add('d-none');
+
+            try {
+                const url = `/api/deep_analysis_data?area=${currentArea}&capital=${currentCapital}&volume=${currentVolume}&tab=${currentTab}&mode=${currentMode}&date=${currentDate}`;
+                const res = await fetch(url);
+                const data = await res.json();
+                currentData = data;
+
+                renderKPIs(data);
+                renderFanChart(data);
+                renderProbabilityChart(data);
+                renderMatrix(data);
+                renderSpikeShield(data);
+                renderVolatility(data);
+
+                document.getElementById('loadingOverlay').classList.add('d-none');
+                document.getElementById('multiPanelsRow').classList.remove('d-none');
+
+                updateVisiblePanels();
+
+            } catch (err) {
+                console.error("Error fetching diagnostics:", err);
+                document.getElementById('loadingOverlay').innerHTML = `<div class="text-danger fw-bold">Failed to load analytics: ${err.message}</div>`;
+            }
+        }
+
+        function renderKPIs(data) {
+            document.getElementById('kpiConsensus').innerText = `${data.unanimous_consensus_rate}%`;
+
+            let diffs = [];
+            for (let i = 0; i < data.quantiles.q90.length; i++) {
+                diffs.push(data.quantiles.q90[i] - data.quantiles.q10[i]);
+            }
+            const avgDiff = diffs.length > 0 ? (diffs.reduce((a,b)=>a+b,0) / diffs.length).toFixed(1) : '--';
+            document.getElementById('kpiConeWidth').innerText = `± ${avgDiff} €/MWh`;
+
+            const shieldEvents = data.spike_shield.interventions;
+            document.getElementById('kpiSpikeShield').innerText = `${shieldEvents} Quarters Protected`;
+            document.getElementById('kpiShieldSaved').innerText = `Preserved: € ${data.spike_shield.total_avoided_loss_eur.toLocaleString()} capital`;
+
+            document.getElementById('kpiVaR').innerText = `€ ${data.spike_shield.var_90_eur.toFixed(2)}`;
+            document.getElementById('kpiVaR99').innerText = `€ ${data.spike_shield.var_99_eur.toFixed(2)}`;
+        }
+
+        function renderFanChart(data) {
+            const quarters = data.quarters;
+            const xLabels = quarters.map((q, i) => `${q} (${data.times[i]})`);
+
+            const q10 = data.quantiles.q10;
+            const q50 = data.quantiles.q50;
+            const q90 = data.quantiles.q90;
+            const spots = data.spot_prices;
+            const actuals = data.actual_settled;
+
+            const traces = [
+                {
+                    x: xLabels,
+                    y: q10,
+                    mode: 'lines',
+                    line: { color: 'rgba(56, 189, 248, 0.0)', width: 0 },
+                    name: 'Quantile q10 (P10)',
+                    showlegend: false,
+                    hoverinfo: 'skip'
+                },
+                {
+                    x: xLabels,
+                    y: q90,
+                    mode: 'lines',
+                    fill: 'tonexty',
+                    fillcolor: 'rgba(56, 189, 248, 0.18)',
+                    line: { color: 'rgba(56, 189, 248, 0.0)', width: 0 },
+                    name: 'Quantile Band (q10 - q90)',
+                    hoverinfo: 'skip'
+                },
+                {
+                    x: xLabels,
+                    y: q50,
+                    mode: 'lines',
+                    line: { color: '#38bdf8', width: 2.2, dash: 'dot' },
+                    name: 'Median Forecast (q50)'
+                },
+                {
+                    x: xLabels,
+                    y: spots,
+                    mode: 'lines',
+                    line: { color: '#94a3b8', width: 2, shape: 'hv' },
+                    name: 'Day-Ahead Spot Baseline'
+                },
+                {
+                    x: xLabels,
+                    y: actuals,
+                    mode: 'lines+markers',
+                    line: { color: '#10b981', width: 2.5 },
+                    marker: { size: 5, color: '#10b981' },
+                    name: 'Actual Settled Imbalance'
+                }
+            ];
+
+            const modelColors = {
+                'Transformer-TFT': '#f59e0b',
+                'Hierarchical-LGBM+XGB': '#a855f7',
+                'Transfer-LightGBM': '#3b82f6',
+                'Pure15m-CatBoost': '#ec4899',
+                'Deep-BiLSTM': '#ef4444',
+                'Stacking-MetaEnsemble': '#14b8a6'
+            };
+
+            for (const [mName, mColor] of Object.entries(modelColors)) {
+                if (data.model_predictions[mName]) {
+                    traces.push({
+                        x: xLabels,
+                        y: data.model_predictions[mName].prices,
+                        mode: 'lines',
+                        line: { color: mColor, width: 1.5, dash: 'dash' },
+                        name: `${mName} Forecast`,
+                        visible: (mName === 'Transformer-TFT') ? true : 'legendonly'
+                    });
+                }
+            }
+
+            const layout = {
+                paper_bgcolor: '#111827',
+                plot_bgcolor: '#090d16',
+                font: { color: '#f3f4f6', family: 'Segoe UI, sans-serif' },
+                margin: { l: 55, r: 25, t: 30, b: 65 },
+                hovermode: 'x unified',
+                xaxis: {
+                    title: '15-Minute Quarter / Time (CET)',
+                    gridcolor: '#1f2937',
+                    tickangle: -45,
+                    nticks: 24,
+                    color: '#94a3b8'
+                },
+                yaxis: {
+                    title: 'Price (EUR / MWh)',
+                    gridcolor: '#1f2937',
+                    color: '#94a3b8'
+                },
+                legend: {
+                    orientation: 'h',
+                    x: 0,
+                    y: 1.15,
+                    bgcolor: 'rgba(11, 17, 32, 0.8)',
+                    bordercolor: '#1f2937',
+                    borderwidth: 1
+                }
+            };
+
+            Plotly.newPlot('plotlyFanChart', traces, layout, { responsive: true, displaylogo: false });
+        }
+
+        function renderProbabilityChart(data) {
+            const xLabels = data.quarters.map((q, i) => `${q} (${data.times[i]})`);
+
+            const traces = [
+                {
+                    x: xLabels,
+                    y: data.probabilities.p_up,
+                    name: 'P(Up-Regulation)',
+                    type: 'bar',
+                    marker: { color: '#10b981' }
+                },
+                {
+                    x: xLabels,
+                    y: data.probabilities.p_balanced,
+                    name: 'P(Balanced)',
+                    type: 'bar',
+                    marker: { color: '#64748b' }
+                },
+                {
+                    x: xLabels,
+                    y: data.probabilities.p_down,
+                    name: 'P(Down-Regulation)',
+                    type: 'bar',
+                    marker: { color: '#ef4444' }
+                }
+            ];
+
+            const layout = {
+                barmode: 'stack',
+                paper_bgcolor: '#111827',
+                plot_bgcolor: '#090d16',
+                font: { color: '#f3f4f6', family: 'Segoe UI, sans-serif' },
+                margin: { l: 55, r: 25, t: 20, b: 50 },
+                hovermode: 'x unified',
+                xaxis: {
+                    gridcolor: '#1f2937',
+                    tickangle: -45,
+                    nticks: 24,
+                    color: '#94a3b8'
+                },
+                yaxis: {
+                    title: 'Probability (%)',
+                    gridcolor: '#1f2937',
+                    range: [0, 100],
+                    color: '#94a3b8'
+                },
+                legend: {
+                    orientation: 'h',
+                    x: 0,
+                    y: 1.2,
+                    bgcolor: 'rgba(11, 17, 32, 0.8)'
+                }
+            };
+
+            Plotly.newPlot('plotlyProbChart', traces, layout, { responsive: true, displaylogo: false });
+        }
+
+        function renderMatrix(data) {
+            const maeContainer = document.getElementById('modelMaeCardsContainer');
+            maeContainer.innerHTML = '';
+            for (const [mName, mObj] of Object.entries(data.model_predictions)) {
+                const maeText = mObj.mae !== null ? `€ ${mObj.mae.toFixed(2)}` : 'Pending Settle';
+                const col = document.createElement('div');
+                col.className = 'col-lg-2 col-md-4 col-6';
+                col.innerHTML = `
+                    <div class="card p-2 text-center border-secondary">
+                        <div class="small text-muted text-truncate" title="${mName}">${mName}</div>
+                        <div class="fs-6 fw-bold text-warning mt-1">${maeText}</div>
+                        <div class="small text-muted" style="font-size: 0.7rem;">MAE Error Spread</div>
+                    </div>
+                `;
+                maeContainer.appendChild(col);
+            }
+
+            document.getElementById('settledCounterBadge').innerText = `${data.settled_count} Settled / ${data.quarters.length} Total`;
+            renderMatrixRows(data);
+        }
+
+        function renderMatrixRows(data) {
+            const tbody = document.getElementById('matrixTableBody');
+            tbody.innerHTML = '';
+
+            data.comparison_matrix.forEach((row, i) => {
+                if (matrixFilter === 'settled' && !row.is_settled) return;
+                if (matrixFilter === 'divergent' && row.consensus.strength !== 'Divergent') return;
+
+                const tr = document.createElement('tr');
+
+                let consPill = `<span class="consensus-pill-hold"><i class="fa-solid fa-minus me-1"></i>HOLD (${row.consensus.votes})</span>`;
+                if (row.consensus.direction.includes('BUY')) {
+                    consPill = `<span class="consensus-pill-buy"><i class="fa-solid fa-arrow-up me-1"></i>BUY (${row.consensus.votes})</span>`;
+                } else if (row.consensus.direction.includes('SELL')) {
+                    consPill = `<span class="consensus-pill-sell"><i class="fa-solid fa-arrow-down me-1"></i>SELL (${row.consensus.votes})</span>`;
+                }
+
+                const actualHtml = row.is_settled ? `<strong class="text-white">€ ${row.actual_price.toFixed(2)}</strong>` : `<span class="badge bg-dark border border-secondary text-muted">Pending</span>`;
+
+                let modelsCols = '';
+                const modelsList = ["Transformer-TFT", "Hierarchical-LGBM+XGB", "Transfer-LightGBM", "Pure15m-CatBoost", "Deep-BiLSTM", "Stacking-MetaEnsemble"];
+                modelsList.forEach(m => {
+                    const mData = row.models[m];
+                    let resHtml = '';
+                    if (row.is_settled && mData.residual !== null) {
+                        const resClass = mData.residual >= 0 ? 'res-positive' : 'res-negative';
+                        resHtml = `<span class="d-block small ${resClass}">${mData.residual >= 0 ? '+' : ''}${mData.residual.toFixed(2)}</span>`;
+                    }
+                    modelsCols += `<td>€ ${mData.price.toFixed(2)}${resHtml}</td>`;
+                });
+
+                tr.innerHTML = `
+                    <td class="fw-bold text-warning">${row.quarter}</td>
+                    <td class="font-monospace text-light">${row.time}</td>
+                    <td class="text-light">€ ${row.spot_price.toFixed(2)}</td>
+                    <td class="bg-primary bg-opacity-10">${actualHtml}</td>
+                    <td>${consPill}</td>
+                    ${modelsCols}
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function filterMatrix(filterType) {
+            matrixFilter = filterType;
+            document.getElementById('filterAllBtn').classList.toggle('active', filterType === 'all');
+            document.getElementById('filterSettledBtn').classList.toggle('active', filterType === 'settled');
+            document.getElementById('filterDivergentBtn').classList.toggle('active', filterType === 'divergent');
+            if (currentData) renderMatrixRows(currentData);
+        }
+
+        function exportMatrixCsv() {
+            if (!currentData) return;
+            const rows = [
+                ["Quarter", "Time", "Spot_Price_EUR", "Actual_Price_EUR", "Consensus_Direction", "Transformer_TFT_EUR", "Hierarchical_EUR", "Transfer_LGBM_EUR", "Pure15m_CatBoost_EUR", "Deep_BiLSTM_EUR", "Meta_Ensemble_EUR"]
+            ];
+            currentData.comparison_matrix.forEach(r => {
+                rows.push([
+                    r.quarter,
+                    r.time,
+                    r.spot_price,
+                    r.actual_price !== null ? r.actual_price : "",
+                    r.consensus.direction,
+                    r.models["Transformer-TFT"].price,
+                    r.models["Hierarchical-LGBM+XGB"].price,
+                    r.models["Transfer-LightGBM"].price,
+                    r.models["Pure15m-CatBoost"].price,
+                    r.models["Deep-BiLSTM"].price,
+                    r.models["Stacking-MetaEnsemble"].price
+                ]);
+            });
+
+            let csvContent = "data:text/csv;charset=utf-8," + rows.map(e => e.join(",")).join("\n");
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", `V3_Model_Comparison_Matrix_${currentArea}_${currentDate}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function renderSpikeShield(data) {
+            const shieldBody = document.getElementById('shieldTableBody');
+            shieldBody.innerHTML = '';
+
+            const events = data.spike_shield.events;
+            if (events.length === 0) {
+                shieldBody.innerHTML = `<tr><td colspan="8" class="text-center text-muted py-3">No upward squeeze tail events detected today. Shield was vigilant.</td></tr>`;
+            } else {
+                events.forEach(e => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td class="fw-bold text-warning">${e.quarter}</td>
+                        <td class="font-monospace text-light">${e.time}</td>
+                        <td>€ ${e.spot_price.toFixed(2)}</td>
+                        <td class="text-danger fw-bold">+€ ${e.q90_spread.toFixed(1)}</td>
+                        <td><span class="badge bg-danger">${e.p_up_spike}%</span></td>
+                        <td class="text-info">${e.actual_price ? '€ ' + e.actual_price.toFixed(2) : '--'}</td>
+                        <td><span class="badge bg-warning text-dark"><i class="fa-solid fa-shield me-1"></i>HOLD</span></td>
+                        <td class="text-success fw-bold">+€ ${e.avoided_loss_eur.toFixed(2)}</td>
+                    `;
+                    shieldBody.appendChild(tr);
+                });
+            }
+
+            const actualSpreads = [];
+            for (let i = 0; i < data.actual_settled.length; i++) {
+                if (data.actual_settled[i] !== null) {
+                    actualSpreads.push(data.actual_settled[i] - data.spot_prices[i]);
+                }
+            }
+
+            const histTrace = {
+                x: actualSpreads.length > 0 ? actualSpreads : data.quantiles.q50.map((v, i) => v - data.spot_prices[i]),
+                type: 'histogram',
+                marker: { color: '#38bdf8', opacity: 0.75 },
+                name: 'Spread Distribution'
+            };
+
+            const tailLayout = {
+                paper_bgcolor: '#111827',
+                plot_bgcolor: '#090d16',
+                font: { color: '#f3f4f6', family: 'Segoe UI, sans-serif' },
+                margin: { l: 45, r: 20, t: 25, b: 45 },
+                xaxis: {
+                    title: 'Spread: (Imbalance - Spot) in EUR/MWh',
+                    gridcolor: '#1f2937',
+                    color: '#94a3b8'
+                },
+                yaxis: {
+                    title: 'Frequency',
+                    gridcolor: '#1f2937',
+                    color: '#94a3b8'
+                },
+                shapes: [
+                    {
+                        type: 'line',
+                        x0: 50, x1: 50,
+                        y0: 0, y1: 1, yref: 'paper',
+                        line: { color: '#ef4444', width: 2, dash: 'dot' }
+                    }
+                ],
+                annotations: [
+                    {
+                        x: 50, y: 0.9, yref: 'paper',
+                        text: 'Tail Squeeze Threshold (>+€50)',
+                        showarrow: true,
+                        arrowhead: 2,
+                        font: { color: '#ef4444', size: 10 }
+                    }
+                ]
+            };
+
+            Plotly.newPlot('plotlyTailChart', [histTrace], tailLayout, { responsive: true, displaylogo: false });
+        }
+
+        function renderVolatility(data) {
+            const hours = data.hourly_volatility.map(h => h.hour);
+            const stds = data.hourly_volatility.map(h => h.std_spread);
+            const means = data.hourly_volatility.map(h => h.mean_spread);
+
+            const traces = [
+                {
+                    x: hours,
+                    y: stds,
+                    name: 'Spread Volatility (Std Dev €/MWh)',
+                    type: 'bar',
+                    marker: {
+                        color: stds.map(s => s > 15.0 ? '#ef4444' : s > 8.0 ? '#f59e0b' : '#38bdf8')
+                    }
+                },
+                {
+                    x: hours,
+                    y: means,
+                    name: 'Mean Imbalance Spread (€/MWh)',
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    line: { color: '#10b981', width: 2.2 },
+                    yaxis: 'y2'
+                }
+            ];
+
+            const layout = {
+                paper_bgcolor: '#111827',
+                plot_bgcolor: '#090d16',
+                font: { color: '#f3f4f6', family: 'Segoe UI, sans-serif' },
+                margin: { l: 55, r: 55, t: 25, b: 45 },
+                xaxis: {
+                    title: 'Hour of Day (CET)',
+                    gridcolor: '#1f2937',
+                    color: '#94a3b8'
+                },
+                yaxis: {
+                    title: 'Spread Standard Deviation (EUR)',
+                    gridcolor: '#1f2937',
+                    color: '#94a3b8'
+                },
+                yaxis2: {
+                    title: 'Mean Spread (EUR)',
+                    overlaying: 'y',
+                    side: 'right',
+                    gridcolor: 'transparent',
+                    color: '#10b981'
+                },
+                legend: {
+                    orientation: 'h',
+                    x: 0,
+                    y: 1.15,
+                    bgcolor: 'rgba(11, 17, 32, 0.8)'
+                }
+            };
+
+            Plotly.newPlot('plotlyVolatilityChart', traces, layout, { responsive: true, displaylogo: false });
+
+            const morningObj = data.hourly_volatility.slice(6, 9);
+            const eveningObj = data.hourly_volatility.slice(17, 21);
+            const nightObj = [...data.hourly_volatility.slice(22, 24), ...data.hourly_volatility.slice(0, 6)];
+
+            const avgMorningStd = (morningObj.reduce((a, b) => a + b.std_spread, 0) / morningObj.length).toFixed(1);
+            const avgEveningStd = (eveningObj.reduce((a, b) => a + b.std_spread, 0) / eveningObj.length).toFixed(1);
+            const avgNightStd = (nightObj.reduce((a, b) => a + b.std_spread, 0) / nightObj.length).toFixed(1);
+
+            document.getElementById('kpiMorningRamp').innerText = `± ${avgMorningStd} €/MWh Vol`;
+            document.getElementById('kpiEveningPeak').innerText = `± ${avgEveningStd} €/MWh Vol`;
+            document.getElementById('kpiNightBase').innerText = `± ${avgNightStd} €/MWh Vol`;
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            syncNavbarUI();
+            fetchDiagnosticsData();
+        });
+    </script>
+</body>
+</html>
