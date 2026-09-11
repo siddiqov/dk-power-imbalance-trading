@@ -21,7 +21,7 @@ export function Header({ priceArea, onPriceAreaChange, viewMode = 'live', dateSt
           <p className="text-slate-400 font-medium mt-1">
             {viewMode === 'today'
               ? `Transformer-TFT Model — Full Day 96 Quarters (${dateStr || 'Today'})`
-              : 'Transformer-TFT Model — Next 6 Tradeable Quarters'}
+              : 'Transformer-TFT Model — Next 8 Tradeable Quarters'}
           </p>
         </div>
       </div>

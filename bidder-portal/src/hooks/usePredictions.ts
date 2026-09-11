@@ -77,12 +77,12 @@ export function usePredictions(
 
       if (viewMode === 'live') {
         // Gate closure is exactly 120 minutes (2 hours) before physical delivery start.
-        // Shows the next 4 tradeable quarters whose gate closure has not yet passed.
+        // Shows the next 8 tradeable quarters whose gate closure has not yet passed.
         const threshold = new Date(Date.now() + 120 * 60 * 1000).toISOString();
         query = query
           .gt('time_dk', threshold)
           .order('time_dk', { ascending: true })
-          .limit(6);
+          .limit(8);
       } else if (viewMode === 'today') {
         // 'today' mode: fetch all 96 settlement quarters for the date directly from Supabase
         query = query
