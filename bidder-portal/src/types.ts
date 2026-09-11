@@ -16,3 +16,21 @@ export interface QuarterPrediction {
   model_name: string;
   updated_at: string;
 }
+
+export type PortalViewMode = 'live' | 'today' | 'range';
+
+export interface DateTimeRange {
+  start: string; // ISO or YYYY-MM-DDTHH:mm
+  end: string;   // ISO or YYYY-MM-DDTHH:mm
+}
+
+export interface DaySummary {
+  totalQuarters: number;
+  buyCount: number;
+  sellCount: number;
+  holdCount: number;
+  avgSpot: number;
+  avgImbalance: number;
+  avgSpread: number;
+  totalVolume: number;
+}

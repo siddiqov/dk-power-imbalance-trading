@@ -1,25 +1,233 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Header } from './components/Header';
 import { QuarterTable } from './components/QuarterTable';
 import { CountdownTimer } from './components/CountdownTimer';
 import { LastUpdated } from './components/LastUpdated';
-import { usePredictions } from './hooks/usePredictions';
+import { ViewToggle } from './components/ViewToggle';
+import { DailySummaryBanner } from './components/DailySummaryBanner';
+import { RangeFilterBar } from './components/RangeFilterBar';
+import { usePredictions, getTodayDateString } from './hooks/usePredictions';
+import { PortalViewMode, DateTimeRange } from './types';
+import { RefreshCw } from 'lucide-react';
+
+/**
+ * isAllScreen = true ONLY when pathname starts with /all or /today.
+ * Base URL / is always the clean customer view — no toggles, no filters.
+ */
+function getInitialParams(): {
+  isAllScreen: boolean;
+  initialMode: PortalViewMode;
+  initialZone: 'DK1' | 'DK2';
+  initialStart?: string;
+  initialEnd?: string;
+} {
+  try {
+    const pathname = window.location.pathname.toLowerCase();
+    const params = new URLSearchParams(window.location.search);
+    const view = params.get('view')?.toLowerCase();
+    const zone = params.get('zone')?.toUpperCase();
+    const start = params.get('start') || undefined;
+    const end = params.get('end') || undefined;
+
+    // Only unlock the full UI when manually navigating to /all
+    const isAllScreen = pathname.startsWith('/all') || pathname.startsWith('/today');
+
+    let initialMode: PortalViewMode = 'live';
+    if (isAllScreen) {
+      initialMode = (view === 'range' || (start && end)) ? 'range' : 'today';
+    }
+
+    const initialZone: 'DK1' | 'DK2' = zone === 'DK2' ? 'DK2' : 'DK1';
+    return { isAllScreen, initialMode, initialZone, initialStart: start, initialEnd: end };
+  } catch {
+    return { isAllScreen: false, initialMode: 'live', initialZone: 'DK1' };
+  }
+}
 
 function App() {
-  const [priceArea, setPriceArea] = useState<'DK1' | 'DK2'>('DK1');
-  const { predictions, loading, error, lastUpdated, refetch } = usePredictions(priceArea);
+  const initial = useMemo(() => getInitialParams(), []);
+  const todayStr = useMemo(() => getTodayDateString(), []);
+
+  const [priceArea, setPriceArea] = useState<'DK1' | 'DK2'>(initial.initialZone);
+  const [viewMode, setViewMode] = useState<PortalViewMode>(initial.initialMode);
+  const [dateRange, setDateRange] = useState<DateTimeRange>({
+    start: initial.initialStart || `${todayStr}T00:00`,
+    end: initial.initialEnd || `${todayStr}T23:45`,
+  });
+
+  // Locked to pathname — never changes by button click on /
+  const isAllScreen = initial.isAllScreen;
+  const effectiveMode: PortalViewMode = isAllScreen ? viewMode : 'live';
+
+  const updateUrl = useCallback(
+    (mode: PortalViewMode, zone: 'DK1' | 'DK2', range: DateTimeRange) => {
+      try {
+        const url = new URL(window.location.href);
+        if (mode === 'range') {
+          url.searchParams.set('view', 'range');
+          url.searchParams.set('start', range.start);
+          url.searchParams.set('end', range.end);
+        } else {
+          url.searchParams.delete('view');
+          url.searchParams.delete('start');
+          url.searchParams.delete('end');
+        }
+        zone === 'DK2'
+          ? url.searchParams.set('zone', 'DK2')
+          : url.searchParams.delete('zone');
+        window.history.replaceState({}, '', url.pathname + url.search);
+      } catch {
+        // ignore
+      }
+    },
+    []
+  );
+
+  const handlePriceAreaChange = (zone: 'DK1' | 'DK2') => {
+    setPriceArea(zone);
+    updateUrl(viewMode, zone, dateRange);
+  };
+
+  const handleViewModeChange = (mode: PortalViewMode) => {
+    setViewMode(mode);
+    updateUrl(mode, priceArea, dateRange);
+  };
+
+  const handleRangeApply = (newRange: DateTimeRange) => {
+    setDateRange(newRange);
+    updateUrl('range', priceArea, newRange);
+  };
+
+  useEffect(() => {
+    const handler = () => window.location.reload();
+    window.addEventListener('popstate', handler);
+    return () => window.removeEventListener('popstate', handler);
+  }, []);
+
+  const { predictions, loading, error, lastUpdated, refetch, daySummary, effectiveDate } =
+    usePredictions(priceArea, effectiveMode, undefined, dateRange);
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col items-center">
-      <div className="w-full max-w-7xl px-4 py-8 flex flex-col gap-8">
-        <Header priceArea={priceArea} onPriceAreaChange={setPriceArea} />
-        
-        <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
-          <CountdownTimer nextQuarter={predictions[0]} onExpire={refetch} />
-          <LastUpdated timestamp={lastUpdated} />
-        </div>
+      <div className="w-full max-w-7xl px-4 py-8 flex flex-col gap-6">
 
-        <QuarterTable predictions={predictions} loading={loading} error={error} />
+        <Header
+          priceArea={priceArea}
+          onPriceAreaChange={handlePriceAreaChange}
+          viewMode={effectiveMode}
+          dateStr={
+            isAllScreen && viewMode === 'range'
+              ? `${dateRange.start.replace('T', ' ')} → ${dateRange.end.replace('T', ' ')}`
+              : effectiveDate
+          }
+        />
+
+        {/* ════════════════════════════════════════════════════
+            BASE URL  /  →  CUSTOMER VIEW
+            Clean: countdown timer + next 4 quarters only.
+            No ViewToggle, no RangeFilterBar, no filters.
+            ════════════════════════════════════════════════════ */}
+        {!isAllScreen && (
+          <>
+            <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
+              <CountdownTimer nextQuarter={predictions[0]} onExpire={refetch} />
+              <LastUpdated timestamp={lastUpdated} />
+            </div>
+
+            <QuarterTable
+              predictions={predictions}
+              loading={loading}
+              error={error}
+              isTodayMode={false}
+            />
+          </>
+        )}
+
+        {/* ════════════════════════════════════════════════════
+            /all  →  INTERNAL / TESTING VIEW
+            Full filter UI: ViewToggle + RangeFilterBar +
+            DailySummaryBanner + full quarters table with filters.
+            ════════════════════════════════════════════════════ */}
+        {isAllScreen && (
+          <>
+            <ViewToggle
+              viewMode={viewMode}
+              onViewModeChange={handleViewModeChange}
+              priceArea={priceArea}
+              dateRange={dateRange}
+            />
+
+            {viewMode === 'range' && (
+              <RangeFilterBar
+                priceArea={priceArea}
+                onPriceAreaChange={handlePriceAreaChange}
+                dateRange={dateRange}
+                onRangeApply={handleRangeApply}
+                resultCount={predictions.length}
+                loading={loading}
+              />
+            )}
+
+            <div className="flex flex-col gap-3">
+              <DailySummaryBanner
+                summary={daySummary}
+                dateStr={
+                  viewMode === 'range'
+                    ? `${dateRange.start.replace('T', ' ')} → ${dateRange.end.replace('T', ' ')}`
+                    : effectiveDate
+                }
+                priceArea={priceArea}
+                title={
+                  viewMode === 'range'
+                    ? 'Custom Range Settlement Overview'
+                    : 'Full Settlement Day Overview'
+                }
+                subtitle={
+                  viewMode === 'range' ? (
+                    <>
+                      Filtering window:{' '}
+                      <span className="font-mono text-slate-200">
+                        {dateRange.start.replace('T', ' ')}
+                      </span>{' '}
+                      to{' '}
+                      <span className="font-mono text-slate-200">
+                        {dateRange.end.replace('T', ' ')}
+                      </span>{' '}
+                      ({predictions.length} quarters found)
+                    </>
+                  ) : undefined
+                }
+              />
+
+              <div className="flex items-center justify-between px-3 py-2 rounded-lg border border-slate-700/60 text-xs text-slate-400">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                  <span>Supabase Direct Query ({predictions.length} quarters loaded)</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <LastUpdated timestamp={lastUpdated} />
+                  <button
+                    type="button"
+                    onClick={() => refetch()}
+                    className="flex items-center gap-1 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                    title="Force refresh from Supabase"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Refresh</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <QuarterTable
+              predictions={predictions}
+              loading={loading}
+              error={error}
+              isTodayMode={true}
+            />
+          </>
+        )}
+
       </div>
     </div>
   );

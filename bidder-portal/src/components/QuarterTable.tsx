@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Info, HelpCircle } from 'lucide-react';
 import { QuarterPrediction } from '../types';
 import { QuarterRow } from './QuarterRow';
@@ -7,6 +7,7 @@ interface QuarterTableProps {
   predictions: QuarterPrediction[];
   loading: boolean;
   error: string | null;
+  isTodayMode?: boolean;
 }
 
 interface ColumnDef {
@@ -58,28 +59,83 @@ const COLUMNS: ColumnDef[] = [
   },
 ];
 
-export function QuarterTable({ predictions, loading, error }: QuarterTableProps) {
+export function QuarterTable({ predictions, loading, error, isTodayMode = false }: QuarterTableProps) {
   const [activeCol, setActiveCol] = useState<ColumnDef | null>(null);
+  const [signalFilter, setSignalFilter] = useState<'ALL' | 'BUY' | 'SELL' | 'HOLD'>('ALL');
+
+  const hasMultipleDates = useMemo(() => {
+    return new Set(predictions.map((p) => p.delivery_date)).size > 1;
+  }, [predictions]);
+
+  const filteredPredictions = predictions.filter((p) => {
+    if (signalFilter === 'ALL') return true;
+    const dec = (p.decision || '').toUpperCase();
+    if (signalFilter === 'BUY') return dec.includes('BUY');
+    if (signalFilter === 'SELL') return dec.includes('SELL');
+    if (signalFilter === 'HOLD') return !dec.includes('BUY') && !dec.includes('SELL');
+    return true;
+  });
 
   if (error) {
     return <div className="p-4 bg-red-900/50 text-red-200 border border-red-800 rounded-lg">Error: {error}</div>;
   }
 
   if (loading && predictions.length === 0) {
-    return <div className="p-8 text-center text-slate-400">Loading predictions...</div>;
+    return <div className="p-8 text-center text-slate-400">Loading predictions from Supabase...</div>;
   }
 
   if (!loading && predictions.length === 0) {
     return (
       <div className="p-8 text-center text-slate-400 bg-slate-800 rounded-xl border border-slate-700">
-        No upcoming quarters available.
+        {isTodayMode ? 'No quarter predictions found for today in Supabase.' : 'No upcoming quarters available.'}
       </div>
     );
   }
 
   return (
-    <div className="w-full bg-slate-800 rounded-xl border border-slate-700 shadow-xl overflow-hidden">
-      {/* Interactive Definition Banner (replaces awkward floating popups so data is NEVER obscured) */}
+    <div className="w-full bg-slate-800 rounded-xl border border-slate-700 shadow-xl overflow-hidden flex flex-col">
+      {/* Top Controls: Filter Pills for All 96 Quarters Mode + Definition Bar */}
+      {isTodayMode && (
+        <div className="px-5 py-3 bg-slate-900/60 border-b border-slate-700/80 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-1.5">
+            <span className="text-slate-400 font-medium mr-1">Filter Signals:</span>
+            {(['ALL', 'BUY', 'SELL', 'HOLD'] as const).map((filter) => (
+              <button
+                key={filter}
+                type="button"
+                onClick={() => setSignalFilter(filter)}
+                className={`px-2.5 py-1 rounded font-medium text-xs transition-colors cursor-pointer ${
+                  signalFilter === filter
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'bg-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-750'
+                }`}
+              >
+                {filter}
+                {filter !== 'ALL' && (
+                  <span className="ml-1 opacity-70">
+                    (
+                    {
+                      predictions.filter((p) => {
+                        const dec = (p.decision || '').toUpperCase();
+                        if (filter === 'BUY') return dec.includes('BUY');
+                        if (filter === 'SELL') return dec.includes('SELL');
+                        return !dec.includes('BUY') && !dec.includes('SELL');
+                      }).length
+                    }
+                    )
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          <div className="text-slate-400 text-xs font-mono">
+            Showing {filteredPredictions.length} of {predictions.length} quarters
+          </div>
+        </div>
+      )}
+
+      {/* Interactive Definition Banner */}
       <div className="px-5 py-2.5 bg-slate-900/90 border-b border-slate-700/80 flex items-center gap-2.5 text-xs transition-colors duration-200">
         {activeCol ? (
           <div className="flex items-center gap-2 text-slate-200 animate-fadeIn">
@@ -140,8 +196,13 @@ export function QuarterTable({ predictions, loading, error }: QuarterTableProps)
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-700">
-            {predictions.map((prediction) => (
-              <QuarterRow key={prediction.time_dk} prediction={prediction} />
+            {filteredPredictions.map((prediction) => (
+              <QuarterRow
+                key={`${prediction.delivery_date}_${prediction.quarter_index}_${prediction.time_dk}`}
+                prediction={prediction}
+                isTodayMode={isTodayMode}
+                showDate={hasMultipleDates}
+              />
             ))}
           </tbody>
         </table>
