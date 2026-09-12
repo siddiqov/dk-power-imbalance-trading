@@ -252,8 +252,8 @@ export function QuarterTable({
 
   return (
     <div className="w-full bg-slate-800 rounded-xl border border-slate-700 shadow-xl overflow-hidden flex flex-col">
-      {/* Top Controls: Filter Pills for All 96 Quarters Mode */}
-      {isTodayMode && (
+      {/* Top Controls: Filter Pills for All 96 Quarters / Audit Mode */}
+      {(isTodayMode || isAuditView) && (
         <div className="px-5 py-3 bg-slate-900/60 border-b border-slate-700/80 flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-slate-400 font-medium mr-1">Filter Signals:</span>
@@ -384,8 +384,8 @@ export function QuarterTable({
         </div>
       </div>
 
-      {/* Scrollable Container with Sticky Table Header */}
-      <div className={`overflow-x-auto ${isAuditView ? 'max-h-[75vh] overflow-y-auto' : ''}`}>
+      {/* Container with Horizontal Scroll if needed */}
+      <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse whitespace-nowrap">
           <thead className="sticky top-0 z-20 bg-slate-900 shadow-md">
             <tr className="bg-slate-900 text-slate-400 uppercase text-xs tracking-wider border-b border-slate-700">
@@ -396,10 +396,10 @@ export function QuarterTable({
                   right: 'text-right',
                 }[col.align];
 
-                const flexAlign = {
-                  left: 'justify-start',
-                  center: 'justify-center',
-                  right: 'justify-end',
+                const colAlign = {
+                  left: 'items-start',
+                  center: 'items-center',
+                  right: 'items-end',
                 }[col.align];
 
                 const isHovered = activeCol?.key === col.key;
@@ -411,12 +411,12 @@ export function QuarterTable({
                     title={col.tooltip}
                     onMouseEnter={() => setActiveCol(col)}
                     onMouseLeave={() => setActiveCol(null)}
-                    className={`px-3 py-3 font-medium select-none transition-colors group ${alignClass} ${
+                    className={`px-3 py-2.5 font-medium select-none transition-colors group ${alignClass} ${
                       isHovered ? 'bg-slate-800/80 text-indigo-300' : 'hover:bg-slate-850 hover:text-slate-200'
                     }`}
                   >
-                    <div className={`inline-flex items-center gap-1.5 ${flexAlign}`}>
-                      <span>{col.label}</span>
+                    <div className={`flex flex-col ${colAlign} gap-1`}>
+                      <span className="leading-tight">{col.label}</span>
                       <button
                         type="button"
                         onClick={(e) => {
@@ -424,17 +424,17 @@ export function QuarterTable({
                           handleCopyColumn(col, e);
                         }}
                         title={`Copy ${col.label} column to clipboard (Excel format)`}
-                        className={`p-1 rounded transition-all cursor-pointer ${
+                        className={`p-0.5 rounded transition-all cursor-pointer inline-flex items-center justify-center ${
                           isCopied
                             ? 'bg-emerald-500/20 text-emerald-400 opacity-100 scale-110'
-                            : 'text-slate-400 hover:text-indigo-300 hover:bg-slate-700/70 opacity-60 group-hover:opacity-100'
+                            : 'text-slate-500 hover:text-indigo-300 hover:bg-slate-800 opacity-60 group-hover:opacity-100'
                         }`}
                         aria-label={`Copy ${col.label} column`}
                       >
                         {isCopied ? (
-                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          <Check className="w-3 h-3 text-emerald-400" />
                         ) : (
-                          <Copy className="w-3.5 h-3.5" />
+                          <Copy className="w-3 h-3" />
                         )}
                       </button>
                     </div>
