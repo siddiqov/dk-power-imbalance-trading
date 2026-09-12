@@ -31,13 +31,13 @@ export function DailySummaryBanner({
   title = 'Full Settlement Day Overview',
   subtitle,
 }: DailySummaryBannerProps) {
-  // Default is strictly 'full'
+  // Default is 'compact'
   const [layoutMode, setLayoutMode] = useState<'full' | 'compact'>(() => {
     try {
-      const saved = localStorage.getItem('portal_summary_layout');
-      return saved === 'compact' ? 'compact' : 'full';
+      const saved = localStorage.getItem('portal_summary_layout_v2');
+      return saved === 'full' ? 'full' : 'compact';
     } catch {
-      return 'full';
+      return 'compact';
     }
   });
 
@@ -46,7 +46,7 @@ export function DailySummaryBanner({
   const handleToggle = (mode: 'full' | 'compact') => {
     setLayoutMode(mode);
     try {
-      localStorage.setItem('portal_summary_layout', mode);
+      localStorage.setItem('portal_summary_layout_v2', mode);
     } catch {
       // ignore
     }
@@ -353,24 +353,24 @@ export function DailySummaryBanner({
           {/* Right: Quick Market Averages in compact badge pills */}
           <div className="flex items-center gap-2 flex-wrap border-t lg:border-t-0 border-slate-800 pt-2 lg:pt-0">
             <div className="px-2.5 py-1.5 rounded-lg bg-slate-850 border border-slate-750 text-xs font-mono">
-              <span className="text-slate-400 mr-1.5">Spot:</span>
+              <span className="text-slate-400 mr-1.5">Avg Spot:</span>
               <strong className="text-slate-100">{formatCurrency(summary.avgSpot)}</strong>
             </div>
 
             <div className="px-2.5 py-1.5 rounded-lg bg-slate-850 border border-slate-750 text-xs font-mono">
-              <span className="text-slate-400 mr-1.5">Pred:</span>
+              <span className="text-slate-400 mr-1.5">Avg Pred:</span>
               <strong className="text-indigo-300">{formatCurrency(summary.avgImbalance)}</strong>
             </div>
 
             <div className="px-2.5 py-1.5 rounded-lg bg-slate-850 border border-slate-750 text-xs font-mono">
-              <span className="text-slate-400 mr-1.5">Spread:</span>
+              <span className="text-slate-400 mr-1.5">Avg Spread:</span>
               <strong className={summary.avgSpread >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
                 {formatSpread(summary.avgSpread)}
               </strong>
             </div>
 
             <div className="px-2.5 py-1.5 rounded-lg bg-slate-850 border border-slate-750 text-xs font-mono">
-              <span className="text-slate-400 mr-1.5">Vol:</span>
+              <span className="text-slate-400 mr-1.5">Total Vol:</span>
               <strong className="text-slate-200">{summary.totalVolume.toFixed(1)} MWh</strong>
             </div>
           </div>
