@@ -3,15 +3,11 @@ import { Header } from './components/Header';
 import { QuarterTable } from './components/QuarterTable';
 import { CountdownTimer } from './components/CountdownTimer';
 import { LastUpdated } from './components/LastUpdated';
-import { ViewToggle } from './components/ViewToggle';
 import { DailySummaryBanner } from './components/DailySummaryBanner';
 import { RangeFilterBar } from './components/RangeFilterBar';
 import { ModelSelector } from './components/ModelSelector';
-import { DenmarkClock } from './components/DenmarkClock';
-import { KpiCards } from './components/KpiCards';
 import { usePredictions, getTodayDateString } from './hooks/usePredictions';
 import { PortalViewMode, DateTimeRange } from './types';
-import { RefreshCw } from 'lucide-react';
 
 /**
  * isAllScreen = true ONLY when pathname starts with /all or /today.
@@ -29,7 +25,6 @@ function getInitialParams(): {
   try {
     const pathname = window.location.pathname.toLowerCase();
     const params = new URLSearchParams(window.location.search);
-    const view = params.get('view')?.toLowerCase();
     const zone = params.get('zone')?.toUpperCase();
     const start = params.get('start') || undefined;
     const end = params.get('end') || undefined;
@@ -39,10 +34,8 @@ function getInitialParams(): {
     // Only unlock the full UI when manually navigating to /all or /today
     const isAllScreen = pathname.startsWith('/all') || pathname.startsWith('/today');
 
-    let initialMode: PortalViewMode = 'live';
-    if (isAllScreen) {
-      initialMode = (view === 'range' || (start && end)) ? 'range' : 'today';
-    }
+    // /all is dedicated to Custom Range view
+    const initialMode: PortalViewMode = isAllScreen ? 'range' : 'live';
 
     const initialZone: 'DK1' | 'DK2' = zone === 'DK2' ? 'DK2' : 'DK1';
     return {
@@ -70,7 +63,7 @@ function App() {
   const todayStr = useMemo(() => getTodayDateString(), []);
 
   const [priceArea, setPriceArea] = useState<'DK1' | 'DK2'>(initial.initialZone);
-  const [viewMode, setViewMode] = useState<PortalViewMode>(initial.initialMode);
+  const viewMode = initial.initialMode;
   const [selectedModel, setSelectedModel] = useState<string>(initial.initialModel);
   const [marketMode, setMarketMode] = useState<'INTRADAY_D0' | 'DAY_AHEAD_D1'>(initial.initialMarketMode);
 
@@ -131,11 +124,6 @@ function App() {
     updateUrl(viewMode, zone, dateRange, selectedModel, marketMode);
   };
 
-  const handleViewModeChange = (mode: PortalViewMode) => {
-    setViewMode(mode);
-    updateUrl(mode, priceArea, dateRange, selectedModel, marketMode);
-  };
-
   const handleModelChange = (newModel: string) => {
     setSelectedModel(newModel);
     updateUrl(viewMode, priceArea, dateRange, newModel, marketMode);
@@ -176,10 +164,13 @@ function App() {
           onPriceAreaChange={handlePriceAreaChange}
           viewMode={effectiveMode}
           dateStr={
-            isAllScreen && viewMode === 'range'
+            isAllScreen
               ? `${dateRange.start.replace('T', ' ')} → ${dateRange.end.replace('T', ' ')}`
               : effectiveDate
           }
+          isDayAhead={isAllScreen && marketMode === 'DAY_AHEAD_D1'}
+          selectedModel={isAllScreen ? selectedModel : 'Transformer-TFT'}
+          isAllScreen={isAllScreen}
         />
 
         {/* ════════════════════════════════════════════════════
@@ -193,7 +184,6 @@ function App() {
             <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-800 p-5 sm:p-6 rounded-xl border border-slate-700 shadow-lg">
               <CountdownTimer nextQuarter={predictions[0]} onExpire={refetch} />
               <div className="flex flex-wrap items-center gap-3">
-                <DenmarkClock />
                 <LastUpdated timestamp={lastUpdated} />
               </div>
             </div>
@@ -209,92 +199,48 @@ function App() {
 
         {/* ════════════════════════════════════════════════════
             /all  →  INTERNAL / MULTI-MODEL AUDIT VIEW
-            Full UI: ModelSelector + ViewToggle + RangeFilterBar +
-            DailySummaryBanner + full quarters table with filters.
+            Dedicated Custom Range view with RangeFilterBar,
+            DailySummaryBanner, KpiCards, ModelSelector, and Table.
             ════════════════════════════════════════════════════ */}
         {isAllScreen && (
           <>
+            <RangeFilterBar
+              priceArea={priceArea}
+              onPriceAreaChange={handlePriceAreaChange}
+              marketMode={marketMode}
+              onMarketModeChange={handleMarketModeChange}
+              dateRange={dateRange}
+              onRangeApply={handleRangeApply}
+              resultCount={predictions.length}
+              loading={loading}
+            />
+
+            <DailySummaryBanner
+              summary={daySummary}
+              predictions={predictions}
+              dateStr={`${dateRange.start.replace('T', ' ')} → ${dateRange.end.replace('T', ' ')}`}
+              priceArea={priceArea}
+              title={`Custom Range Audit (${selectedModel} - ${marketMode === 'DAY_AHEAD_D1' ? 'Day-Ahead' : 'Intraday'})`}
+              subtitle={
+                <>
+                  Filtering window:{' '}
+                  <span className="font-mono text-slate-200">
+                    {dateRange.start.replace('T', ' ')}
+                  </span>{' '}
+                  to{' '}
+                  <span className="font-mono text-slate-200">
+                    {dateRange.end.replace('T', ' ')}
+                  </span>{' '}
+                  ({predictions.length} quarters loaded)
+                </>
+              }
+            />
+
+            {/* Compact Model Selector directly above QuarterTable */}
             <ModelSelector
               selectedModel={selectedModel}
               onModelChange={handleModelChange}
-              marketMode={marketMode}
-              onMarketModeChange={handleMarketModeChange}
             />
-
-            <ViewToggle
-              viewMode={viewMode}
-              onViewModeChange={handleViewModeChange}
-              priceArea={priceArea}
-              dateRange={dateRange}
-            />
-
-            {viewMode === 'range' && (
-              <RangeFilterBar
-                priceArea={priceArea}
-                onPriceAreaChange={handlePriceAreaChange}
-                dateRange={dateRange}
-                onRangeApply={handleRangeApply}
-                resultCount={predictions.length}
-                loading={loading}
-              />
-            )}
-
-            <div className="flex flex-col gap-3">
-              <DailySummaryBanner
-                summary={daySummary}
-                dateStr={
-                  viewMode === 'range'
-                    ? `${dateRange.start.replace('T', ' ')} → ${dateRange.end.replace('T', ' ')}`
-                    : effectiveDate
-                }
-                priceArea={priceArea}
-                title={
-                  viewMode === 'range'
-                    ? `Custom Range (${selectedModel} - ${marketMode === 'DAY_AHEAD_D1' ? 'Day-Ahead' : 'Intraday'})`
-                    : `Settlement Overview (${selectedModel} - ${marketMode === 'DAY_AHEAD_D1' ? 'Day-Ahead' : 'Intraday'})`
-                }
-                subtitle={
-                  viewMode === 'range' ? (
-                    <>
-                      Filtering window:{' '}
-                      <span className="font-mono text-slate-200">
-                        {dateRange.start.replace('T', ' ')}
-                      </span>{' '}
-                      to{' '}
-                      <span className="font-mono text-slate-200">
-                        {dateRange.end.replace('T', ' ')}
-                      </span>{' '}
-                      ({predictions.length} quarters found)
-                    </>
-                  ) : undefined
-                }
-              />
-
-              {/* 4 Professional KPI Cards for Trading Audit */}
-              <KpiCards predictions={predictions} daySummary={daySummary} />
-
-              <div className="flex items-center justify-between px-3 py-2 rounded-lg border border-slate-700/60 text-xs text-slate-400">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                  <span>
-                    Supabase [{selectedModel} | {marketMode}] ({predictions.length} quarters loaded)
-                  </span>
-                </div>
-                <div className="flex flex-wrap items-center gap-3">
-                  <DenmarkClock />
-                  <LastUpdated timestamp={lastUpdated} />
-                  <button
-                    type="button"
-                    onClick={() => refetch()}
-                    className="flex items-center gap-1 text-slate-300 hover:text-white transition-colors cursor-pointer"
-                    title="Force refresh from Supabase"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    <span>Refresh</span>
-                  </button>
-                </div>
-              </div>
-            </div>
 
             <QuarterTable
               predictions={predictions}
