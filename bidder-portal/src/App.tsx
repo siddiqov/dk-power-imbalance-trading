@@ -7,6 +7,7 @@ import { ViewToggle } from './components/ViewToggle';
 import { DailySummaryBanner } from './components/DailySummaryBanner';
 import { RangeFilterBar } from './components/RangeFilterBar';
 import { ModelSelector } from './components/ModelSelector';
+import { DenmarkClock } from './components/DenmarkClock';
 import { usePredictions, getTodayDateString } from './hooks/usePredictions';
 import { PortalViewMode, DateTimeRange } from './types';
 import { RefreshCw } from 'lucide-react';
@@ -188,9 +189,12 @@ function App() {
             ════════════════════════════════════════════════════ */}
         {!isAllScreen && (
           <>
-            <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
+            <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-800 p-5 sm:p-6 rounded-xl border border-slate-700 shadow-lg">
               <CountdownTimer nextQuarter={predictions[0]} onExpire={refetch} />
-              <LastUpdated timestamp={lastUpdated} />
+              <div className="flex flex-wrap items-center gap-3">
+                <DenmarkClock />
+                <LastUpdated timestamp={lastUpdated} />
+              </div>
             </div>
 
             <QuarterTable
@@ -272,7 +276,8 @@ function App() {
                     Supabase [{selectedModel} | {marketMode}] ({predictions.length} quarters loaded)
                   </span>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <DenmarkClock />
                   <LastUpdated timestamp={lastUpdated} />
                   <button
                     type="button"
