@@ -30,6 +30,19 @@ ALL_MODELS = [
 ]
 
 
+def clean_numeric(val) -> Optional[float]:
+    """Safely converts currency/status strings (e.g. '+€ 107.25', '-€ 91.17', '--') to numeric float."""
+    if val is None or val == "" or val == "--":
+        return None
+    if isinstance(val, (int, float)):
+        return float(val) if not pd.isna(val) else None
+    cleaned = str(val).replace("€", "").replace("EUR", "").replace("+", "").replace(",", "").strip()
+    try:
+        return float(cleaned)
+    except (ValueError, TypeError):
+        return None
+
+
 class SupabasePublisher:
     """
     Pushes multi-model predictions and trade audit records
@@ -55,28 +68,26 @@ class SupabasePublisher:
         trades: List[Dict],
         price_area: str,
         delivery_date: str,
-        model_name: str = "Transformer-TFT",
+        model_name: str,
         market_mode: str = "INTRADAY_D0",
     ) -> int:
         """
-        Upsert a list of trade dicts (from V3CommercialStrategyEngine.evaluate_trading_ledger)
-        into Supabase. Returns the number of rows upserted.
-
-        Args:
-            trades: List of trade dicts from summary["trades"]
-            price_area: 'DK1' or 'DK2'
-            delivery_date: 'YYYY-MM-DD' string
-            model_name: Model identifier, default 'Transformer-TFT'
-            market_mode: 'INTRADAY_D0' or 'DAY_AHEAD_D1'
+        Takes trade objects from V3CommercialStrategyEngine and upserts into Supabase.
         """
+        if not trades:
+            logger.warning(f"No trades to publish for {price_area} {delivery_date} [{market_mode}] model={model_name}")
+            return 0
+
         cph_tz = zoneinfo.ZoneInfo("Europe/Copenhagen")
+        d_parts = [int(p) for p in delivery_date.split("-")]
 
         rows = []
-        d_parts = [int(p) for p in delivery_date.split("-")]
         for trade in trades:
-            q_raw = str(trade.get("quarter", "Q1")).split(" ")[0].replace("Q", "")
+            # Derive quarter index from string like 'Q1' or 'Q1 (+15m)'
+            q_raw = trade.get("quarter", "Q1")
+            q_str = q_raw.split()[0].replace("Q", "").strip()
             try:
-                q_idx = int(q_raw)
+                q_idx = int(q_str)
             except ValueError:
                 q_idx = 1
             hour = (q_idx - 1) // 4
@@ -110,13 +121,21 @@ class SupabasePublisher:
 
             # Optional settlement fields if trade was already audited
             if trade.get("actual_settled_eur") is not None:
-                row["actual_settled_eur"] = trade.get("actual_settled_eur")
+                cleaned_actual = clean_numeric(trade.get("actual_settled_eur"))
+                if cleaned_actual is not None:
+                    row["actual_settled_eur"] = cleaned_actual
             if trade.get("net_pnl_eur") is not None:
-                row["net_pnl_eur"] = trade.get("net_pnl_eur")
+                cleaned_pnl = clean_numeric(trade.get("net_pnl_eur"))
+                if cleaned_pnl is not None:
+                    row["net_pnl_eur"] = cleaned_pnl
             if trade.get("fees_eur") is not None:
-                row["fees_eur"] = trade.get("fees_eur")
+                cleaned_fees = clean_numeric(trade.get("fees_eur"))
+                if cleaned_fees is not None:
+                    row["fees_eur"] = cleaned_fees
             if trade.get("gross_pnl_eur") is not None:
-                row["gross_pnl_eur"] = trade.get("gross_pnl_eur")
+                cleaned_gross = clean_numeric(trade.get("gross_pnl_eur"))
+                if cleaned_gross is not None:
+                    row["gross_pnl_eur"] = cleaned_gross
 
             rows.append(row)
 
@@ -241,28 +260,28 @@ class SupabasePublisher:
                 tax = (gross_pnl - fees) * tax_rate if (gross_pnl - fees) > 0 else 0.0
                 net_pnl = gross_pnl - fees - tax
 
-                row_update = {
-                    "id": row["id"],
-                    "actual_settled_eur": round(actual_price, 2),
-                    "spread_captured_eur": round(spread_cap, 2),
-                    "da_cash_flow_eur": round(da_cash, 2),
-                    "settle_cash_flow_eur": round(settle_cash, 2),
-                    "gross_pnl_eur": round(gross_pnl, 2),
-                    "fees_eur": round(fees, 2),
-                    "tax_eur": round(tax, 2),
-                    "net_pnl_eur": round(net_pnl, 2),
-                    "status": "SETTLED_AUDITED",
-                    "settled_at": now_iso,
-                    "updated_at": now_iso,
-                }
+                row_update = dict(row)
+                row_update.pop("id", None)
+                row_update["actual_settled_eur"] = round(actual_price, 2)
+                row_update["spread_captured_eur"] = round(spread_cap, 2)
+                row_update["da_cash_flow_eur"] = round(da_cash, 2)
+                row_update["settle_cash_flow_eur"] = round(settle_cash, 2)
+                row_update["gross_pnl_eur"] = round(gross_pnl, 2)
+                row_update["fees_eur"] = round(fees, 2)
+                row_update["tax_eur"] = round(tax, 2)
+                row_update["net_pnl_eur"] = round(net_pnl, 2)
+                row_update["status"] = "SETTLED_AUDITED"
+                row_update["settled_at"] = now_iso
+                row_update["updated_at"] = now_iso
                 updates_batch.append(row_update)
 
         if updates_batch:
-            # Batch update in chunks of 50
+            # Batch update in chunks of 50 using composite unique key (avoids identity column 'id')
+            on_conflict_cols = "market_mode,price_area,delivery_date,quarter_index,model_name"
             for i in range(0, len(updates_batch), 50):
                 chunk = updates_batch[i : i + 50]
                 try:
-                    self.table.upsert(chunk, on_conflict="id").execute()
+                    self.table.upsert(chunk, on_conflict=on_conflict_cols).execute()
                     updated_count += len(chunk)
                 except Exception as e:
                     logger.warning(f"  [Reconciliation] Upsert error: {e}")
