@@ -30,6 +30,21 @@ ALL_MODELS = [
 ]
 
 
+def _clean_numeric(val):
+    if val is None:
+        return None
+    if isinstance(val, (int, float)):
+        import numpy as np
+        return float(val) if not np.isnan(val) else None
+    s = str(val).replace("€", "").replace("EUR", "").replace(",", "").replace("+", "").strip()
+    if s in ["--", "None", "nan", "null", ""]:
+        return None
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        return None
+
+
 class SupabasePublisher:
     """
     Pushes multi-model predictions and trade audit records
@@ -40,33 +55,30 @@ class SupabasePublisher:
         url = os.getenv("SUPABASE_URL")
         key = os.getenv("SUPABASE_SERVICE_KEY")
         if not url or not key:
-            raise ValueError(
-                "Missing SUPABASE_URL or SUPABASE_SERVICE_KEY in environment. "
-                "Copy .env.example to .env and fill in your Supabase credentials."
-            )
+            raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_KEY must be set in .env")
         # Lazy import to avoid requiring supabase for non-publisher usage
         from supabase import create_client
         self.client = create_client(url, key)
         self.table = self.client.table("quarter_predictions")
         self.log_table = self.client.table("prediction_updates_log")
+        self.logs_table = self.log_table
 
     def upsert_predictions(
         self,
-        trades: List[Dict],
+        trades: list,
         price_area: str,
         delivery_date: str,
         model_name: str = "Transformer-TFT",
         market_mode: str = "INTRADAY_D0",
     ) -> int:
         """
-        Upsert a list of trade dicts (from V3CommercialStrategyEngine.evaluate_trading_ledger)
-        into Supabase. Returns the number of rows upserted.
-
+        Upserts a 96-quarter commercial trading schedule to Supabase.
+        
         Args:
-            trades: List of trade dicts from summary["trades"]
+            trades: List of trade dicts from V3CommercialStrategyEngine or DayAheadAuctionEngine
             price_area: 'DK1' or 'DK2'
-            delivery_date: 'YYYY-MM-DD' string
-            model_name: Model identifier, default 'Transformer-TFT'
+            delivery_date: 'YYYY-MM-DD'
+            model_name: Model name from ALL_MODELS
             market_mode: 'INTRADAY_D0' or 'DAY_AHEAD_D1'
         """
         cph_tz = zoneinfo.ZoneInfo("Europe/Copenhagen")
@@ -91,18 +103,18 @@ class SupabasePublisher:
                 "quarter_index": q_idx,
                 "quarter_label": f"Q{q_idx}",
                 "time_dk": time_dk_iso,
-                "spot_price_eur": trade.get("spot_price_eur"),
-                "pred_imbalance_eur": trade.get("pred_imbalance_eur"),
-                "pred_spread_eur": trade.get("pred_spread_eur"),
-                "p_up": trade.get("p_up"),
-                "p_down": trade.get("p_down"),
-                "p_up_spike": trade.get("p_up_spike"),
+                "spot_price_eur": _clean_numeric(trade.get("spot_price_eur")),
+                "pred_imbalance_eur": _clean_numeric(trade.get("pred_imbalance_eur")),
+                "pred_spread_eur": _clean_numeric(trade.get("pred_spread_eur")),
+                "p_up": _clean_numeric(trade.get("p_up")),
+                "p_down": _clean_numeric(trade.get("p_down")),
+                "p_up_spike": _clean_numeric(trade.get("p_up_spike")),
                 "decision": trade.get("action"),
                 "direction": trade.get("direction"),
-                "volume_mwh": trade.get("volume_mwh"),
-                "q10_price_eur": trade.get("q10_price_eur"),
-                "q50_price_eur": trade.get("q50_price_eur"),
-                "q90_price_eur": trade.get("q90_price_eur"),
+                "volume_mwh": _clean_numeric(trade.get("volume_mwh")),
+                "q10_price_eur": _clean_numeric(trade.get("q10_price_eur")),
+                "q50_price_eur": _clean_numeric(trade.get("q50_price_eur")),
+                "q90_price_eur": _clean_numeric(trade.get("q90_price_eur")),
                 "model_name": model_name,
                 "status": trade.get("status", "LOCKED_PENDING"),
                 "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -110,13 +122,21 @@ class SupabasePublisher:
 
             # Optional settlement fields if trade was already audited
             if trade.get("actual_settled_eur") is not None:
-                row["actual_settled_eur"] = trade.get("actual_settled_eur")
+                val = _clean_numeric(trade.get("actual_settled_eur"))
+                if val is not None:
+                    row["actual_settled_eur"] = val
             if trade.get("net_pnl_eur") is not None:
-                row["net_pnl_eur"] = trade.get("net_pnl_eur")
+                val = _clean_numeric(trade.get("net_pnl_eur"))
+                if val is not None:
+                    row["net_pnl_eur"] = val
             if trade.get("fees_eur") is not None:
-                row["fees_eur"] = trade.get("fees_eur")
+                val = _clean_numeric(trade.get("fees_eur"))
+                if val is not None:
+                    row["fees_eur"] = val
             if trade.get("gross_pnl_eur") is not None:
-                row["gross_pnl_eur"] = trade.get("gross_pnl_eur")
+                val = _clean_numeric(trade.get("gross_pnl_eur"))
+                if val is not None:
+                    row["gross_pnl_eur"] = val
 
             rows.append(row)
 
@@ -136,15 +156,14 @@ class SupabasePublisher:
                     on_conflict="market_mode,price_area,delivery_date,quarter_index,model_name",
                 ).execute()
             except Exception as e:
-                # If migration_v2 has not been applied yet, fallback to original 4-column constraint
-                if "quarter_predictions_upsert_key" in str(e) or "market_mode" in str(e):
-                    # Strip market_mode if column doesn't exist yet
-                    for b in batch:
-                        b.pop("market_mode", None)
-                    self.table.upsert(
-                        batch,
-                        on_conflict="price_area,delivery_date,quarter_index,model_name",
-                    ).execute()
+                err_str = str(e)
+                # If migration_v2 has not dropped old 4-column constraint yet, handle gracefully
+                if "23505" in err_str or "quarter_predictions_upsert_key" in err_str or "market_mode" in err_str or "duplicate key" in err_str:
+                    logger.warning(
+                        f"  [Supabase] 4-column unique constraint detected in DB. "
+                        f"Preserving primary Intraday records for model={model_name}."
+                    )
+                    continue
                 else:
                     raise e
             total_upserted += len(batch)

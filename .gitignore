@@ -67,6 +67,9 @@ forecast_ledger.db-wal
 trades_journal.db
 trades_journal.db-shm
 trades_journal.db-wal
+trade_journal.db
+trade_journal.db-shm
+trade_journal.db-wal
 trading_history.db
 trading_history.db-shm
 trading_history.db-wal

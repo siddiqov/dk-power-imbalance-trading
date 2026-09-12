@@ -24,23 +24,16 @@ SET market_mode = 'INTRADAY_D0'
 WHERE market_mode IS NULL;
 
 -- 3. Safely update the UNIQUE constraint to include market_mode
--- First, drop the old unique constraint if present
-DO $$
-BEGIN
-    IF EXISTS (
-        SELECT 1 
-        FROM pg_constraint 
-        WHERE conname = 'quarter_predictions_price_area_delivery_date_quarter_index_model_key'
-           OR conname = 'quarter_predictions_price_area_delivery_date_quarter_index_mode_key'
-    ) THEN
-        ALTER TABLE quarter_predictions 
-        DROP CONSTRAINT quarter_predictions_price_area_delivery_date_quarter_index_model_key;
-    END IF;
-EXCEPTION
-    WHEN undefined_object THEN NULL;
-END $$;
+-- First, drop the old unique constraints if present
+ALTER TABLE quarter_predictions 
+  DROP CONSTRAINT IF EXISTS quarter_predictions_price_area_delivery_date_quarter_index__key;
 
--- Drop generic unique constraint if it was created under the original table definition
+ALTER TABLE quarter_predictions 
+  DROP CONSTRAINT IF EXISTS quarter_predictions_price_area_delivery_date_quarter_index_model_key;
+
+ALTER TABLE quarter_predictions 
+  DROP CONSTRAINT IF EXISTS quarter_predictions_price_area_delivery_date_quarter_index_mode_key;
+
 ALTER TABLE quarter_predictions 
   DROP CONSTRAINT IF EXISTS quarter_predictions_pkey_unique;
 

@@ -23,19 +23,34 @@ sys.path.insert(0, PROJECT_ROOT)
 from scripts.push_predictions import push_predictions
 from src.supabase_publisher import ALL_MODELS
 
-# Setup dual logging (Terminal + File)
+# Setup dual logging (Terminal + File) with immediate flush
 os.makedirs(os.path.join(PROJECT_ROOT, "logs"), exist_ok=True)
 log_file = os.path.join(PROJECT_ROOT, "logs", "auto_publisher.log")
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[
-        logging.FileHandler(log_file, encoding="utf-8"),
-        logging.StreamHandler(sys.stdout),
-    ],
-)
+class ImmediateFlushFileHandler(logging.FileHandler):
+    def emit(self, record):
+        super().emit(record)
+        self.flush()
+
+class ImmediateFlushStreamHandler(logging.StreamHandler):
+    def emit(self, record):
+        super().emit(record)
+        self.flush()
+
+formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+
+file_h = ImmediateFlushFileHandler(log_file, encoding="utf-8")
+file_h.setFormatter(formatter)
+
+stream_h = ImmediateFlushStreamHandler(sys.stdout)
+stream_h.setFormatter(formatter)
+
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+root_logger.handlers.clear()
+root_logger.addHandler(file_h)
+root_logger.addHandler(stream_h)
+
 logger = logging.getLogger("AutoPublisher")
 
 

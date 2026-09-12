@@ -20,7 +20,7 @@ class V3CommercialStrategyEngine:
     Supports both Pure Day-Ahead (D-1) and Continuous Intraday (D-0).
     """
 
-    def __init__(self, price_area='DK1', capital=100000.0, base_volume_mwh=2.0):
+    def __init__(self, price_area='DK1', capital=20000.0, base_volume_mwh=2.0):
         self.price_area = price_area
         self.capital = float(capital)
         self.base_volume_mwh = float(base_volume_mwh)
@@ -28,6 +28,32 @@ class V3CommercialStrategyEngine:
         self.tax_rate = 0.22  # Danish 22% Corporate Tax
         self.model_suite = V3QuantileModelSuite(price_area=price_area)
         self.journal = V3TradeJournal()
+
+    def compute_conviction_volume(self, pred_spread: float, p_up: float, p_down: float, action: str, v_min: float = 1.0, v_max: float = 15.0) -> float:
+        """
+        Calculates dynamic trade volume in range [1.0 MW, 15.0 MW] based on
+        joint Spread Magnitude and Directional Classifier Conviction.
+        """
+        if "BUY" not in action and "SELL" not in action:
+            return 0.0
+
+        p_up_norm = p_up / 100.0 if p_up > 1.0 else p_up
+        p_down_norm = p_down / 100.0 if p_down > 1.0 else p_down
+
+        p_target = p_up_norm if "BUY" in action else p_down_norm
+
+        # 1. Spread Magnitude Factor (0.0 at €1.20 spread, 1.0 at €8.00+ spread)
+        spread_mag = abs(pred_spread)
+        m_spread = min(max((spread_mag - 1.20) / (8.00 - 1.20), 0.0), 1.0)
+
+        # 2. Probability Factor (0.0 at 0% prob, 1.0 at 75%+ prob)
+        m_prob = min(max(p_target / 0.75, 0.0), 1.0)
+
+        # 3. Joint Multiplicative Conviction
+        conviction = m_spread * m_prob
+
+        vol = v_min + (v_max - v_min) * conviction
+        return round(vol, 1)
 
     def evaluate_trading_ledger(self, df_day_d, model_name="Transformer-TFT", market_mode="DAY_AHEAD_D1"):
         """
@@ -61,8 +87,8 @@ class V3CommercialStrategyEngine:
         for i, row in df_day_d.iterrows():
             q_idx = i + 1
             q_str = f"Q{q_idx}"
-            t_dk_str = row[t_col].strftime("%Y-%m-%d %H:%M") if hasattr(row[t_col], "strftime") else str(row[t_col])
-            p_spot = float(row["spot_price_eur"])
+            t_dk_str = str(row[t_col])[:16]
+            p_spot = float(row.get("spot_price_eur") or row.get("DayAheadPriceEUR") or row.get("SpotPriceEUR") or 0.0)
 
             # -----------------------------------------------------------------
             # 1. CHECK / LOCK ORDER IN IMMUTABLE TRADE JOURNAL
@@ -70,7 +96,7 @@ class V3CommercialStrategyEngine:
             existing_order = self.journal.get_order(market_mode, self.price_area, model_name, delivery_date_str, q_idx)
 
             if existing_order is None:
-                # Calculate new trade signal to lock
+                # First time locking this order at gate closure
                 pred_spread = float(point_preds[i])
                 p_pred = p_spot + pred_spread
 
@@ -84,18 +110,10 @@ class V3CommercialStrategyEngine:
 
                 action = "HOLD"
                 direction = "BALANCED (0)"
-                vol_multiplier = 1.0
 
                 if pred_spread > 1.2:
                     action = "BUY Spot (Long)"
                     direction = "UP-REGULATION (+1)"
-                    if p_up >= 0.65 or pred_spread >= 5.0:
-                        vol_multiplier = 2.5
-                    elif p_up >= 0.45 or pred_spread >= 2.5:
-                        vol_multiplier = 1.5
-                    else:
-                        vol_multiplier = 1.0
-
                 elif pred_spread < -1.2:
                     # Asymmetric Spike Shield: abort shorting only if tail risk of an extreme upward squeeze (>+€80/MWh) is elevated
                     if (q90_s > 80.0 and p_up_spike > 0.35) or p_up_spike > 0.45:
@@ -104,14 +122,8 @@ class V3CommercialStrategyEngine:
                     else:
                         action = "SELL Spot (Short)"
                         direction = "DOWN-REGULATION (-1)"
-                        if p_down >= 0.65 or pred_spread <= -5.0:
-                            vol_multiplier = 2.0
-                        elif p_down >= 0.45 or pred_spread <= -2.5:
-                            vol_multiplier = 1.2
-                        else:
-                            vol_multiplier = 1.0
 
-                trade_vol = self.base_volume_mwh * vol_multiplier if "BUY" in action or "SELL" in action else 0.0
+                trade_vol = self.compute_conviction_volume(pred_spread, p_up, p_down, action)
 
                 # Persist order to Immutable Journal
                 order_to_lock = {
