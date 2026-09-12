@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Info, HelpCircle, Copy, Check, FileSpreadsheet } from 'lucide-react';
+import { Info, HelpCircle, Copy, Check, FileSpreadsheet, Clock, ChevronDown, ChevronUp } from 'lucide-react';
 import { QuarterPrediction } from '../types';
 import { QuarterRow } from './QuarterRow';
 
@@ -8,6 +8,7 @@ interface QuarterTableProps {
   loading: boolean;
   error: string | null;
   isTodayMode?: boolean;
+  isAuditView?: boolean;
 }
 
 interface ColumnDef {
@@ -17,7 +18,7 @@ interface ColumnDef {
   align: 'left' | 'center' | 'right';
 }
 
-const COLUMNS: ColumnDef[] = [
+const BASE_COLUMNS: ColumnDef[] = [
   {
     key: 'quarter',
     label: 'Quarter',
@@ -68,6 +69,27 @@ const COLUMNS: ColumnDef[] = [
   },
 ];
 
+const AUDIT_EXTRA_COLUMNS: ColumnDef[] = [
+  {
+    key: 'settled',
+    label: 'Settled (€)',
+    tooltip: 'Actual final Energinet Imbalance settlement clearing price (€/MWh) reconciled from Energi Data Service.',
+    align: 'right',
+  },
+  {
+    key: 'net_pnl',
+    label: 'Net PnL (€)',
+    tooltip: 'Realized net profit/loss after Nord Pool fees, TSO balancing fees, slippage (€0.51/MWh), and Danish corp tax (22%).',
+    align: 'right',
+  },
+  {
+    key: 'status',
+    label: 'Status',
+    tooltip: 'Settlement lifecycle: Settled (reconciled against official TSO data) or Pending (future/awaiting settlement).',
+    align: 'center',
+  },
+];
+
 const formatTime = (quarterIndex: number) => {
   const hour = Math.floor((quarterIndex - 1) / 4).toString().padStart(2, '0');
   const minute = (((quarterIndex - 1) % 4) * 15).toString().padStart(2, '0');
@@ -92,6 +114,12 @@ function getColumnValue(prediction: QuarterPrediction, key: string, hasMultipleD
       return prediction.decision || '';
     case 'volume':
       return prediction.volume_mwh != null ? prediction.volume_mwh.toFixed(1) : '';
+    case 'settled':
+      return prediction.actual_settled_eur != null ? prediction.actual_settled_eur.toFixed(2) : '';
+    case 'net_pnl':
+      return prediction.net_pnl_eur != null ? prediction.net_pnl_eur.toFixed(2) : '';
+    case 'status':
+      return prediction.status || 'PENDING';
     default:
       return '';
   }
@@ -119,25 +147,48 @@ const copyToClipboard = async (text: string) => {
   return ok;
 };
 
-export function QuarterTable({ predictions, loading, error, isTodayMode = false }: QuarterTableProps) {
+export function QuarterTable({
+  predictions,
+  loading,
+  error,
+  isTodayMode = false,
+  isAuditView = false,
+}: QuarterTableProps) {
   const [activeCol, setActiveCol] = useState<ColumnDef | null>(null);
   const [signalFilter, setSignalFilter] = useState<'ALL' | 'BUY' | 'SELL' | 'HOLD'>('ALL');
   const [copiedColKey, setCopiedColKey] = useState<string | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
   const [includeHeader, setIncludeHeader] = useState<boolean>(true);
+  const [expandedQuarterKey, setExpandedQuarterKey] = useState<string | null>(null);
+
+  const activeColumns = useMemo(() => {
+    return isAuditView ? [...BASE_COLUMNS, ...AUDIT_EXTRA_COLUMNS] : BASE_COLUMNS;
+  }, [isAuditView]);
 
   const hasMultipleDates = useMemo(() => {
     return new Set(predictions.map((p) => p.delivery_date)).size > 1;
   }, [predictions]);
 
-  const filteredPredictions = predictions.filter((p) => {
-    if (signalFilter === 'ALL') return true;
-    const dec = (p.decision || '').toUpperCase();
-    if (signalFilter === 'BUY') return dec.includes('BUY');
-    if (signalFilter === 'SELL') return dec.includes('SELL');
-    if (signalFilter === 'HOLD') return !dec.includes('BUY') && !dec.includes('SELL');
-    return true;
-  });
+  const filteredPredictions = useMemo(() => {
+    return predictions.filter((p) => {
+      if (signalFilter === 'ALL') return true;
+      const dec = (p.decision || '').toUpperCase();
+      if (signalFilter === 'BUY') return dec.includes('BUY');
+      if (signalFilter === 'SELL') return dec.includes('SELL');
+      if (signalFilter === 'HOLD') return !dec.includes('BUY') && !dec.includes('SELL');
+      return true;
+    });
+  }, [predictions, signalFilter]);
+
+  // Index of first pending/upcoming quarter to insert the NOW separator
+  const firstUpcomingIndex = useMemo(() => {
+    if (!isTodayMode && !isAuditView) return -1;
+    const now = Date.now();
+    return filteredPredictions.findIndex((p) => {
+      const deliveryEndTime = new Date(p.time_dk).getTime() + 15 * 60 * 1000;
+      return now < deliveryEndTime && p.status?.toUpperCase() !== 'SETTLED';
+    });
+  }, [filteredPredictions, isTodayMode, isAuditView]);
 
   const handleCopyColumn = async (col: ColumnDef, e?: React.MouseEvent) => {
     const values = filteredPredictions.map((p) => getColumnValue(p, col.key, hasMultipleDates));
@@ -160,9 +211,9 @@ export function QuarterTable({ predictions, loading, error, isTodayMode = false 
   };
 
   const handleCopyEntireTable = async () => {
-    const headers = COLUMNS.map((c) => c.label);
+    const headers = activeColumns.map((c) => c.label);
     const rows = filteredPredictions.map((p) =>
-      COLUMNS.map((col) => getColumnValue(p, col.key, hasMultipleDates)).join('\t')
+      activeColumns.map((col) => getColumnValue(p, col.key, hasMultipleDates)).join('\t')
     );
     const tsv = [headers.join('\t'), ...rows].join('\n');
 
@@ -177,6 +228,10 @@ export function QuarterTable({ predictions, loading, error, isTodayMode = false 
     setTimeout(() => {
       setCopyFeedback((curr) => (curr?.includes('entire table') ? null : curr));
     }, 4500);
+  };
+
+  const toggleRowExpansion = (key: string) => {
+    setExpandedQuarterKey((curr) => (curr === key ? null : key));
   };
 
   if (error) {
@@ -197,10 +252,10 @@ export function QuarterTable({ predictions, loading, error, isTodayMode = false 
 
   return (
     <div className="w-full bg-slate-800 rounded-xl border border-slate-700 shadow-xl overflow-hidden flex flex-col">
-      {/* Top Controls: Filter Pills for All 96 Quarters Mode + Definition Bar */}
+      {/* Top Controls: Filter Pills for All 96 Quarters Mode */}
       {isTodayMode && (
         <div className="px-5 py-3 bg-slate-900/60 border-b border-slate-700/80 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-slate-400 font-medium mr-1">Filter Signals:</span>
             {(['ALL', 'BUY', 'SELL', 'HOLD'] as const).map((filter) => (
               <button
@@ -232,8 +287,36 @@ export function QuarterTable({ predictions, loading, error, isTodayMode = false 
             ))}
           </div>
 
-          <div className="text-slate-400 text-xs font-mono">
-            Showing {filteredPredictions.length} of {predictions.length} quarters
+          <div className="flex items-center gap-3">
+            {isAuditView && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (expandedQuarterKey) {
+                    setExpandedQuarterKey(null);
+                  } else if (filteredPredictions.length > 0) {
+                    const first = filteredPredictions[0];
+                    setExpandedQuarterKey(`${first.delivery_date}_${first.quarter_index}`);
+                  }
+                }}
+                className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1 cursor-pointer font-medium"
+              >
+                {expandedQuarterKey ? (
+                  <>
+                    <ChevronUp className="w-3.5 h-3.5" />
+                    <span>Collapse Open Details</span>
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="w-3.5 h-3.5" />
+                    <span>Click Row for Details</span>
+                  </>
+                )}
+              </button>
+            )}
+            <div className="text-slate-400 text-xs font-mono">
+              Showing {filteredPredictions.length} of {predictions.length} quarters
+            </div>
           </div>
         </div>
       )}
@@ -257,7 +340,11 @@ export function QuarterTable({ predictions, loading, error, isTodayMode = false 
           ) : (
             <div className="flex items-center gap-2 text-slate-400">
               <HelpCircle className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-              <span className="truncate">Click the copy icon on any column header to copy its values for Excel.</span>
+              <span className="truncate">
+                {isAuditView
+                  ? 'Click any quarter row to inspect quantile forecast and settlement cash flows.'
+                  : 'Click the copy icon on any column header to copy its values for Excel.'}
+              </span>
             </div>
           )}
         </div>
@@ -272,7 +359,7 @@ export function QuarterTable({ predictions, loading, error, isTodayMode = false 
                 ? 'bg-indigo-950/80 border-indigo-500 text-indigo-300'
                 : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-slate-300'
             }`}
-            title="Toggle whether the column label is copied as the first row (useful when creating new Excel columns)"
+            title="Toggle whether the column label is copied as the first row"
           >
             Header: {includeHeader ? 'Included' : 'Values only'}
           </button>
@@ -297,11 +384,12 @@ export function QuarterTable({ predictions, loading, error, isTodayMode = false 
         </div>
       </div>
 
-      <div className="overflow-x-auto">
+      {/* Scrollable Container with Sticky Table Header */}
+      <div className={`overflow-x-auto ${isAuditView ? 'max-h-[75vh] overflow-y-auto' : ''}`}>
         <table className="w-full text-left border-collapse whitespace-nowrap">
-          <thead>
-            <tr className="bg-slate-900 text-slate-400 uppercase text-xs tracking-wider">
-              {COLUMNS.map((col) => {
+          <thead className="sticky top-0 z-20 bg-slate-900 shadow-md">
+            <tr className="bg-slate-900 text-slate-400 uppercase text-xs tracking-wider border-b border-slate-700">
+              {activeColumns.map((col) => {
                 const alignClass = {
                   left: 'text-left',
                   center: 'text-center',
@@ -323,7 +411,7 @@ export function QuarterTable({ predictions, loading, error, isTodayMode = false 
                     title={col.tooltip}
                     onMouseEnter={() => setActiveCol(col)}
                     onMouseLeave={() => setActiveCol(null)}
-                    className={`px-3 py-3.5 font-medium border-b border-slate-700 select-none transition-colors group ${alignClass} ${
+                    className={`px-3 py-3 font-medium select-none transition-colors group ${alignClass} ${
                       isHovered ? 'bg-slate-800/80 text-indigo-300' : 'hover:bg-slate-850 hover:text-slate-200'
                     }`}
                   >
@@ -356,14 +444,36 @@ export function QuarterTable({ predictions, loading, error, isTodayMode = false 
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-700">
-            {filteredPredictions.map((prediction) => (
-              <QuarterRow
-                key={`${prediction.delivery_date}_${prediction.quarter_index}_${prediction.time_dk}`}
-                prediction={prediction}
-                isTodayMode={isTodayMode}
-                showDate={hasMultipleDates}
-              />
-            ))}
+            {filteredPredictions.map((prediction, idx) => {
+              const rowKey = `${prediction.delivery_date}_${prediction.quarter_index}`;
+              const isExpanded = expandedQuarterKey === rowKey;
+              const isFirstUpcoming = idx === firstUpcomingIndex && idx > 0;
+
+              return (
+                <div key={rowKey} style={{ display: 'contents' }}>
+                  {/* NOW Divider Row */}
+                  {isFirstUpcoming && (
+                    <tr className="bg-gradient-to-r from-indigo-950/80 via-indigo-900/60 to-indigo-950/80 border-y-2 border-indigo-500/60">
+                      <td colSpan={activeColumns.length} className="py-2.5 px-4 text-center">
+                        <div className="flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider text-indigo-300">
+                          <Clock className="w-4 h-4 text-indigo-400 animate-pulse" />
+                          <span>── NOW: Upcoming Quarters Below ──</span>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+
+                  <QuarterRow
+                    prediction={prediction}
+                    isTodayMode={isTodayMode}
+                    showDate={hasMultipleDates}
+                    isAuditView={isAuditView}
+                    isExpanded={isExpanded}
+                    onToggleExpand={() => toggleRowExpansion(rowKey)}
+                  />
+                </div>
+              );
+            })}
           </tbody>
         </table>
       </div>

@@ -69,7 +69,7 @@ export function DailySummaryBanner({
       </div>
 
       {/* Metric Cards Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+      <div className={`grid gap-3 ${summary.settledCount !== undefined && summary.settledCount > 0 ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-7' : 'grid-cols-2 sm:grid-cols-5'}`}>
         <div className="bg-slate-900/70 p-3 rounded-lg border border-slate-750">
           <div className="text-[11px] font-medium text-slate-400 flex items-center gap-1">
             <Layers className="w-3.5 h-3.5 text-slate-500" />
@@ -118,6 +118,30 @@ export function DailySummaryBanner({
             {summary.totalVolume.toFixed(1)} <span className="text-xs font-normal text-slate-400">MWh</span>
           </div>
         </div>
+
+        {summary.settledCount !== undefined && summary.settledCount > 0 && (
+          <>
+            <div className="bg-slate-900/70 p-3 rounded-lg border border-slate-750">
+              <div className="text-[11px] font-medium text-slate-400 flex items-center gap-1">
+                <BarChart3 className="w-3.5 h-3.5 text-emerald-400" />
+                Realized PnL
+              </div>
+              <div className={`text-lg font-bold font-mono mt-1 ${summary.realizedPnl && summary.realizedPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {summary.realizedPnl !== undefined ? formatSpread(summary.realizedPnl) : '—'}
+              </div>
+            </div>
+
+            <div className="bg-slate-900/70 p-3 rounded-lg border border-slate-750">
+              <div className="text-[11px] font-medium text-slate-400 flex items-center gap-1">
+                <Layers className="w-3.5 h-3.5 text-indigo-400" />
+                Settled Quarters
+              </div>
+              <div className="text-lg font-bold font-mono text-slate-100 mt-1">
+                {summary.settledCount} <span className="text-xs font-normal text-slate-400">/ {summary.totalQuarters}</span>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

@@ -8,6 +8,7 @@ import { DailySummaryBanner } from './components/DailySummaryBanner';
 import { RangeFilterBar } from './components/RangeFilterBar';
 import { ModelSelector } from './components/ModelSelector';
 import { DenmarkClock } from './components/DenmarkClock';
+import { KpiCards } from './components/KpiCards';
 import { usePredictions, getTodayDateString } from './hooks/usePredictions';
 import { PortalViewMode, DateTimeRange } from './types';
 import { RefreshCw } from 'lucide-react';
@@ -269,6 +270,9 @@ function App() {
                 }
               />
 
+              {/* 4 Professional KPI Cards for Trading Audit */}
+              <KpiCards predictions={predictions} daySummary={daySummary} />
+
               <div className="flex items-center justify-between px-3 py-2 rounded-lg border border-slate-700/60 text-xs text-slate-400">
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
@@ -297,6 +301,7 @@ function App() {
               loading={loading}
               error={error}
               isTodayMode={true}
+              isAuditView={true}
             />
           </>
         )}
