@@ -26,6 +26,8 @@ export function computeDaySummary(predictions: QuarterPrediction[]): DaySummary 
   let totalImbalance = 0;
   let totalSpread = 0;
   let totalVolume = 0;
+  let realizedPnl = 0;
+  let settledCount = 0;
 
   for (const p of predictions) {
     const dec = (p.decision || '').toUpperCase();
@@ -37,6 +39,11 @@ export function computeDaySummary(predictions: QuarterPrediction[]): DaySummary 
     totalImbalance += Number(p.pred_imbalance_eur || 0);
     totalSpread += Number(p.pred_spread_eur || 0);
     totalVolume += Number(p.volume_mwh || 0);
+
+    if (p.net_pnl_eur != null && !isNaN(Number(p.net_pnl_eur))) {
+      realizedPnl += Number(p.net_pnl_eur);
+      settledCount++;
+    }
   }
 
   const n = predictions.length;
@@ -49,6 +56,8 @@ export function computeDaySummary(predictions: QuarterPrediction[]): DaySummary 
     avgImbalance: totalImbalance / n,
     avgSpread: totalSpread / n,
     totalVolume,
+    realizedPnl,
+    settledCount,
   };
 }
 
@@ -56,7 +65,9 @@ export function usePredictions(
   priceArea: 'DK1' | 'DK2',
   viewMode: PortalViewMode = 'live',
   targetDate?: string,
-  dateTimeRange?: DateTimeRange
+  dateTimeRange?: DateTimeRange,
+  selectedModel: string = 'Transformer-TFT',
+  selectedMarketMode: string = 'INTRADAY_D0'
 ) {
   const [predictions, setPredictions] = useState<QuarterPrediction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,6 +85,20 @@ export function usePredictions(
         .from('quarter_predictions')
         .select('*')
         .eq('price_area', priceArea);
+
+      // Model filtering: For root customer portal, strictly filter for 'Transformer-TFT'
+      if (viewMode === 'live' || !selectedModel || selectedModel === 'Transformer-TFT') {
+        query = query.eq('model_name', 'Transformer-TFT');
+      } else if (selectedModel !== 'ALL') {
+        query = query.eq('model_name', selectedModel);
+      }
+
+      // Market mode filtering: For root customer portal, strictly filter for 'INTRADAY_D0'
+      if (viewMode === 'live' || !selectedMarketMode || selectedMarketMode === 'INTRADAY_D0') {
+        query = query.eq('market_mode', 'INTRADAY_D0');
+      } else if (selectedMarketMode !== 'ALL') {
+        query = query.eq('market_mode', selectedMarketMode);
+      }
 
       if (viewMode === 'live') {
         // Gate closure is exactly 120 minutes (2 hours) before physical delivery start.
@@ -112,13 +137,13 @@ export function usePredictions(
     } finally {
       setLoading(false);
     }
-  }, [priceArea, viewMode, effectiveDate, dateTimeRange?.start, dateTimeRange?.end]);
+  }, [priceArea, viewMode, effectiveDate, dateTimeRange?.start, dateTimeRange?.end, selectedModel, selectedMarketMode]);
 
   useEffect(() => {
     fetchPredictions();
 
     const subscription = supabase
-      .channel(`quarter_predictions_${priceArea}_${viewMode}`)
+      .channel(`quarter_predictions_${priceArea}_${viewMode}_${selectedModel}_${selectedMarketMode}`)
       .on(
         'postgres_changes',
         {
@@ -143,7 +168,7 @@ export function usePredictions(
       subscription.unsubscribe();
       clearInterval(interval);
     };
-  }, [fetchPredictions, priceArea, viewMode]);
+  }, [fetchPredictions, priceArea, viewMode, selectedModel, selectedMarketMode]);
 
   const daySummary = useMemo(() => computeDaySummary(predictions), [predictions]);
 
