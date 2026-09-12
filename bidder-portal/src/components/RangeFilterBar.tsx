@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Calendar, Clock, MapPin, Filter, RotateCcw, Share2, Check, TrendingUp } from 'lucide-react';
 import { DateTimeRange } from '../types';
-import { getTodayDateString } from '../hooks/usePredictions';
+import { getTodayDateString, getDenmarkDateTimeString } from '../hooks/usePredictions';
 
 interface RangeFilterBarProps {
   priceArea: 'DK1' | 'DK2';
@@ -38,48 +38,47 @@ export function RangeFilterBar({
     onRangeApply({ start: startVal, end: endVal });
   };
 
-  // Helper to format ISO or local Date to YYYY-MM-DDTHH:mm
-  const formatDateTimeLocal = (d: Date) => {
-    const pad = (n: number) => n.toString().padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  };
-
   const applyPreset = (preset: 'today' | 'next24' | 'past24' | 'morning' | 'evening') => {
-    const now = new Date();
-    let s = new Date();
-    let e = new Date();
+    const today = getTodayDateString();
 
     if (preset === 'today') {
-      const today = getTodayDateString();
       const newStart = `${today}T00:00`;
       const newEnd = `${today}T23:45`;
       setStartVal(newStart);
       setEndVal(newEnd);
       onRangeApply({ start: newStart, end: newEnd });
       return;
+    } else if (preset === 'morning') {
+      const newStart = `${today}T06:00`;
+      const newEnd = `${today}T12:00`;
+      setStartVal(newStart);
+      setEndVal(newEnd);
+      onRangeApply({ start: newStart, end: newEnd });
+      return;
+    } else if (preset === 'evening') {
+      const newStart = `${today}T17:00`;
+      const newEnd = `${today}T21:00`;
+      setStartVal(newStart);
+      setEndVal(newEnd);
+      onRangeApply({ start: newStart, end: newEnd });
+      return;
     } else if (preset === 'next24') {
-      const startIso = formatDateTimeLocal(now);
-      const endD = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-      const endIso = formatDateTimeLocal(endD);
-      setStartVal(startIso);
-      setEndVal(endIso);
-      onRangeApply({ start: startIso, end: endIso });
+      const nowDk = getDenmarkDateTimeString(new Date());
+      const endD = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      const endDk = getDenmarkDateTimeString(endD);
+      setStartVal(nowDk);
+      setEndVal(endDk);
+      onRangeApply({ start: nowDk, end: endDk });
       return;
     } else if (preset === 'past24') {
-      s = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    } else if (preset === 'morning') {
-      s.setHours(6, 0, 0, 0);
-      e.setHours(12, 0, 0, 0);
-    } else if (preset === 'evening') {
-      s.setHours(17, 0, 0, 0);
-      e.setHours(21, 0, 0, 0);
+      const startD = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const startDk = getDenmarkDateTimeString(startD);
+      const nowDk = getDenmarkDateTimeString(new Date());
+      setStartVal(startDk);
+      setEndVal(nowDk);
+      onRangeApply({ start: startDk, end: nowDk });
+      return;
     }
-
-    const newStart = formatDateTimeLocal(s);
-    const newEnd = formatDateTimeLocal(e);
-    setStartVal(newStart);
-    setEndVal(newEnd);
-    onRangeApply({ start: newStart, end: newEnd });
   };
 
   const handleCopyShareLink = async () => {
