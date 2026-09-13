@@ -105,6 +105,18 @@ class SupabasePublisher:
             dt = datetime(d_parts[0], d_parts[1], d_parts[2], hour, minute, tzinfo=cph_tz)
             time_dk_iso = dt.isoformat()
 
+            p_up_val = _clean_numeric(trade.get("p_up"))
+            if p_up_val is not None and p_up_val <= 1.0:
+                p_up_val = round(p_up_val * 100.0, 1)
+
+            p_down_val = _clean_numeric(trade.get("p_down"))
+            if p_down_val is not None and p_down_val <= 1.0:
+                p_down_val = round(p_down_val * 100.0, 1)
+
+            p_up_spike_val = _clean_numeric(trade.get("p_up_spike"))
+            if p_up_spike_val is not None and p_up_spike_val <= 1.0:
+                p_up_spike_val = round(p_up_spike_val * 100.0, 1)
+
             row = {
                 "market_mode": market_mode,
                 "price_area": price_area,
@@ -115,9 +127,9 @@ class SupabasePublisher:
                 "spot_price_eur": _clean_numeric(trade.get("spot_price_eur")),
                 "pred_imbalance_eur": _clean_numeric(trade.get("pred_imbalance_eur")),
                 "pred_spread_eur": _clean_numeric(trade.get("pred_spread_eur")),
-                "p_up": _clean_numeric(trade.get("p_up")),
-                "p_down": _clean_numeric(trade.get("p_down")),
-                "p_up_spike": _clean_numeric(trade.get("p_up_spike")),
+                "p_up": p_up_val,
+                "p_down": p_down_val,
+                "p_up_spike": p_up_spike_val,
                 "decision": trade.get("action"),
                 "direction": trade.get("direction"),
                 "volume_mwh": _clean_numeric(trade.get("volume_mwh")),

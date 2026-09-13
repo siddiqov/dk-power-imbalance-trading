@@ -4,8 +4,8 @@ interface ConfidenceBarProps {
 }
 
 export function ConfidenceBar({ pUp, pDown }: ConfidenceBarProps) {
-  const upVal = pUp <= 1.0 ? pUp * 100 : pUp;
-  const downVal = pDown <= 1.0 ? pDown * 100 : pDown;
+  const upVal = Number(pUp ?? 0);
+  const downVal = Number(pDown ?? 0);
 
   return (
     <div className="inline-flex items-center justify-center font-mono text-sm">

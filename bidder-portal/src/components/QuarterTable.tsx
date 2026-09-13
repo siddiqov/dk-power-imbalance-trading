@@ -109,7 +109,7 @@ function getColumnValue(prediction: QuarterPrediction, key: string, hasMultipleD
     case 'pred_spread':
       return prediction.pred_spread_eur != null ? prediction.pred_spread_eur.toFixed(2) : '';
     case 'probabilities':
-      return `${((prediction.p_up ?? 0) * 100).toFixed(1)}% / ${((prediction.p_down ?? 0) * 100).toFixed(1)}%`;
+      return `${Number(prediction.p_up ?? 0).toFixed(1)}% / ${Number(prediction.p_down ?? 0).toFixed(1)}%`;
     case 'decision':
       return prediction.decision || '';
     case 'volume':
