@@ -28,7 +28,7 @@ function getInitialParams(): {
     const zone = params.get('zone')?.toUpperCase();
     const start = params.get('start') || undefined;
     const end = params.get('end') || undefined;
-    const model = params.get('model') || 'Transformer-TFT';
+    const model = params.get('model') || 'Transfer-LightGBM';
     const modeParam = params.get('mode')?.toUpperCase() === 'DAY_AHEAD_D1' ? 'DAY_AHEAD_D1' : 'INTRADAY_D0';
 
     // Only unlock the full UI when manually navigating to /all or /today
@@ -52,7 +52,7 @@ function getInitialParams(): {
       isAllScreen: false,
       initialMode: 'live',
       initialZone: 'DK1',
-      initialModel: 'Transformer-TFT',
+      initialModel: 'Transfer-LightGBM',
       initialMarketMode: 'INTRADAY_D0',
     };
   }

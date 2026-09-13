@@ -17,6 +17,7 @@ import os
 import argparse
 import logging
 from datetime import datetime, timedelta
+import pandas as pd
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -25,7 +26,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from src.tournament_tables_v2 import TournamentTableGenerator
-from src.commercial_strategy_v3 import V3CommercialStrategyEngine
+from src.commercial_strategy_v3_1 import V31CommercialStrategyEngine
 from src.supabase_publisher import SupabasePublisher, ALL_MODELS
 
 logging.basicConfig(
@@ -81,16 +82,33 @@ def push_predictions(
 
                 logger.info(f"  Got {len(df)} quarters from data source")
 
-                strategy = V3CommercialStrategyEngine(
-                    price_area=area, capital=20000.0, base_volume_mwh=2.0
+                strategy = V31CommercialStrategyEngine(
+                    price_area=area, capital=20000.0, base_volume_mwh=2.0, profile="tier3_aggressive"
                 )
+
+                # Approach A (Midnight Boundary Bridge): Load Day D table to seed physical inertia across midnight
+                try:
+                    t_col = "time_dk" if "time_dk" in df.columns else "time_utc"
+                    first_dt = pd.to_datetime(df.iloc[0][t_col])
+                    prev_date_str = (first_dt - timedelta(days=1)).strftime("%Y-%m-%d")
+                    if prev_date_str == today_str:
+                        df_prev_day = table_gen.get_future_table(date_str=today_str)
+                    else:
+                        df_prev_day = table_gen.get_backtest_table(date_str=prev_date_str)
+                except Exception:
+                    df_prev_day = None
 
                 # Step 2: Loop through requested models and market modes
                 for mode in market_modes:
                     for model_name in models:
-                        logger.info(f"  Evaluating [{mode}] model={model_name}...")
+                        logger.info(f"  Evaluating [{mode}] model={model_name} (Approach A: Midnight Bridge)...")
                         summary = strategy.evaluate_trading_ledger(
-                            df, model_name=model_name, market_mode=mode
+                            df, 
+                            model_name=model_name, 
+                            market_mode=mode, 
+                            profile="tier3_aggressive",
+                            approach="A", 
+                            df_prev_day=df_prev_day
                         )
 
                         trades = summary.get("trades", [])

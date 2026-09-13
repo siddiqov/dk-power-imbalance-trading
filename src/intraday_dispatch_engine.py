@@ -150,12 +150,27 @@ class Intraday2HourDispatchEngine:
         if target_df.empty:
             target_df = self.table_gen.get_future_table()
 
-        # Evaluate V3 Commercial Strategy
+        # Approach A (Midnight Boundary Bridge): Load Day D table for midnight physical inertia
+        try:
+            t_col = "time_dk" if "time_dk" in target_df.columns else "time_utc"
+            first_dt = pd.to_datetime(target_df.iloc[0][t_col])
+            today_str = dk_now.strftime("%Y-%m-%d")
+            prev_date_str = (first_dt - timedelta(days=1)).strftime("%Y-%m-%d")
+            if prev_date_str == today_str:
+                df_prev_day = self.table_gen.get_future_table(date_str=today_str)
+            else:
+                df_prev_day = self.table_gen.get_backtest_table(date_str=prev_date_str)
+        except Exception:
+            df_prev_day = None
+
+        # Evaluate V3.1 Commercial Strategy with Approach A
         summary = self.strategy.evaluate_trading_ledger(
             target_df, 
             model_name=model_name, 
             market_mode="INTRADAY_D0",
-            profile=self.profile
+            profile=self.profile,
+            approach="A",
+            df_prev_day=df_prev_day
         )
 
         all_trades = summary.get("trades", [])
@@ -305,12 +320,27 @@ class Intraday2HourDispatchEngine:
         if target_df.empty:
             target_df = self.table_gen.get_future_table()
 
-        # Evaluate Commercial Strategy across all 96 quarters (handles Dynamic Conviction Tiers & Fixed Profiles)
+        # Approach A (Midnight Boundary Bridge): Load Day D table for midnight physical inertia
+        try:
+            t_col = "time_dk" if "time_dk" in target_df.columns else "time_utc"
+            first_dt = pd.to_datetime(target_df.iloc[0][t_col])
+            today_str = dk_now.strftime("%Y-%m-%d")
+            prev_date_str = (first_dt - timedelta(days=1)).strftime("%Y-%m-%d")
+            if prev_date_str == today_str:
+                df_prev_day = self.table_gen.get_future_table(date_str=today_str)
+            else:
+                df_prev_day = self.table_gen.get_backtest_table(date_str=prev_date_str)
+        except Exception:
+            df_prev_day = None
+
+        # Evaluate Commercial Strategy across all 96 quarters with Approach A
         summary = self.strategy.evaluate_trading_ledger(
             target_df,
             model_name=model_name,
             market_mode="INTRADAY_D0",
-            profile=self.profile
+            profile=self.profile,
+            approach="A",
+            df_prev_day=df_prev_day
         )
         all_trades = summary.get("trades", [])
 

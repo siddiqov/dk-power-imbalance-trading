@@ -507,7 +507,7 @@ def api_dispatch_batch_1_v3_1():
     trade_volume = float(request.args.get('volume', 2.0))
     profile = request.args.get('profile', 'tier2_standard')
     tab = request.args.get('tab', 'live')
-    num_quarters = int(request.args.get('num_quarters', 9))
+    num_quarters = int(request.args.get('num_quarters', 8))
 
     dk_now = get_danish_now()
     tomorrow_str = (dk_now + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -529,8 +529,28 @@ def api_dispatch_batch_1_v3_1():
     if target_df.empty:
         target_df = table_gen.get_future_table()
 
+    # Approach A (Midnight Boundary Bridge): Load Day D table to seed continuous inertia across midnight
+    try:
+        t_col = "time_dk" if "time_dk" in target_df.columns else "time_utc"
+        first_dt = pd.to_datetime(target_df.iloc[0][t_col])
+        today_str = dk_now.strftime("%Y-%m-%d")
+        prev_date_str = (first_dt - timedelta(days=1)).strftime("%Y-%m-%d")
+        if prev_date_str == today_str:
+            df_prev_day = table_gen.get_future_table(date_str=today_str)
+        else:
+            df_prev_day = table_gen.get_backtest_table(date_str=prev_date_str)
+    except Exception:
+        df_prev_day = None
+
     strategy = V31CommercialStrategyEngine(price_area=price_area, capital=capital, base_volume_mwh=trade_volume, profile=profile)
-    summary = strategy.evaluate_trading_ledger(target_df, model_name=model_name, market_mode="INTRADAY_D0", profile=profile)
+    summary = strategy.evaluate_trading_ledger(
+        target_df, 
+        model_name=model_name, 
+        market_mode="INTRADAY_D0", 
+        profile=profile,
+        approach="A",
+        df_prev_day=df_prev_day
+    )
 
     trades = summary.get("trades", [])[:num_quarters]
     headers = [
@@ -574,10 +594,13 @@ def api_dispatch_batch_1_v3_1():
             "p_down": t['p_down'],
             "action": action_clean,
             "volume_mwh": t['volume_mwh'],
-            "status": "Batch 1 (00:00 - 02:15 CET)"
+            "status": f"Batch 1 (00:00 - {num_quarters * 15 // 60:02d}:{num_quarters * 15 % 60:02d} CET)"
         })
 
     actual_delivery_date = formatted_trades[0]['time_dk'][:10] if formatted_trades else target_delivery_date
+    end_h = num_quarters * 15 // 60
+    end_m = num_quarters * 15 % 60
+    window_label = f"00:00 - {end_h:02d}:{end_m:02d} CET (Q1-Q{num_quarters})"
 
     return jsonify({
         "success": True,
@@ -585,7 +608,7 @@ def api_dispatch_batch_1_v3_1():
         "model_name": model_name,
         "profile": profile,
         "date": actual_delivery_date,
-        "delivery_window": "00:00 - 02:15 CET (Q1-Q9)",
+        "delivery_window": window_label,
         "gate_closure_cutoff": "D-1 21:45 CET",
         "num_quarters": len(formatted_trades),
         "trades": formatted_trades,
