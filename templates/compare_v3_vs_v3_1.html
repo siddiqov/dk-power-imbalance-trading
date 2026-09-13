@@ -3,63 +3,38 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>V3 vs V3.1 Comprehensive Head-to-Head Comparison</title>
+    <title>V3 vs V3.1 — Pairwise Model Performance Comparison</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root {
-            --bg-dark: #111622;
-            --card-bg: #182030;
-            --card-surface: #1e283d;
-            --card-border: #2d384e;
-            --accent-blue: #38bdf8;
-            --accent-green: #10b981;
-            --accent-red: #f43f5e;
-            --accent-yellow: #f59e0b;
-            --text-main: #e2e8f0;
-            --text-secondary: #cbd5e1;
-            --text-muted: #8fa0b5;
+            --bg-dark: #0d121d;
+            --card-bg: #151d2c;
+            --card-border: #2d3b55;
+            --text-main: #f8fafc;
+            --text-secondary: #e2e8f0;
+            --text-muted: #94a3b8;
         }
-        body {
-            background-color: var(--bg-dark);
-            color: var(--text-main);
-            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-        }
-        .navbar {
-            background-color: #141b29;
-            border-bottom: 1px solid var(--card-border);
-        }
-        .card, .metric-card {
-            background-color: var(--card-bg);
-            border: 1px solid var(--card-border);
-            border-radius: 10px;
-        }
-        .metric-card {
-            padding: 1.25rem;
-            background: linear-gradient(145deg, #1d2639 0%, #161e2e 100%);
-        }
+        body { background-color: var(--bg-dark); color: var(--text-main); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 0.95rem; }
+        .navbar { background-color: #111726; border-bottom: 1px solid var(--card-border); }
+        .card { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.25); }
+        .metric-card { padding: 1.25rem; background: linear-gradient(145deg, #182234 0%, #131a28 100%); border: 1px solid var(--card-border); border-radius: 10px; }
         .table-dark {
             --bs-table-bg: var(--card-bg);
-            --bs-table-striped-bg: #151c2a;
-            --bs-table-hover-bg: #1e283d;
-            --bs-table-border-color: var(--card-border);
-            color: var(--text-secondary);
+            --bs-table-striped-bg: #101724;
+            --bs-table-hover-bg: #1b2436;
+            --bs-table-border-color: #243044;
+            color: #e2e8f0;
         }
-        .table-dark thead th {
-            background-color: #141b29 !important;
-            border-bottom: 2px solid var(--card-border) !important;
-            color: #cbd5e1;
-        }
-        .badge-tree {
-            background-color: #065f46;
-            color: #a7f3d0;
-            border: 1px solid #10b981;
-        }
-        .badge-neural {
-            background-color: #4c1d95;
-            color: #ddd6fe;
-            border: 1px solid #8b5cf6;
-        }
+        .table-dark thead th { background-color: #0f1624 !important; border-bottom: 2px solid #334155 !important; color: #f8fafc !important; font-weight: 600; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.5px; }
+        .table-dark tbody td { color: #e2e8f0; border-bottom-color: #243044; vertical-align: middle; }
+        .badge-tree { background-color: #064e3b; color: #a7f3d0; border: 1px solid #10b981; font-weight: 600; }
+        .badge-neural { background-color: #3b0764; color: #e9d5ff; border: 1px solid #a855f7; font-weight: 600; }
+        .badge-hybrid { background-color: #713f12; color: #fef08a; border: 1px solid #eab308; font-weight: 600; }
+        .area-tab { cursor: pointer; padding: 0.5rem 1.5rem; border-radius: 6px; border: 1px solid #334155; color: #94a3b8; font-weight: 600; transition: all 0.15s; }
+        .area-tab.active { background-color: #1e3a5f; color: #38bdf8; border-color: #38bdf8; }
+        .area-tab:hover:not(.active) { background-color: #1b2436; color: #cbd5e1; }
+        .totals-row td { border-top: 2px solid #334155 !important; font-size: 1rem; }
     </style>
 </head>
 <body>
@@ -67,14 +42,14 @@
         <div class="container-fluid">
             <span class="navbar-brand text-white fw-bold d-flex align-items-center">
                 <i class="fa-solid fa-code-compare text-info me-2 fs-4"></i>
-                V3 vs V3.1 Comprehensive Head-to-Head Comparison
+                V3 vs V3.1 — Pairwise Model Performance Comparison
             </span>
             <div class="d-flex align-items-center gap-3">
-                <a href="http://127.0.0.1:5001/?area={{ price_area }}" target="_blank" class="btn btn-sm btn-outline-secondary text-white fw-bold">
-                    <i class="fa-solid fa-arrow-up-right-from-square me-1"></i> V3 Dashboard (Port 5001)
+                <a href="http://127.0.0.1:5001/" target="_blank" class="btn btn-sm btn-outline-info text-white fw-bold">
+                    <i class="fa-solid fa-arrow-up-right-from-square me-1"></i> V3 (Port 5001)
                 </a>
-                <a href="/?area={{ price_area }}" class="btn btn-sm btn-warning text-dark fw-bold">
-                    <i class="fa-solid fa-trophy me-1"></i> V3.1 Dashboard (Port 5003)
+                <a href="/" class="btn btn-sm btn-warning text-dark fw-bold">
+                    <i class="fa-solid fa-trophy me-1"></i> V3.1 (Port 5003)
                 </a>
             </div>
         </div>
@@ -82,195 +57,196 @@
 
     <div class="container-fluid px-4 pb-5">
 
-        <!-- Context Overview Banner -->
-        <div class="card p-3 mb-4 border-info">
+        <!-- Banner -->
+        <div class="card p-3 mb-4" style="border-left: 4px solid #38bdf8;">
             <div class="d-flex justify-content-between align-items-center">
                 <div>
-                    <h5 class="fw-bold text-white mb-1"><i class="fa-solid fa-microchip text-info me-2"></i> Architectural & Algorithmic Evolution</h5>
-                    <p class="text-muted small mb-0">
-                        Comparing <strong>V3.0 Baseline</strong> (Fixed heuristic hyperparameters, gradient boosted trees) against <strong>V3.1 Suite</strong> (Optuna Bayesian Optimization, Dual Suites with Native PyTorch BiLSTM & Temporal Attention, and Real-Time Financial Tournament).
+                    <h5 class="fw-bold text-white mb-1"><i class="fa-solid fa-scale-balanced text-info me-2"></i> Model-vs-Model Accumulative Net Realized Profit</h5>
+                    <p class="mb-0" style="color: #cbd5e1; font-size: 0.93rem;">
+                        Each model in <strong class="text-white">V3</strong> is compared against the <strong class="text-white">same architecture in V3.1</strong> on today's live intraday settlement data. All figures are <strong class="text-white">Net Realized Profit (€)</strong> after €0.51/MWh fees and 22% Danish corporate tax.
                     </p>
                 </div>
-                <div class="text-end">
-                    <span class="badge bg-dark border border-secondary text-info fs-6 px-3 py-2">Price Area: {{ price_area }}</span>
+                <div class="text-end text-nowrap">
+                    <span class="badge bg-dark border border-secondary text-info fs-6 px-3 py-2" id="dateLabel">{{ selected_date }}</span>
                 </div>
             </div>
         </div>
 
-        <!-- Dynamic Metrics Loading Container -->
+        <!-- Loading -->
         <div id="loadingState" class="text-center py-5">
             <div class="spinner-border text-info mb-3" style="width: 3rem; height: 3rem;"></div>
-            <h5 class="text-light">Calculating Head-to-Head Comparative Metrics...</h5>
-            <p class="text-muted small">Simulating 96 quarters under Danish market settlement rules (€0.51/MWh fee, 22% tax)...</p>
+            <h5 class="text-light">Computing pairwise model-vs-model comparison for DK1 & DK2...</h5>
+            <p class="small" style="color: #94a3b8;">Running 12 model evaluations (6 models × 2 engines) per area...</p>
         </div>
 
         <div id="comparisonContent" style="display: none;">
-            <!-- Comparison KPI Cards -->
+
+            <!-- Aggregate KPI Cards -->
             <div class="row g-3 mb-4">
-                <div class="col-md-4">
-                    <div class="metric-card border-secondary">
-                        <div class="text-muted small text-uppercase fw-bold">V3.0 Baseline Net Profit</div>
-                        <div class="text-info fs-4 fw-bold mt-1" id="v3Pnl">--</div>
-                        <div class="text-muted small mt-1">Win Rate: <span class="text-light fw-bold" id="v3Wr">--</span> | ROC: <span class="text-light fw-bold" id="v3Roc">--</span></div>
-                        <div class="text-muted small mt-1">Model: <span class="text-light font-monospace" id="v3Model">--</span></div>
+                <div class="col-md-3">
+                    <div class="metric-card" style="border-color: #3b82f6;">
+                        <div class="fw-bold small text-uppercase" style="color: #93c5fd; letter-spacing: 0.5px;">DK1 — V3 Total PnL</div>
+                        <div class="fs-4 fw-bold mt-1" id="dk1V3Total" style="color: #60a5fa;">--</div>
                     </div>
                 </div>
-                <div class="col-md-4">
-                    <div class="metric-card border-warning">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <div class="text-muted small text-uppercase fw-bold">V3.1 Tournament Champion</div>
-                            <span class="badge bg-warning text-dark fw-bold"><i class="fa-solid fa-crown me-1"></i> WINNER</span>
-                        </div>
-                        <div class="text-success fs-4 fw-bold mt-1" id="v31Pnl">--</div>
-                        <div class="text-muted small mt-1">Win Rate: <span class="text-light fw-bold" id="v31Wr">--</span> | ROC: <span class="text-light fw-bold" id="v31Roc">--</span></div>
-                        <div class="text-muted small mt-1">Model: <span class="text-warning font-monospace" id="v31Model">--</span></div>
+                <div class="col-md-3">
+                    <div class="metric-card" style="border-color: #10b981;">
+                        <div class="fw-bold small text-uppercase" style="color: #6ee7b7; letter-spacing: 0.5px;">DK1 — V3.1 Total PnL</div>
+                        <div class="fs-4 fw-bold mt-1" id="dk1V31Total" style="color: #4ade80;">--</div>
                     </div>
                 </div>
-                <div class="col-md-4">
-                    <div class="metric-card border-success">
-                        <div class="text-muted small text-uppercase fw-bold">Performance Delta (Improvement)</div>
-                        <div class="fs-4 fw-bold mt-1" id="deltaPnl">--</div>
-                        <div class="text-muted small mt-1">Win Rate Delta: <span class="fw-bold" id="deltaWr">--</span></div>
-                        <div class="text-muted small mt-1">Optimization Winner: <span class="badge bg-success" id="overallWinner">--</span></div>
+                <div class="col-md-3">
+                    <div class="metric-card" style="border-color: #3b82f6;">
+                        <div class="fw-bold small text-uppercase" style="color: #93c5fd; letter-spacing: 0.5px;">DK2 — V3 Total PnL</div>
+                        <div class="fs-4 fw-bold mt-1" id="dk2V3Total" style="color: #60a5fa;">--</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="metric-card" style="border-color: #10b981;">
+                        <div class="fw-bold small text-uppercase" style="color: #6ee7b7; letter-spacing: 0.5px;">DK2 — V3.1 Total PnL</div>
+                        <div class="fs-4 fw-bold mt-1" id="dk2V31Total" style="color: #4ade80;">--</div>
                     </div>
                 </div>
             </div>
 
-            <!-- Detailed Comparison Table -->
-            <div class="card p-3 mb-4 border-secondary">
-                <h5 class="fw-bold text-white mb-3"><i class="fa-solid fa-table-columns text-warning me-2"></i> Side-by-Side Dimension Breakdown</h5>
+            <!-- DK1 Table -->
+            <div class="card p-3 mb-4" style="border-color: #334155;">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 class="fw-bold text-white mb-0"><i class="fa-solid fa-bolt text-warning me-2"></i> DK1 (Western Denmark) — Model-vs-Model Comparison</h5>
+                    <span class="badge bg-dark border border-info text-info px-3 py-2" id="dk1DeltaBadge">--</span>
+                </div>
                 <div class="table-responsive">
-                    <table class="table table-dark table-striped align-middle mb-0">
+                    <table class="table table-dark table-hover align-middle mb-0">
                         <thead>
-                            <tr class="text-muted small text-uppercase">
-                                <th style="width: 20%;">Evaluation Dimension</th>
-                                <th style="width: 40%;">V3.0 Baseline (Port 5001)</th>
-                                <th style="width: 40%;">V3.1 Tournament & Deep Learning (Port 5003)</th>
+                            <tr>
+                                <th>#</th>
+                                <th>Model Architecture</th>
+                                <th>Paradigm</th>
+                                <th style="text-align:right;">V3 Net Profit (€)</th>
+                                <th style="text-align:center;">V3 Win Rate</th>
+                                <th style="text-align:right;">V3.1 Net Profit (€)</th>
+                                <th style="text-align:center;">V3.1 Win Rate</th>
+                                <th style="text-align:right;">Δ PnL (€)</th>
+                                <th style="text-align:center;">Winner</th>
                             </tr>
                         </thead>
-                        <tbody>
-                            <tr>
-                                <td class="fw-bold text-info">Hyperparameter Tuning</td>
-                                <td class="text-muted">Fixed heuristic defaults (learning_rate=0.05, max_depth=6, num_leaves=31) without Bayesian search.</td>
-                                <td class="text-success fw-bold">Optuna Bayesian Optimization with 48-Hour Purged TimeSeriesSplit cross-validation.</td>
-                            </tr>
-                            <tr>
-                                <td class="fw-bold text-info">Model Architectures</td>
-                                <td class="text-muted">Single paradigm tree models (LGBM, CatBoost, XGBoost) and heuristic ensemble.</td>
-                                <td class="text-success fw-bold">Dual Suites: 3 Boosted Trees + 2 Native PyTorch Deep Networks (BiLSTM, Temporal Self-Attention) + Stacking Meta-Learner.</td>
-                            </tr>
-                            <tr>
-                                <td class="fw-bold text-info">Model Selection Strategy</td>
-                                <td class="text-muted">Static default selection (Transformer-TFT by default).</td>
-                                <td class="text-success fw-bold">Dynamic Real-Time Financial Tournament: continuously ranks candidate models on Realized Net PnL (€) and auto-promotes Champion.</td>
-                            </tr>
-                            <tr>
-                                <td class="fw-bold text-info">Quantile Forecasting</td>
-                                <td class="text-muted">Basic pinball quantile loss (q10, q50, q90).</td>
-                                <td class="text-success fw-bold">Optimeering calibrated quantile bands (q10, q50, q90) + Tri-State direction softmax.</td>
-                            </tr>
-                            <tr>
-                                <td class="fw-bold text-info">Market Horizon Support</td>
-                                <td class="text-muted">Dual-market (Day-Ahead D-1 & Intraday D-0).</td>
-                                <td class="text-success fw-bold">Dual-market (Day-Ahead D-1 & Intraday D-0) with dedicated 26-feature and 44-feature trained suites.</td>
-                            </tr>
-                            <tr>
-                                <td class="fw-bold text-info">Settlement Fidelity</td>
-                                <td class="text-muted">Genuine Energinet settlement data, €0.51/MWh fee, 22% Danish tax.</td>
-                                <td class="text-success fw-bold">Identical 100% genuine Energinet settlement rules (€0.51/MWh fee, 22% tax) for rigorous comparability.</td>
-                            </tr>
-                        </tbody>
+                        <tbody id="dk1Body"></tbody>
                     </table>
                 </div>
             </div>
 
-            <!-- Full V3.1 Tournament Leaderboard -->
-            <div class="card p-3 mb-4 border-secondary">
-                <h5 class="fw-bold text-white mb-3"><i class="fa-solid fa-trophy text-warning me-2"></i> V3.1 Model Suite Tournament Leaderboard</h5>
+            <!-- DK2 Table -->
+            <div class="card p-3 mb-4" style="border-color: #334155;">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 class="fw-bold text-white mb-0"><i class="fa-solid fa-bolt text-warning me-2"></i> DK2 (Eastern Denmark) — Model-vs-Model Comparison</h5>
+                    <span class="badge bg-dark border border-info text-info px-3 py-2" id="dk2DeltaBadge">--</span>
+                </div>
                 <div class="table-responsive">
-                    <table class="table table-dark table-hover align-middle mb-0" id="tournTable">
+                    <table class="table table-dark table-hover align-middle mb-0">
                         <thead>
-                            <tr class="text-muted small text-uppercase">
-                                <th>Rank</th>
-                                <th>Architecture</th>
-                                <th>Type & Paradigm</th>
-                                <th>Net Realized Profit (€)</th>
-                                <th>Win Rate</th>
-                                <th>Profit Factor</th>
-                                <th>ROC %</th>
-                                <th>MAE (€/MWh)</th>
-                                <th>Trades (W/L/H)</th>
+                            <tr>
+                                <th>#</th>
+                                <th>Model Architecture</th>
+                                <th>Paradigm</th>
+                                <th style="text-align:right;">V3 Net Profit (€)</th>
+                                <th style="text-align:center;">V3 Win Rate</th>
+                                <th style="text-align:right;">V3.1 Net Profit (€)</th>
+                                <th style="text-align:center;">V3.1 Win Rate</th>
+                                <th style="text-align:right;">Δ PnL (€)</th>
+                                <th style="text-align:center;">Winner</th>
                             </tr>
                         </thead>
-                        <tbody id="tournBody">
-                        </tbody>
+                        <tbody id="dk2Body"></tbody>
                     </table>
                 </div>
             </div>
+
         </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        fetch(`/api/compare_v3_vs_v3_1?area={{ price_area }}&capital={{ capital }}&profile={{ profile }}&date={{ selected_date }}`)
+        function fmtEur(v) {
+            const sign = v >= 0 ? '+' : '-';
+            return sign + '€ ' + Math.abs(v).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        }
+        function pnlClass(v) { return v >= 0 ? 'text-success' : 'text-danger'; }
+
+        function renderTable(tbodyId, models, totalV3, totalV31, totalDelta) {
+            const tbody = document.getElementById(tbodyId);
+            tbody.innerHTML = '';
+            models.forEach((r, i) => {
+                const badgeClass = r.model_type === 'Tree' ? 'badge-tree' : (r.model_type === 'Deep Neural' ? 'badge-neural' : 'badge-hybrid');
+                const winnerBadge = r.winner === 'V3.1'
+                    ? '<span class="badge bg-success text-white fw-bold">V3.1 ✓</span>'
+                    : (r.winner === 'V3' ? '<span class="badge bg-info text-dark fw-bold">V3 ✓</span>' : '<span class="badge bg-secondary text-white">Tie</span>');
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="fw-bold text-white">${i + 1}</td>
+                    <td class="fw-bold text-white">${r.model_name}</td>
+                    <td><span class="badge ${badgeClass}" style="font-size:0.78rem;">${r.paradigm}</span></td>
+                    <td class="fw-bold ${pnlClass(r.v3_pnl)} font-monospace" style="text-align:right; font-size:0.95rem;">${fmtEur(r.v3_pnl)}</td>
+                    <td class="text-center" style="color:#94a3b8;">${r.v3_win_rate}%</td>
+                    <td class="fw-bold ${pnlClass(r.v31_pnl)} font-monospace" style="text-align:right; font-size:0.95rem;">${fmtEur(r.v31_pnl)}</td>
+                    <td class="text-center" style="color:#94a3b8;">${r.v31_win_rate}%</td>
+                    <td class="fw-bold ${pnlClass(r.delta_pnl)} font-monospace" style="text-align:right; font-size:0.95rem;">${fmtEur(r.delta_pnl)}</td>
+                    <td style="text-align:center;">${winnerBadge}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+            // Totals row
+            const totalTr = document.createElement('tr');
+            totalTr.className = 'totals-row';
+            totalTr.innerHTML = `
+                <td></td>
+                <td class="fw-bold text-warning" style="font-size:1rem;">TOTAL (Accumulative)</td>
+                <td></td>
+                <td class="fw-bold ${pnlClass(totalV3)} font-monospace" style="text-align:right; font-size:1.05rem;">${fmtEur(totalV3)}</td>
+                <td></td>
+                <td class="fw-bold ${pnlClass(totalV31)} font-monospace" style="text-align:right; font-size:1.05rem;">${fmtEur(totalV31)}</td>
+                <td></td>
+                <td class="fw-bold ${pnlClass(totalDelta)} font-monospace" style="text-align:right; font-size:1.05rem;">${fmtEur(totalDelta)}</td>
+                <td style="text-align:center;">${totalDelta >= 0 ? '<span class="badge bg-success text-white fw-bold px-3 py-1">V3.1 ✓</span>' : '<span class="badge bg-info text-dark fw-bold px-3 py-1">V3 ✓</span>'}</td>
+            `;
+            tbody.appendChild(totalTr);
+        }
+
+        fetch(`/api/compare_v3_vs_v3_1?capital={{ capital }}&profile={{ profile }}&date={{ selected_date }}`)
             .then(res => res.json())
             .then(data => {
                 document.getElementById('loadingState').style.display = 'none';
                 document.getElementById('comparisonContent').style.display = 'block';
 
                 if (!data.success) {
-                    alert('Could not compute comparative data: ' + data.message);
+                    alert('Failed: ' + (data.message || 'Unknown error'));
                     return;
                 }
 
-                const v3 = data.v3_baseline;
-                const v31 = data.v3_1_suite;
-                const delta = data.comparison_delta;
+                document.getElementById('dateLabel').innerText = 'Date: ' + data.date;
 
-                document.getElementById('v3Pnl').innerText = '€ ' + v3.net_pnl_eur.toLocaleString('en-US', {minimumFractionDigits: 2});
-                document.getElementById('v3Wr').innerText = v3.win_rate_pct + '%';
-                document.getElementById('v3Roc').innerText = (v3.roc_pct >= 0 ? '+' : '') + v3.roc_pct.toFixed(2) + '%';
-                document.getElementById('v3Model').innerText = v3.model_name;
+                // DK1 KPIs
+                document.getElementById('dk1V3Total').innerText = fmtEur(data.dk1.total_v3_pnl);
+                document.getElementById('dk1V3Total').className = 'fs-4 fw-bold mt-1 ' + pnlClass(data.dk1.total_v3_pnl);
+                document.getElementById('dk1V31Total').innerText = fmtEur(data.dk1.total_v31_pnl);
+                document.getElementById('dk1V31Total').className = 'fs-4 fw-bold mt-1 ' + pnlClass(data.dk1.total_v31_pnl);
+                document.getElementById('dk1DeltaBadge').innerText = 'Δ Total: ' + fmtEur(data.dk1.total_delta);
+                document.getElementById('dk1DeltaBadge').className = 'badge bg-dark border px-3 py-2 fw-bold ' + (data.dk1.total_delta >= 0 ? 'border-success text-success' : 'border-danger text-danger');
 
-                document.getElementById('v31Pnl').innerText = '€ ' + v31.net_pnl_eur.toLocaleString('en-US', {minimumFractionDigits: 2});
-                document.getElementById('v31Wr').innerText = v31.win_rate_pct + '%';
-                document.getElementById('v31Roc').innerText = (v31.roc_pct >= 0 ? '+' : '') + v31.roc_pct.toFixed(2) + '%';
-                document.getElementById('v31Model').innerText = v31.model_name;
+                // DK2 KPIs
+                document.getElementById('dk2V3Total').innerText = fmtEur(data.dk2.total_v3_pnl);
+                document.getElementById('dk2V3Total').className = 'fs-4 fw-bold mt-1 ' + pnlClass(data.dk2.total_v3_pnl);
+                document.getElementById('dk2V31Total').innerText = fmtEur(data.dk2.total_v31_pnl);
+                document.getElementById('dk2V31Total').className = 'fs-4 fw-bold mt-1 ' + pnlClass(data.dk2.total_v31_pnl);
+                document.getElementById('dk2DeltaBadge').innerText = 'Δ Total: ' + fmtEur(data.dk2.total_delta);
+                document.getElementById('dk2DeltaBadge').className = 'badge bg-dark border px-3 py-2 fw-bold ' + (data.dk2.total_delta >= 0 ? 'border-success text-success' : 'border-danger text-danger');
 
-                const deltaEl = document.getElementById('deltaPnl');
-                deltaEl.innerText = (delta.delta_net_pnl_eur >= 0 ? '+€ ' : '-€ ') + Math.abs(delta.delta_net_pnl_eur).toLocaleString('en-US', {minimumFractionDigits: 2}) + ' (' + (delta.delta_pnl_pct >= 0 ? '+' : '') + delta.delta_pnl_pct + '%)';
-                deltaEl.className = 'fs-4 fw-bold mt-1 ' + (delta.delta_net_pnl_eur >= 0 ? 'text-success' : 'text-danger');
-
-                const deltaWrEl = document.getElementById('deltaWr');
-                deltaWrEl.innerText = (delta.delta_win_rate_pct >= 0 ? '+' : '') + delta.delta_win_rate_pct + '%';
-                deltaWrEl.className = 'fw-bold ' + (delta.delta_win_rate_pct >= 0 ? 'text-success' : 'text-danger');
-
-                document.getElementById('overallWinner').innerText = delta.winner;
-
-                // Render tournament table
-                const tournBody = document.getElementById('tournBody');
-                tournBody.innerHTML = '';
-                data.tournament_leaderboard.forEach(r => {
-                    const tr = document.createElement('tr');
-                    const badgeClass = r.model_type === 'Tree' ? 'badge-tree' : (r.model_type === 'Deep Neural' ? 'badge-neural' : 'badge-warning text-dark');
-                    const rankStr = r.rank === 1 ? '🥇 #1' : (r.rank === 2 ? '🥈 #2' : (r.rank === 3 ? '🥉 #3' : '#' + r.rank));
-                    tr.innerHTML = `
-                        <td class="fw-bold ${r.rank === 1 ? 'text-warning fs-5' : 'text-muted'}">${rankStr}</td>
-                        <td class="fw-bold text-light">${r.model_name} ${r.is_champion ? '<span class="badge bg-warning text-dark ms-2">CHAMPION</span>' : ''}</td>
-                        <td><span class="badge ${badgeClass}">${r.badge}</span> <span class="small text-muted d-block mt-1">${r.paradigm}</span></td>
-                        <td class="fw-bold ${r.net_pnl_eur >= 0 ? 'text-success' : 'text-danger'}">€ ${r.net_pnl_eur.toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
-                        <td class="text-success fw-bold">${r.win_rate_pct}%</td>
-                        <td class="text-light fw-bold">${r.profit_factor}</td>
-                        <td class="fw-bold ${r.roc_pct >= 0 ? 'text-success' : 'text-danger'}">${r.roc_pct >= 0 ? '+' : ''}${r.roc_pct.toFixed(2)}%</td>
-                        <td class="text-info font-monospace">€${r.mae_eur}</td>
-                        <td class="small"><span class="text-success fw-bold">${r.win_count}W</span> / <span class="text-danger fw-bold">${r.loss_count}L</span> / <span class="text-muted">${r.hold_trades}H</span></td>
-                    `;
-                    tournBody.appendChild(tr);
-                });
+                // Render tables
+                renderTable('dk1Body', data.dk1.models, data.dk1.total_v3_pnl, data.dk1.total_v31_pnl, data.dk1.total_delta);
+                renderTable('dk2Body', data.dk2.models, data.dk2.total_v3_pnl, data.dk2.total_v31_pnl, data.dk2.total_delta);
             })
             .catch(err => {
                 console.error(err);
-                document.getElementById('loadingState').innerHTML = '<div class="text-danger">Failed to load comparative metrics.</div>';
+                document.getElementById('loadingState').innerHTML = '<div class="text-danger fs-5">Failed to load comparison data.</div>';
             });
     </script>
 </body>

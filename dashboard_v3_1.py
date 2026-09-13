@@ -190,17 +190,14 @@ def api_model_trades_ledger():
 
 @app.route('/compare_v3_vs_v3_1')
 def compare_v3_vs_v3_1_view():
-    """Side-by-side comparison page between V3 baseline and V3.1 tournament suite."""
-    price_area = request.args.get('area', 'DK1')
+    """Side-by-side pairwise model-vs-model comparison between V3 and V3.1 for DK1 & DK2."""
     capital = float(request.args.get('capital', 20000.0))
     profile = request.args.get('profile', 'tier2_standard')
     dk_now = get_danish_now()
-    default_date = (dk_now - timedelta(days=1)).strftime("%Y-%m-%d")
-    selected_date = request.args.get('date', default_date)
+    selected_date = request.args.get('date', dk_now.strftime("%Y-%m-%d"))
 
     return render_template(
         'compare_v3_vs_v3_1.html',
-        price_area=price_area,
         capital=capital,
         profile=profile,
         selected_date=selected_date,
@@ -208,92 +205,115 @@ def compare_v3_vs_v3_1_view():
     )
 
 
+def _build_model_vs_model(price_area, capital, profile, date_str):
+    """Runs all 6 models through both V3 and V3.1 engines for a given area and returns pairwise results."""
+    # Model name mapping: V3 name -> V3.1 name
+    MODEL_PAIRS = [
+        {"v3_name": "Transformer-TFT",       "v31_name": "Transformer-TFT",       "paradigm": "P3. Pure 15m Native",        "type": "Deep Neural"},
+        {"v3_name": "Transfer-LightGBM",      "v31_name": "Transfer-LightGBM",     "paradigm": "P1. Transfer Learning",      "type": "Tree"},
+        {"v3_name": "Hierarchical-LGBM+XGB",  "v31_name": "Hierarchical-LGBM+XGB", "paradigm": "P2. Hierarchical Residual",  "type": "Tree"},
+        {"v3_name": "Pure15m-CatBoost",       "v31_name": "Pure15m-CatBoost",      "paradigm": "P3. Pure 15m Native",        "type": "Tree"},
+        {"v3_name": "Deep-BiLSTM",            "v31_name": "Transfer-BiLSTM",       "paradigm": "P1. Transfer Learning",      "type": "Deep Neural"},
+        {"v3_name": "Stacking-MetaEnsemble",  "v31_name": "Stacking-MetaEnsemble", "paradigm": "P4. Stacking Meta-Ensemble", "type": "Hybrid"},
+    ]
+
+    table_gen = TournamentTableGenerator(price_area=price_area)
+    try:
+        target_df = table_gen.generate_and_save_future_table(date_str=date_str)
+    except Exception:
+        target_df = table_gen.get_backtest_table(date_str=date_str)
+    if target_df.empty:
+        target_df = table_gen.get_future_table()
+    if target_df.empty:
+        return []
+
+    strat_v3 = V3CommercialStrategyEngine(price_area=price_area, capital=capital, profile=profile)
+    strat_v31 = V31CommercialStrategyEngine(price_area=price_area, capital=capital, profile=profile)
+
+    rows = []
+    for pair in MODEL_PAIRS:
+        # V3 evaluation
+        s_v3 = strat_v3.evaluate_trading_ledger(target_df, model_name=pair["v3_name"], market_mode="INTRADAY_D0", profile=profile)
+        pnl_v3 = float(s_v3.get("net_realized_profit_so_far", s_v3.get("net_pnl_eur", 0.0)))
+        trades_v3 = s_v3.get("trades", [])
+        settled_v3 = [t for t in trades_v3 if t.get("is_settled")]
+        active_v3 = [t for t in settled_v3 if "BUY" in t.get("action", "") or "SELL" in t.get("action", "")]
+        win_v3 = [t for t in active_v3 if str(t.get("net_pnl_eur", "")).startswith("+€") or (isinstance(t.get("net_pnl_eur"), (int, float)) and t.get("net_pnl_eur") > 0) or t.get("net_pnl_val", 0) > 0]
+        wr_v3 = round((len(win_v3) / len(active_v3) * 100), 1) if active_v3 else 0.0
+        trades_str_v3 = s_v3.get("trades_fraction_str", f"{len(active_v3)}/{len(trades_v3)}")
+
+        # V3.1 evaluation
+        s_v31 = strat_v31.evaluate_trading_ledger(target_df, model_name=pair["v31_name"], market_mode="INTRADAY_D0", profile=profile)
+        pnl_v31 = float(s_v31.get("net_realized_profit_so_far", s_v31.get("net_pnl_eur", 0.0)))
+        trades_v31 = s_v31.get("trades", [])
+        settled_v31 = [t for t in trades_v31 if t.get("is_settled")]
+        active_v31 = [t for t in settled_v31 if t.get("net_pnl_val", 0) != 0 or "BUY" in t.get("action", "") or "SELL" in t.get("action", "")]
+        if not active_v31:
+            active_v31 = [t for t in settled_v31 if str(t.get("action", "")).upper() not in ("HOLD", "")]
+        win_v31 = [t for t in active_v31 if t.get("net_pnl_val", 0) > 0]
+        wr_v31 = round((len(win_v31) / len(active_v31) * 100), 1) if active_v31 else 0.0
+        trades_str_v31 = s_v31.get("trades_fraction_str", f"{len(active_v31)}/{len(trades_v31)}")
+
+        delta = round(pnl_v31 - pnl_v3, 2)
+
+        rows.append({
+            "model_name": pair["v3_name"],
+            "v31_model_name": pair["v31_name"],
+            "paradigm": pair["paradigm"],
+            "model_type": pair["type"],
+            "v3_pnl": round(pnl_v3, 2),
+            "v3_win_rate": wr_v3,
+            "v3_trades": trades_str_v3,
+            "v3_active": len(active_v3),
+            "v31_pnl": round(pnl_v31, 2),
+            "v31_win_rate": wr_v31,
+            "v31_trades": trades_str_v31,
+            "v31_active": len(active_v31),
+            "delta_pnl": delta,
+            "winner": "V3.1" if delta > 0 else ("V3" if delta < 0 else "Tie")
+        })
+
+    # Sort by V3.1 PnL descending
+    rows.sort(key=lambda x: x["v31_pnl"], reverse=True)
+    return rows
+
+
 @app.route('/api/compare_v3_vs_v3_1')
 def api_compare_v3_vs_v3_1():
-    """Calculates side-by-side financial and model metrics between V3 baseline and V3.1 suite."""
-    price_area = request.args.get('area', 'DK1')
+    """Pairwise model-vs-model Net Realized Profit comparison for DK1 and DK2."""
     capital = float(request.args.get('capital', 20000.0))
     profile = request.args.get('profile', 'tier2_standard')
     date_str = request.args.get('date', None)
+    if not date_str:
+        dk_now = get_danish_now()
+        date_str = dk_now.strftime("%Y-%m-%d")
 
-    table_gen = TournamentTableGenerator(price_area=price_area)
-    if date_str:
-        target_df = table_gen.get_backtest_table(date_str=date_str)
-    else:
-        target_df = table_gen.get_backtest_table()
-        if target_df.empty:
-            target_df = table_gen.get_future_table()
+    dk1_rows = _build_model_vs_model("DK1", capital, profile, date_str)
+    dk2_rows = _build_model_vs_model("DK2", capital, profile, date_str)
 
-    if target_df.empty:
-        return jsonify({"success": False, "message": "No settlement data available"})
-
-    # 1. Run V3 Baseline (Transformer-TFT default)
-    strat_v3 = V3CommercialStrategyEngine(price_area=price_area, capital=capital, profile=profile)
-    summary_v3 = strat_v3.evaluate_trading_ledger(target_df, model_name="Transformer-TFT", market_mode="INTRADAY_D0", profile=profile)
-
-    # 2. Run V3.1 Real-Time Tournament Engine
-    tournament_engine = V31RealTimeTournamentEngine(price_area=price_area, initial_capital=capital, profile=profile)
-    tourn_res = tournament_engine.run_tournament(date_str=date_str)
-    champ = tourn_res.get("champion", {})
-    champ_model = champ.get("model_name", "Hierarchical-LGBM+XGB")
-
-    strat_v3_1 = V31CommercialStrategyEngine(price_area=price_area, capital=capital, profile=profile)
-    summary_v3_1 = strat_v3_1.evaluate_trading_ledger(target_df, model_name=champ_model, market_mode="INTRADAY_D0", profile=profile)
-
-    # 3. Compute Deltas & Improvements
-    pnl_v3 = float(summary_v3.get("net_realized_profit_so_far", summary_v3.get("net_pnl_eur", 0.0)))
-    pnl_v3_1 = float(summary_v3_1.get("net_realized_profit_so_far", summary_v3_1.get("net_pnl_eur", 0.0)))
-    delta_pnl = round(pnl_v3_1 - pnl_v3, 2)
-    delta_pnl_pct = round((delta_pnl / abs(pnl_v3) * 100), 2) if abs(pnl_v3) > 0 else 0.0
-
-    trades_v3 = summary_v3.get("trades", [])
-    trades_v3_1 = summary_v3_1.get("trades", [])
-    settled_v3 = [t for t in trades_v3 if t.get("is_settled")]
-    settled_v3_1 = [t for t in trades_v3_1 if t.get("is_settled")]
-
-    win_v3 = len([t for t in settled_v3 if str(t.get("net_pnl_eur", "")).startswith("+€") or (isinstance(t.get("net_pnl_eur"), (int, float)) and t.get("net_pnl_eur") > 0)])
-    win_v3_1 = len([t for t in settled_v3_1 if str(t.get("net_pnl_eur", "")).startswith("+€") or (isinstance(t.get("net_pnl_eur"), (int, float)) and t.get("net_pnl_eur") > 0)])
-    wr_v3 = round((win_v3 / len(settled_v3) * 100), 1) if settled_v3 else 0.0
-    wr_v3_1 = round((win_v3_1 / len(settled_v3_1) * 100), 1) if settled_v3_1 else 0.0
+    # Aggregate totals
+    dk1_total_v3 = round(sum(r["v3_pnl"] for r in dk1_rows), 2)
+    dk1_total_v31 = round(sum(r["v31_pnl"] for r in dk1_rows), 2)
+    dk2_total_v3 = round(sum(r["v3_pnl"] for r in dk2_rows), 2)
+    dk2_total_v31 = round(sum(r["v31_pnl"] for r in dk2_rows), 2)
 
     return jsonify({
         "success": True,
-        "price_area": price_area,
-        "date": summary_v3_1.get("delivery_date", date_str or "Live"),
+        "date": date_str,
         "profile": profile,
-        "v3_baseline": {
-            "version": "V3.0 (Heuristic Baseline)",
-            "model_name": "Transformer-TFT (Baseline)",
-            "hyperparameters": "Fixed defaults (depth=6, lr=0.05, leaves=31)",
-            "architectures": "LightGBM, CatBoost, XGBoost, Torch TFT",
-            "net_pnl_eur": round(pnl_v3, 2),
-            "win_rate_pct": wr_v3,
-            "roc_pct": summary_v3.get("live_roc_percent", summary_v3.get("roc_percent", 0.0)),
-            "fees_eur": round(summary_v3.get("fees_so_far", summary_v3.get("fees_eur", 0.0)), 2),
-            "tax_eur": round(summary_v3.get("tax_so_far", summary_v3.get("tax_eur", 0.0)), 2),
-            "total_trades": len(trades_v3),
-            "active_trades": summary_v3.get("active_occurred", summary_v3.get("active_trades", 0))
+        "capital": capital,
+        "dk1": {
+            "models": dk1_rows,
+            "total_v3_pnl": dk1_total_v3,
+            "total_v31_pnl": dk1_total_v31,
+            "total_delta": round(dk1_total_v31 - dk1_total_v3, 2)
         },
-        "v3_1_suite": {
-            "version": "V3.1 (Optuna Bayesian + PyTorch Dual Suites)",
-            "model_name": f"{champ_model} (Tournament Champion)",
-            "hyperparameters": "Optuna Bayesian Optimization + TimeSeriesSplit CV",
-            "architectures": "6 Models: 3 Trees + 2 PyTorch Deep Networks + 1 Stacking Blend",
-            "net_pnl_eur": round(pnl_v3_1, 2),
-            "win_rate_pct": wr_v3_1,
-            "roc_pct": summary_v3_1.get("live_roc_percent", summary_v3_1.get("roc_percent", 0.0)),
-            "fees_eur": round(summary_v3_1.get("fees_so_far", summary_v3_1.get("fees_eur", 0.0)), 2),
-            "tax_eur": round(summary_v3_1.get("tax_so_far", summary_v3_1.get("tax_eur", 0.0)), 2),
-            "total_trades": len(trades_v3_1),
-            "active_trades": summary_v3_1.get("active_occurred", summary_v3_1.get("active_trades", 0))
-        },
-        "comparison_delta": {
-            "delta_net_pnl_eur": delta_pnl,
-            "delta_pnl_pct": delta_pnl_pct,
-            "delta_win_rate_pct": round(wr_v3_1 - wr_v3, 1),
-            "winner": "V3.1 Suite" if delta_pnl >= 0 else "V3.0 Baseline"
-        },
-        "tournament_leaderboard": tourn_res.get("leaderboard", [])
+        "dk2": {
+            "models": dk2_rows,
+            "total_v3_pnl": dk2_total_v3,
+            "total_v31_pnl": dk2_total_v31,
+            "total_delta": round(dk2_total_v31 - dk2_total_v3, 2)
+        }
     })
 
 
