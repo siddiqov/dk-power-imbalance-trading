@@ -68,7 +68,7 @@ def download_decision_feature_guide():
 @app.route('/')
 def index():
     price_area = request.args.get('area', 'DK1')
-    initial_capital = float(request.args.get('capital', 100000.0))
+    initial_capital = float(request.args.get('capital', 20000.0))
     trade_volume = float(request.args.get('volume', 2.0))
     active_tab = request.args.get('tab', 'live')
     raw_mode = request.args.get('mode', 'day_ahead')  # 'day_ahead' or 'intraday'
@@ -166,7 +166,7 @@ def api_model_trades_ledger():
     model_name = request.args.get('model', 'Transformer-TFT')
     if ' ' in model_name:
         model_name = model_name.replace(' ', '+')
-    capital = float(request.args.get('capital', 100000.0))
+    capital = float(request.args.get('capital', 20000.0))
     trade_volume = float(request.args.get('volume', 2.0))
     tab = request.args.get('tab', 'live')
     raw_mode = request.args.get('mode', 'day_ahead')
@@ -192,7 +192,7 @@ def api_dispatch_batch_1():
     model_name = request.args.get('model', 'Transformer-TFT')
     if ' ' in model_name:
         model_name = model_name.replace(' ', '+')
-    capital = float(request.args.get('capital', 100000.0))
+    capital = float(request.args.get('capital', 20000.0))
     trade_volume = float(request.args.get('volume', 2.0))
     tab = request.args.get('tab', 'live')
     num_quarters = int(request.args.get('num_quarters', 9))
@@ -291,7 +291,7 @@ def api_dispatch_batch_1():
 def trade_ledger_v3():
     model_name = request.args.get('model', 'Transformer-TFT')
     price_area = request.args.get('area', 'DK1')
-    capital = float(request.args.get('capital', 100000.0))
+    capital = float(request.args.get('capital', 20000.0))
     trade_volume = float(request.args.get('volume', 2.0))
     tab = request.args.get('tab', 'live')
     raw_mode = request.args.get('mode', 'day_ahead')
@@ -315,7 +315,7 @@ def trade_ledger_v3():
 @app.route('/api/deep_analysis_data')
 def api_deep_analysis_data():
     price_area = request.args.get('area', 'DK1')
-    capital = float(request.args.get('capital', 100000.0))
+    capital = float(request.args.get('capital', 20000.0))
     trade_volume = float(request.args.get('volume', 2.0))
     tab = request.args.get('tab', 'live')
     raw_mode = request.args.get('mode', 'day_ahead')
@@ -332,7 +332,7 @@ def api_deep_analysis_data():
 @app.route('/deep_analysis')
 def deep_analysis():
     price_area = request.args.get('area', 'DK1')
-    capital = float(request.args.get('capital', 100000.0))
+    capital = float(request.args.get('capital', 20000.0))
     trade_volume = float(request.args.get('volume', 2.0))
     tab = request.args.get('tab', 'live')
     raw_mode = request.args.get('mode', 'day_ahead')
@@ -358,7 +358,7 @@ def deep_analysis():
 def dispatch_batch_1_view():
     price_area = request.args.get('area', 'DK1')
     model_name = request.args.get('model', 'Transformer-TFT')
-    capital = float(request.args.get('capital', 100000.0))
+    capital = float(request.args.get('capital', 20000.0))
     trade_volume = float(request.args.get('volume', 2.0))
     tab = request.args.get('tab', 'live')
     raw_mode = request.args.get('mode', 'intraday')
@@ -385,7 +385,7 @@ def dispatch_batch_1_view():
 def day_ahead_auction_view():
     price_area = request.args.get('area', 'DK1')
     volume = float(request.args.get('volume', 2.0))
-    capital = float(request.args.get('capital', 100000.0))
+    capital = float(request.args.get('capital', 20000.0))
     date_str = request.args.get('date', None)
 
     engine = DayAheadAuctionEngine(price_area=price_area, capital=capital, base_volume_mwh=volume)
@@ -408,7 +408,7 @@ def day_ahead_auction_view():
 def api_day_ahead_auction():
     price_area = request.args.get('area', 'DK1')
     volume = float(request.args.get('volume', 2.0))
-    capital = float(request.args.get('capital', 100000.0))
+    capital = float(request.args.get('capital', 20000.0))
     date_str = request.args.get('date', None)
 
     engine = DayAheadAuctionEngine(price_area=price_area, capital=capital, base_volume_mwh=volume)

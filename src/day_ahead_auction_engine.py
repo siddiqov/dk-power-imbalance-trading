@@ -37,7 +37,7 @@ class DayAheadAuctionEngine:
     recommendations for delivery on Day D (00:00 to 23:45 CET).
     """
 
-    def __init__(self, price_area: str = "DK1", capital: float = 100000.0, base_volume_mwh: float = 2.0):
+    def __init__(self, price_area: str = "DK1", capital: float = 20000.0, base_volume_mwh: float = 2.0):
         self.price_area = price_area.upper()
         self.capital = float(capital)
         self.base_volume_mwh = float(base_volume_mwh)

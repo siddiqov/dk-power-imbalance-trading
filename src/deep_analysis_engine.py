@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 # src/deep_analysis_engine.py
 # Quantitative Analytics & Diagnostics Engine for V3 Deep Analysis
 # ZERO SYNTHETIC DATA / 100% Genuine Energinet & Nord Pool Settlements
@@ -20,7 +20,7 @@ class V3DeepAnalysisEngine:
     tail risk mitigations (Spike Shield), and spread volatility metrics.
     """
 
-    def __init__(self, price_area='DK1', capital=100000.0, base_volume_mwh=2.0):
+    def __init__(self, price_area='DK1', capital=20000.0, base_volume_mwh=2.0):
         self.price_area = price_area
         self.capital = float(capital)
         self.base_volume_mwh = float(base_volume_mwh)

@@ -82,7 +82,7 @@ def push_predictions(
                 logger.info(f"  Got {len(df)} quarters from data source")
 
                 strategy = V3CommercialStrategyEngine(
-                    price_area=area, capital=100000.0, base_volume_mwh=2.0
+                    price_area=area, capital=20000.0, base_volume_mwh=2.0
                 )
 
                 # Step 2: Loop through requested models and market modes
