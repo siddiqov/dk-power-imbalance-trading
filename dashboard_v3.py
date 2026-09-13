@@ -402,6 +402,13 @@ def dispatch_96quarter_view_v3():
     capital = float(request.args.get('capital', 20000.0))
     version = request.args.get('version', 'v3')
 
+    dk_now = get_danish_now()
+    if not date_str:
+        if dk_now.hour >= 13:
+            date_str = (dk_now + timedelta(days=1)).strftime("%Y-%m-%d")
+        else:
+            date_str = dk_now.strftime("%Y-%m-%d")
+
     return render_template(
         'dispatch_96quarter.html',
         price_area=price_area,
@@ -420,6 +427,13 @@ def api_dispatch_96quarter_v3():
     profile = request.args.get('profile', 'tier3_aggressive')
     date_str = request.args.get('date', None)
     capital = float(request.args.get('capital', 20000.0))
+
+    dk_now = get_danish_now()
+    if not date_str:
+        if dk_now.hour >= 13:
+            date_str = (dk_now + timedelta(days=1)).strftime("%Y-%m-%d")
+        else:
+            date_str = dk_now.strftime("%Y-%m-%d")
 
     from src.intraday_dispatch_engine import Intraday2HourDispatchEngine
     engine = Intraday2HourDispatchEngine(price_area=price_area, capital=capital, profile=profile)

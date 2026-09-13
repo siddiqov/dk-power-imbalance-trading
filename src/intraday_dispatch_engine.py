@@ -266,9 +266,9 @@ class Intraday2HourDispatchEngine:
         Supports any choice of model, DK1/DK2, and maps each quarter to its 2-hour batch and gate closure cutoff.
         """
         dk_now = get_danish_now()
+        # Default to next day (D+1) if Danish time is >= 13:00 CET (post Day-Ahead spot auction clearing), else today (D)
         if not date_str:
-            # Default to tomorrow if current time is in the evening (>= 18:00 CET), else today
-            if dk_now.hour >= 18:
+            if dk_now.hour >= 13:
                 date_str = (dk_now + timedelta(days=1)).strftime("%Y-%m-%d")
             else:
                 date_str = dk_now.strftime("%Y-%m-%d")
