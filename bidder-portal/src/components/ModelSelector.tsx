@@ -2,10 +2,16 @@ import { Cpu } from 'lucide-react';
 
 export const AVAILABLE_MODELS = [
   {
+    id: 'Transfer-LightGBM',
+    shortName: 'Transfer-LightGBM',
+    fullName: 'Transfer-LightGBM (Target Domain Transfer)',
+    badge: 'Active',
+  },
+  {
     id: 'Transformer-TFT',
     shortName: 'TFT',
     fullName: 'Transformer-TFT (Primary Quantile Attention)',
-    badge: 'Primary',
+    badge: 'Quantile',
   },
   {
     id: 'Stacking-MetaEnsemble',
@@ -18,12 +24,6 @@ export const AVAILABLE_MODELS = [
     shortName: 'LGBM+XGB',
     fullName: 'Hierarchical-LGBM+XGB (Two-Stage Tree Model)',
     badge: 'Ensemble',
-  },
-  {
-    id: 'Transfer-LightGBM',
-    shortName: 'Transfer',
-    fullName: 'Transfer-LightGBM (Target Domain Transfer)',
-    badge: 'Transfer',
   },
   {
     id: 'Pure15m-CatBoost',

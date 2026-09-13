@@ -19,7 +19,7 @@ export function Header({
   viewMode = 'live',
   dateStr,
   isDayAhead = false,
-  selectedModel = 'Transformer-TFT',
+  selectedModel = 'Transfer-LightGBM',
   isAllScreen = false,
 }: HeaderProps) {
   return (

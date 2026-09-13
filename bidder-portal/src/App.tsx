@@ -99,7 +99,7 @@ function App() {
           ? url.searchParams.set('zone', 'DK2')
           : url.searchParams.delete('zone');
 
-        if (isAllScreen && model && model !== 'Transformer-TFT') {
+        if (isAllScreen && model && model !== 'Transfer-LightGBM') {
           url.searchParams.set('model', model);
         } else {
           url.searchParams.delete('model');
@@ -151,7 +151,7 @@ function App() {
       effectiveMode,
       undefined,
       dateRange,
-      isAllScreen ? selectedModel : 'Transformer-TFT',
+      isAllScreen ? selectedModel : 'Transfer-LightGBM',
       isAllScreen ? marketMode : 'INTRADAY_D0'
     );
 
@@ -169,15 +169,15 @@ function App() {
               : effectiveDate
           }
           isDayAhead={isAllScreen && marketMode === 'DAY_AHEAD_D1'}
-          selectedModel={isAllScreen ? selectedModel : 'Transformer-TFT'}
+          selectedModel={isAllScreen ? selectedModel : 'Transfer-LightGBM'}
           isAllScreen={isAllScreen}
         />
 
         {/* ════════════════════════════════════════════════════
             BASE URL  /  →  CUSTOMER VIEW
-            Clean: countdown timer + next 4 quarters only.
+            Clean: countdown timer + next 8 quarters only.
             No ViewToggle, no RangeFilterBar, no filters.
-            Strictly Transformer-TFT + INTRADAY_D0.
+            Strictly Transfer-LightGBM + INTRADAY_D0.
             ════════════════════════════════════════════════════ */}
         {!isAllScreen && (
           <>

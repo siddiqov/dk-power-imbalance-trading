@@ -132,7 +132,7 @@ export function usePredictions(
   viewMode: PortalViewMode = 'live',
   targetDate?: string,
   dateTimeRange?: DateTimeRange,
-  selectedModel: string = 'Transformer-TFT',
+  selectedModel: string = 'Transfer-LightGBM',
   selectedMarketMode: string = 'INTRADAY_D0'
 ) {
   const [predictions, setPredictions] = useState<QuarterPrediction[]>([]);
@@ -152,9 +152,9 @@ export function usePredictions(
         .select('*')
         .eq('price_area', priceArea);
 
-      // Model filtering: For root customer portal, strictly filter for 'Transformer-TFT'
-      if (viewMode === 'live' || !selectedModel || selectedModel === 'Transformer-TFT') {
-        query = query.eq('model_name', 'Transformer-TFT');
+      // Model filtering: For root customer portal, strictly filter for 'Transfer-LightGBM'
+      if (viewMode === 'live' || !selectedModel || selectedModel === 'Transfer-LightGBM') {
+        query = query.eq('model_name', 'Transfer-LightGBM');
       } else if (selectedModel !== 'ALL') {
         query = query.eq('model_name', selectedModel);
       }
