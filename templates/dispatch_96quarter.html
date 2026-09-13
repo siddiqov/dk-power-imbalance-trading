@@ -195,9 +195,15 @@
                     <i class="fa-solid fa-sliders me-1"></i> <span id="selectedProfileLabel">Profile: {{ profile }}</span>
                 </button>
                 <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end">
+                    <li class="dropdown-header text-muted small text-uppercase fw-bold">Dynamic Conviction Tiers</li>
                     <li><a class="dropdown-item text-warning fw-bold" href="javascript:void(0)" onclick="changeProfile('tier3_aggressive')">🚀 tier3_aggressive (0.5 – 25.0 MW)</a></li>
                     <li><a class="dropdown-item" href="javascript:void(0)" onclick="changeProfile('tier2_standard')">⚖️ tier2_standard (2.0 – 20.0 MW)</a></li>
                     <li><a class="dropdown-item" href="javascript:void(0)" onclick="changeProfile('tier1_conservative')">🛡️ tier1_conservative (1.0 – 15.0 MW)</a></li>
+                    <li><hr class="dropdown-divider border-secondary"></li>
+                    <li class="dropdown-header text-muted small text-uppercase fw-bold">Fixed Volume Profiles</li>
+                    <li><a class="dropdown-item" href="javascript:void(0)" onclick="changeProfile('fixed_2mwh')">Fixed 2.0 MWh / Trade</a></li>
+                    <li><a class="dropdown-item" href="javascript:void(0)" onclick="changeProfile('fixed_5mwh')">Fixed 5.0 MWh / Trade</a></li>
+                    <li><a class="dropdown-item" href="javascript:void(0)" onclick="changeProfile('fixed_10mwh')">Fixed 10.0 MWh / Trade</a></li>
                 </ul>
             </div>
             {% endif %}
@@ -343,10 +349,12 @@
 
         var urlParams = new URLSearchParams(window.location.search);
         var urlVersion = (urlParams.get('version') || "{{ version or 'v2' }}").toLowerCase();
-        // If opened from V3 or port 5001, default checked; if V2 or port 5000, default unchecked
-        var isV3 = (urlVersion === 'v3' || window.location.port === '5001');
+        // If opened from V3, V3.1, or ports 5001 / 5003, default isV3 = true
+        var isV3 = (urlVersion.includes('v3') || window.location.port === '5001' || window.location.port === '5003');
 
-        if (!isV3 && (!currentProfile || currentProfile.startsWith('tier'))) {
+        if (!currentProfile) {
+            currentProfile = isV3 ? 'tier2_standard' : 'fixed_5mwh';
+        } else if (!isV3 && currentProfile.startsWith('tier')) {
             currentProfile = 'fixed_5mwh';
         }
 
@@ -367,7 +375,7 @@
 
         function loadSchedule() {
             document.getElementById('spinnerOverlay').style.display = 'flex';
-            var url = `/api/dispatch_96quarter?area=${currentArea}&model=${encodeURIComponent(currentModel)}&profile=${encodeURIComponent(currentProfile)}`;
+            var url = `/api/dispatch_96quarter?area=${currentArea}&model=${encodeURIComponent(currentModel)}&profile=${encodeURIComponent(currentProfile)}&version=${encodeURIComponent(urlVersion)}`;
             if (currentDate) {
                 url += `&date=${encodeURIComponent(currentDate)}`;
             }

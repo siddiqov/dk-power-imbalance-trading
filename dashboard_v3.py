@@ -436,7 +436,7 @@ def api_dispatch_96quarter_v3():
             date_str = dk_now.strftime("%Y-%m-%d")
 
     from src.intraday_dispatch_engine import Intraday2HourDispatchEngine
-    engine = Intraday2HourDispatchEngine(price_area=price_area, capital=capital, profile=profile)
+    engine = Intraday2HourDispatchEngine(price_area=price_area, capital=capital, profile=profile, version="v3")
     res = engine.generate_full_day_96q(date_str=date_str, model_name=model_name)
     return jsonify(res)
 

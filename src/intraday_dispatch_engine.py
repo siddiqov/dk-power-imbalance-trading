@@ -13,6 +13,10 @@ import pandas as pd
 
 from src.tournament_tables_v2 import TournamentTableGenerator
 from src.commercial_strategy_v3 import V3CommercialStrategyEngine
+try:
+    from src.commercial_strategy_v3_1 import V31CommercialStrategyEngine
+except ImportError:
+    V31CommercialStrategyEngine = None
 
 
 def get_danish_now():
@@ -88,18 +92,28 @@ class Intraday2HourDispatchEngine:
     for physical trading execution, formatted for 1-click clipboard paste to Google Docs/Sheets.
     """
 
-    def __init__(self, price_area="DK1", capital=20000.0, base_volume_mwh=2.0, profile="tier3_aggressive"):
+    def __init__(self, price_area="DK1", capital=20000.0, base_volume_mwh=2.0, profile="tier2_standard", version="v3_1"):
         self.price_area = price_area
         self.capital = float(capital)
         self.base_volume_mwh = float(base_volume_mwh)
-        self.profile = profile
+        self.profile = profile or "tier2_standard"
+        self.version = str(version).lower() if version else "v3_1"
         self.table_gen = TournamentTableGenerator(price_area=price_area)
-        self.strategy = V3CommercialStrategyEngine(
-            price_area=price_area, 
-            capital=self.capital, 
-            base_volume_mwh=self.base_volume_mwh,
-            profile=self.profile
-        )
+        
+        if ("v3_1" in self.version or "3.1" in self.version) and V31CommercialStrategyEngine is not None:
+            self.strategy = V31CommercialStrategyEngine(
+                price_area=price_area,
+                capital=self.capital,
+                base_volume_mwh=self.base_volume_mwh,
+                profile=self.profile
+            )
+        else:
+            self.strategy = V3CommercialStrategyEngine(
+                price_area=price_area, 
+                capital=self.capital, 
+                base_volume_mwh=self.base_volume_mwh,
+                profile=self.profile
+            )
 
     def generate_batch(self, batch_num: int = None, date_str: str = None, model_name: str = "Transformer-TFT"):
         """
@@ -166,15 +180,23 @@ class Intraday2HourDispatchEngine:
 
         for t in batch_trades_raw:
             action_clean = t["action"].replace(" (Long)", "").replace(" (Short)", "")
-            q_spread = f"€{t['q10_price_eur']:.1f} - €{t['q90_price_eur']:.1f}"
-            p_ratio = f"{t['p_up']}% Up / {t['p_down']}% Dn"
+            q_spread = f"€{t.get('q10_price_eur', 0):.1f} - €{t.get('q90_price_eur', 0):.1f}"
             
+            p_up_val = float(t.get('p_up', 50.0))
+            if p_up_val <= 1.0:
+                p_up_val *= 100.0
+            p_down_val = float(t.get('p_down', 50.0))
+            if p_down_val <= 1.0:
+                p_down_val *= 100.0
+            p_ratio = f"{p_up_val:.0f}% Up / {p_down_val:.0f}% Dn"
+            
+            vol = float(t.get("volume_mwh", 0.0))
             if "BUY" in t["action"]:
                 buy_count += 1
-                total_vol += t["volume_mwh"]
+                total_vol += vol
             elif "SELL" in t["action"]:
                 sell_count += 1
-                total_vol += t["volume_mwh"]
+                total_vol += vol
             else:
                 hold_count += 1
 
@@ -187,10 +209,10 @@ class Intraday2HourDispatchEngine:
                 q_spread,
                 p_ratio,
                 action_clean,
-                f"{t['volume_mwh']:.1f} MW" if t["volume_mwh"] > 0 else "0.0 MW",
+                f"{vol:.1f} MW" if vol > 0 else "0.0 MW",
                 f"Batch {batch_num} Dispatched"
             ]
-            tsv_lines.append("	".join(row_tsv))
+            tsv_lines.append("\t".join(row_tsv))
             csv_lines.append(",".join([f'"{c}"' for c in row_tsv]))
 
             formatted_trades.append({
@@ -199,12 +221,12 @@ class Intraday2HourDispatchEngine:
                 "spot_price_eur": round(t["spot_price_eur"], 2),
                 "pred_imbalance_eur": round(t["pred_imbalance_eur"], 2),
                 "pred_spread_eur": round(t["pred_spread_eur"], 2),
-                "q10_price_eur": round(t["q10_price_eur"], 2),
-                "q90_price_eur": round(t["q90_price_eur"], 2),
-                "p_up": t["p_up"],
-                "p_down": t["p_down"],
+                "q10_price_eur": round(t.get("q10_price_eur", 0), 2),
+                "q90_price_eur": round(t.get("q90_price_eur", 0), 2),
+                "p_up": round(p_up_val, 1),
+                "p_down": round(p_down_val, 1),
                 "action": action_clean,
-                "volume_mwh": t["volume_mwh"],
+                "volume_mwh": vol,
                 "status": f"Batch {batch_num} ({meta['delivery_window']})"
             })
 
@@ -283,76 +305,14 @@ class Intraday2HourDispatchEngine:
         if target_df.empty:
             target_df = self.table_gen.get_future_table()
 
-        # Check if running under Fixed Volume Profile (V2 Pure Arbitrage Mode)
-        if self.profile and self.profile.startswith("fixed_"):
-            if "2" in self.profile:
-                fixed_vol = 2.0
-            elif "10" in self.profile:
-                fixed_vol = 10.0
-            else:
-                fixed_vol = 5.0
-
-            model_col_map = {
-                "Transformer-TFT": "transformer_tft_eur",
-                "Transfer-LightGBM": "transfer_lgb_eur",
-                "Hierarchical-LGBM+XGB": "hierarchical_eur",
-                "Hierarchical-LGBM": "hierarchical_eur",
-                "Stacking-MetaEnsemble": "meta_ensemble_eur",
-                "Deep-BiLSTM": "deep_bilstm_eur",
-                "Pure15m-CatBoost": "pure15m_catboost_eur"
-            }
-            pred_col = model_col_map.get(model_name, "transfer_lgb_eur")
-            if pred_col not in target_df.columns:
-                for c in ["transfer_lgb_eur", "transformer_tft_eur", "hierarchical_eur", "pure15m_catboost_eur", "meta_ensemble_eur", "deep_bilstm_eur"]:
-                    if c in target_df.columns:
-                        pred_col = c
-                        break
-
-            all_trades = []
-            fee_hurdle = 0.51
-            t_col = "time_dk" if "time_dk" in target_df.columns else "time_utc"
-
-            for i, row in target_df.reset_index(drop=True).iterrows():
-                p_spot = float(row.get("spot_price_eur") or row.get("DayAheadPriceEUR") or row.get("SpotPriceEUR") or 0.0)
-                p_pred = float(row.get(pred_col, p_spot))
-                pred_spread = p_pred - p_spot
-
-                if pred_spread > fee_hurdle:
-                    action = "BUY Spot (Long)"
-                    trade_vol = fixed_vol
-                elif pred_spread < -fee_hurdle:
-                    action = "SELL Spot (Short)"
-                    trade_vol = fixed_vol
-                else:
-                    action = "HOLD"
-                    trade_vol = 0.0
-
-                time_dk_val = str(row.get(t_col, ""))[:16]
-                time_utc_val = str(row.get("time_utc", ""))[:16] if "time_utc" in row else ""
-
-                all_trades.append({
-                    "quarter": f"Q{i+1}",
-                    "time_dk": time_dk_val,
-                    "time_utc": time_utc_val,
-                    "spot_price_eur": p_spot,
-                    "pred_imbalance_eur": p_pred,
-                    "pred_spread_eur": pred_spread,
-                    "q10_price_eur": p_spot + (pred_spread - 5.0),
-                    "q90_price_eur": p_spot + (pred_spread + 5.0),
-                    "p_up": 85 if pred_spread > fee_hurdle else (15 if pred_spread < -fee_hurdle else 50),
-                    "p_down": 15 if pred_spread > fee_hurdle else (85 if pred_spread < -fee_hurdle else 50),
-                    "action": action,
-                    "volume_mwh": trade_vol
-                })
-        else:
-            # Evaluate V3 Commercial Strategy across all 96 quarters
-            summary = self.strategy.evaluate_trading_ledger(
-                target_df,
-                model_name=model_name,
-                market_mode="INTRADAY_D0",
-                profile=self.profile
-            )
-            all_trades = summary.get("trades", [])
+        # Evaluate Commercial Strategy across all 96 quarters (handles Dynamic Conviction Tiers & Fixed Profiles)
+        summary = self.strategy.evaluate_trading_ledger(
+            target_df,
+            model_name=model_name,
+            market_mode="INTRADAY_D0",
+            profile=self.profile
+        )
+        all_trades = summary.get("trades", [])
 
         headers = [
             "Quarter", "Batch", "Delivery Time (CET)", "Delivery Time (UTC)", "Spot Price (€/MWh)", 
@@ -376,7 +336,14 @@ class Intraday2HourDispatchEngine:
 
             action_clean = t["action"].replace(" (Long)", "").replace(" (Short)", "")
             q_spread = f"€{t.get('q10_price_eur', 0):.1f} - €{t.get('q90_price_eur', 0):.1f}"
-            p_ratio = f"{t.get('p_up', 0)}% Up / {t.get('p_down', 0)}% Dn"
+            
+            p_up_val = float(t.get('p_up', 50.0))
+            if p_up_val <= 1.0:
+                p_up_val *= 100.0
+            p_down_val = float(t.get('p_down', 50.0))
+            if p_down_val <= 1.0:
+                p_down_val *= 100.0
+            p_ratio = f"{p_up_val:.0f}% Up / {p_down_val:.0f}% Dn"
 
             vol = float(t.get("volume_mwh", 0.0))
             spot = float(t.get("spot_price_eur", 0.0))
@@ -430,8 +397,8 @@ class Intraday2HourDispatchEngine:
                 "pred_spread_eur": round(t["pred_spread_eur"], 2),
                 "q10_price_eur": round(t.get("q10_price_eur", 0), 2),
                 "q90_price_eur": round(t.get("q90_price_eur", 0), 2),
-                "p_up": t.get("p_up", 0),
-                "p_down": t.get("p_down", 0),
+                "p_up": round(p_up_val, 1),
+                "p_down": round(p_down_val, 1),
                 "action": action_clean,
                 "volume_mwh": vol,
                 "da_cash_flow": da_flow_str,
