@@ -290,6 +290,16 @@ def api_dispatch_2hour():
     return jsonify(res)
 
 
+from zoneinfo import ZoneInfo
+
+def get_danish_now():
+    try:
+        return datetime.now(ZoneInfo("Europe/Copenhagen"))
+    except Exception:
+        from datetime import timezone
+        return datetime.now(timezone.utc) + timedelta(hours=2)
+
+
 @app.route('/dispatch_96quarter')
 @app.route('/intraday_96quarter')
 def dispatch_96quarter_view():
@@ -299,6 +309,13 @@ def dispatch_96quarter_view():
     date_str = request.args.get('date', None)
     capital = float(request.args.get('capital', 20000.0))
     version = request.args.get('version', 'v2')
+
+    dk_now = get_danish_now()
+    if not date_str:
+        if dk_now.hour >= 13:
+            date_str = (dk_now + timedelta(days=1)).strftime("%Y-%m-%d")
+        else:
+            date_str = dk_now.strftime("%Y-%m-%d")
 
     return render_template(
         'dispatch_96quarter.html',
@@ -318,6 +335,13 @@ def api_dispatch_96quarter():
     profile = request.args.get('profile', 'fixed_5mwh')
     date_str = request.args.get('date', None)
     capital = float(request.args.get('capital', 20000.0))
+
+    dk_now = get_danish_now()
+    if not date_str:
+        if dk_now.hour >= 13:
+            date_str = (dk_now + timedelta(days=1)).strftime("%Y-%m-%d")
+        else:
+            date_str = dk_now.strftime("%Y-%m-%d")
 
     from src.intraday_dispatch_engine import Intraday2HourDispatchEngine
     engine = Intraday2HourDispatchEngine(price_area=price_area, capital=capital, profile=profile)
