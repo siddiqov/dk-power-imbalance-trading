@@ -27,7 +27,7 @@ class RealTimeDayAheadTracker:
     Manages live Day-Ahead bidding schedules and intraday real-time ROC tracking.
     """
 
-    def __init__(self, price_area='DK1', initial_capital=100000.0):
+    def __init__(self, price_area='DK1', initial_capital=20000.0):
         self.price_area = price_area
         self.initial_capital = initial_capital
         self.engine = V2DataEngine()

@@ -42,7 +42,7 @@ def serve_static_results(filename):
     return send_from_directory('results', filename)
 
 
-def load_leaderboard(price_area="DK1", capital=100000.0, trade_volume_mwh=2.0, mode='live'):
+def load_leaderboard(price_area="DK1", capital=20000.0, trade_volume_mwh=2.0, mode='live'):
     """Loads the real-time occurred quarters leaderboard or historical backtest CSV."""
     if mode == 'live':
         try:
@@ -86,7 +86,7 @@ def download_dispatch_workflow_guide():
 @app.route('/')
 def index():
     price_area = request.args.get('area', 'DK1')
-    initial_capital = float(request.args.get('capital', 100000.0))
+    initial_capital = float(request.args.get('capital', 20000.0))
     trade_volume_mwh = float(request.args.get('volume', 2.0))
     active_tab = request.args.get('tab', 'live')
     date_str = request.args.get('date', None)
@@ -193,7 +193,7 @@ def api_run_historical_backtest():
         if not date_str:
             return jsonify({"status": "error", "message": "Date is required"}), 400
             
-        capital = float(data.get('capital', 100000.0))
+        capital = float(data.get('capital', 20000.0))
         trade_volume_mwh = float(data.get('volume', 2.0))
         
         from src.db_manager import fetch_daily_ledger
@@ -207,7 +207,7 @@ def api_run_historical_backtest():
         # Ensure correct capital base
         # Since DB stores relative PnL, we recreate capital curve
         for s in trading_summaries:
-            diff = capital - 100000.0
+            diff = capital - 20000.0
             s["summary"]["capital_curve"] = [x + diff for x in s["summary"]["capital_curve"]]
             s["summary"]["initial_capital"] = capital
             
@@ -224,7 +224,7 @@ def api_run_tournament():
     try:
         data = request.get_json() or {}
         price_area = data.get('area', 'DK1')
-        capital = float(data.get('capital', 100000.0))
+        capital = float(data.get('capital', 20000.0))
         trade_volume_mwh = float(data.get('volume', 2.0))
 
         df_lb = run_tournament(price_area=price_area, initial_capital=capital)
@@ -238,12 +238,99 @@ def api_run_tournament():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+@app.route('/trade_ledger_v2')
+@app.route('/trade_ledger')
+def trade_ledger_v2_view():
+    model_name = request.args.get('model', 'Transformer-TFT')
+    price_area = request.args.get('area', 'DK1')
+    capital = float(request.args.get('capital', 20000.0))
+    trade_volume = float(request.args.get('volume', 2.0))
+    tab = request.args.get('tab', 'live')
+    date_str = request.args.get('date', None)
+    return render_template(
+        'trade_ledger_v2.html',
+        model_name=model_name,
+        price_area=price_area,
+        capital=capital,
+        trade_volume=trade_volume,
+        active_tab=tab,
+        date_str=date_str,
+        today_str=datetime.now().strftime("%d %B %Y")
+    )
+
+
+@app.route('/dispatch_2hour')
+@app.route('/dispatch_batch_1')
+def dispatch_2hour_view():
+    price_area = request.args.get('area', 'DK1')
+    batch = request.args.get('batch', 'auto')
+    profile = request.args.get('profile', 'tier3_aggressive')
+    date_str = request.args.get('date', None)
+
+    return render_template(
+        'dispatch_2hour.html',
+        price_area=price_area,
+        current_batch=batch,
+        profile=profile,
+        selected_date=date_str
+    )
+
+
+@app.route('/api/dispatch_2hour')
+def api_dispatch_2hour():
+    price_area = request.args.get('area', 'DK1')
+    batch = request.args.get('batch', request.args.get('batch_num', 'auto'))
+    profile = request.args.get('profile', 'tier3_aggressive')
+    date_str = request.args.get('date', None)
+    model_name = request.args.get('model', 'Transformer-TFT')
+
+    from src.intraday_dispatch_engine import Intraday2HourDispatchEngine
+    engine = Intraday2HourDispatchEngine(price_area=price_area, profile=profile)
+    res = engine.export_and_save_batch(batch_num=batch, date_str=date_str)
+    return jsonify(res)
+
+
+@app.route('/dispatch_96quarter')
+@app.route('/intraday_96quarter')
+def dispatch_96quarter_view():
+    price_area = request.args.get('area', 'DK1')
+    model_name = request.args.get('model', 'Transfer-LightGBM')
+    profile = request.args.get('profile', 'fixed_5mwh')
+    date_str = request.args.get('date', None)
+    capital = float(request.args.get('capital', 20000.0))
+    version = request.args.get('version', 'v2')
+
+    return render_template(
+        'dispatch_96quarter.html',
+        price_area=price_area,
+        model_name=model_name,
+        profile=profile,
+        selected_date=date_str,
+        capital=capital,
+        version=version
+    )
+
+
+@app.route('/api/dispatch_96quarter')
+def api_dispatch_96quarter():
+    price_area = request.args.get('area', 'DK1')
+    model_name = request.args.get('model', 'Transfer-LightGBM')
+    profile = request.args.get('profile', 'fixed_5mwh')
+    date_str = request.args.get('date', None)
+    capital = float(request.args.get('capital', 20000.0))
+
+    from src.intraday_dispatch_engine import Intraday2HourDispatchEngine
+    engine = Intraday2HourDispatchEngine(price_area=price_area, capital=capital, profile=profile)
+    res = engine.generate_full_day_96q(date_str=date_str, model_name=model_name)
+    return jsonify(res)
+
+
 @app.route('/api/model_trades_ledger')
 def api_model_trades_ledger():
     """Returns quarter-by-quarter financial trade audit ledger for an occurred/active model."""
     price_area = request.args.get('area', 'DK1')
     model_name = request.args.get('model', 'Transformer-TFT')
-    capital = float(request.args.get('capital', 100000.0))
+    capital = float(request.args.get('capital', 20000.0))
     trade_volume_mwh = float(request.args.get('volume', 2.0))
 
     from src.live_intraday_ledger import LiveIntradayLedger
@@ -267,6 +354,41 @@ def api_export_csv():
         filename = f"96Q_future_table_{price_area}.csv"
 
     return send_from_directory("results", filename, as_attachment=True)
+
+
+@app.route('/historical_predictions')
+def historical_predictions_view():
+    return render_template('historical_predictions.html')
+
+
+@app.route('/api/historical_predictions')
+def api_historical_predictions():
+    start_date = request.args.get('start_date', None)
+    end_date = request.args.get('end_date', None)
+    zone = request.args.get('zone', 'ALL')
+    version = request.args.get('version', 'ALL')
+    snapshot_id = request.args.get('snapshot_id', None)
+    status = request.args.get('status', 'ALL')
+    view_mode = request.args.get('view_mode', 'all')
+
+    from src.historical_predictions_service import query_historical_predictions
+    res = query_historical_predictions(
+        start_date=start_date,
+        end_date=end_date,
+        zone=None if zone == 'ALL' else zone,
+        version=None if version == 'ALL' else version,
+        snapshot_id=int(snapshot_id) if snapshot_id else None,
+        status=None if status == 'ALL' else status,
+        view_mode=view_mode
+    )
+    return jsonify(res)
+
+
+@app.route('/api/historical_predictions_snapshots')
+def api_historical_predictions_snapshots():
+    from src.historical_predictions_service import get_all_snapshots
+    snapshots = get_all_snapshots()
+    return jsonify({"success": True, "snapshots": snapshots})
 
 
 if __name__ == '__main__':

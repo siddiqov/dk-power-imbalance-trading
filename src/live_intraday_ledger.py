@@ -23,7 +23,7 @@ class LiveIntradayLedger:
     and completed quarters on Day D-1 (Backtest).
     """
 
-    def __init__(self, price_area='DK1', capital=100000.0, trade_volume_mwh=2.0):
+    def __init__(self, price_area='DK1', capital=20000.0, trade_volume_mwh=2.0):
         self.price_area = price_area
         self.capital = capital
         self.trade_volume_mwh = float(trade_volume_mwh)

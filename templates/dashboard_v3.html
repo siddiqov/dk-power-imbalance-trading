@@ -8,38 +8,63 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root {
-            --bg-dark: #090d16;
-            --card-bg: #111827;
-            --card-border: #1f2937;
+            --bg-dark: #111622;
+            --card-bg: #182030;
+            --card-surface: #1e283d;
+            --card-border: #2d384e;
+            --card-border-subtle: #232e42;
             --accent-blue: #38bdf8;
             --accent-green: #10b981;
-            --accent-red: #ef4444;
+            --accent-red: #f43f5e;
             --accent-yellow: #f59e0b;
+            --accent-purple: #c084fc;
+            --text-main: #e2e8f0;
+            --text-secondary: #cbd5e1;
+            --text-muted: #8fa0b5;
         }
         body {
             background-color: var(--bg-dark);
-            color: #f3f4f6;
+            color: var(--text-main);
             font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            letter-spacing: 0.1px;
         }
         .navbar {
-            background-color: #0b1120;
+            background-color: #141b29;
             border-bottom: 1px solid var(--card-border);
         }
         .card, .metric-card {
             background-color: var(--card-bg);
             border: 1px solid var(--card-border);
             border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
         }
         .metric-card {
             padding: 1.25rem;
+            background: linear-gradient(145deg, #1d2639 0%, #161e2e 100%);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
         }
         .metric-val {
             font-size: 1.65rem;
             font-weight: 700;
+            color: var(--text-main);
         }
         .table-dark {
             --bs-table-bg: var(--card-bg);
-            --bs-table-border-color: var(--card-border);
+            --bs-table-striped-bg: #151c2a;
+            --bs-table-hover-bg: #1e283d;
+            --bs-table-border-color: var(--card-border-subtle);
+            color: var(--text-secondary);
+        }
+        .table-dark thead th {
+            color: #cbd5e1;
+            background-color: #141b29 !important;
+            border-bottom: 2px solid var(--card-border) !important;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+        }
+        .table-dark tbody td {
+            color: #cbd5e1;
+            vertical-align: middle;
         }
         .btn-zone {
             font-weight: 600;
@@ -86,19 +111,21 @@
                     </a>
                 </div>
 
-                <!-- Volume Selector -->
+                <!-- Risk Profile Selector -->
                 <div class="btn-group" role="group">
-                    <span class="input-group-text bg-dark border-secondary text-warning fw-bold small px-2">Volume:</span>
-                    <a href="/?area={{ price_area }}&capital={{ capital }}&volume=2.0&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}" class="btn btn-sm {% if trade_volume == 2.0 %}btn-warning fw-bold text-dark{% else %}btn-outline-secondary text-light{% endif %}">2.0 MWh</a>
-                    <a href="/?area={{ price_area }}&capital={{ capital }}&volume=5.0&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}" class="btn btn-sm {% if trade_volume == 5.0 %}btn-warning fw-bold text-dark{% else %}btn-outline-secondary text-light{% endif %}">5.0 MWh</a>
-                    <a href="/?area={{ price_area }}&capital={{ capital }}&volume=10.0&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}" class="btn btn-sm {% if trade_volume == 10.0 %}btn-warning fw-bold text-dark{% else %}btn-outline-secondary text-light{% endif %}">10.0 MWh</a>
+                    <span class="input-group-text bg-dark border-secondary text-info fw-bold small px-2">
+                        <i class="fa-solid fa-gauge-high me-1"></i> Conviction Sizing:
+                    </span>
+                    <a href="/?area={{ price_area }}&capital={{ capital }}&profile=tier1_conservative&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}" class="btn btn-sm {% if profile == 'tier1_conservative' or not profile %}btn-info fw-bold text-dark{% else %}btn-outline-secondary text-light{% endif %}" title="Tier 1 Conservative (1.0 - 15.0 MW)">Tier 1 (1–15 MW)</a>
+                    <a href="/?area={{ price_area }}&capital={{ capital }}&profile=tier2_standard&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}" class="btn btn-sm {% if profile == 'tier2_standard' %}btn-info fw-bold text-dark{% else %}btn-outline-secondary text-light{% endif %}" title="Tier 2 Standard (2.0 - 20.0 MW)">Tier 2 (2–20 MW)</a>
+                    <a href="/?area={{ price_area }}&capital={{ capital }}&profile=tier3_aggressive&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}" class="btn btn-sm {% if profile == 'tier3_aggressive' %}btn-danger fw-bold text-white{% else %}btn-outline-secondary text-light{% endif %}" title="Tier 3 Aggressive (0.5 - 25.0 MW)">Tier 3 (0.5–25 MW)</a>
                 </div>
 
                 <!-- Price Area Selector -->
-                <a href="/?area=DK1&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}" class="btn btn-zone {% if price_area == 'DK1' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
+                <a href="/?area=DK1&capital={{ capital }}&volume={{ trade_volume }}&profile={{ profile }}&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}" class="btn btn-zone {% if price_area == 'DK1' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
                     <i class="fa-solid fa-wind me-1"></i> DK1 (West)
                 </a>
-                <a href="/?area=DK2&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}" class="btn btn-zone {% if price_area == 'DK2' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
+                <a href="/?area=DK2&capital={{ capital }}&volume={{ trade_volume }}&profile={{ profile }}&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}" class="btn btn-zone {% if price_area == 'DK2' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
                     <i class="fa-solid fa-city me-1"></i> DK2 (East)
                 </a>
 
@@ -107,24 +134,24 @@
                     <i class="fa-solid fa-chart-pie me-1"></i> Deep Analysis
                 </a>
 
-                <!-- Download PDF Whitepaper Button -->
-                <a href="/download/technical_report" class="btn btn-sm btn-outline-info text-info fw-bold shadow-sm ms-1" title="Download Zero-Leakage & Horizon Architecture Technical Whitepaper (PDF)">
-                    <i class="fa-solid fa-file-pdf me-1"></i> Technical Whitepaper (PDF)
-                </a>
-
-                <!-- Download Decision Hierarchy & 14D Features PDF Button -->
-                <a href="/download/decision_feature_guide" class="btn btn-sm btn-outline-success text-success fw-bold shadow-sm ms-1" title="Download Decision Hierarchy, Softmax Probabilities & 14-D Telemetry Feature Guide (PDF)">
-                    <i class="fa-solid fa-file-shield me-1"></i> Decision & 14-D Features (PDF)
-                </a>
-
                 <!-- Day-Ahead Auction (96Q) Bidding Sheet Button (Opens in New Tab) -->
                 <a href="/day_ahead_auction?area={{ price_area }}&capital={{ capital }}&volume={{ trade_volume }}" target="_blank" class="btn btn-sm btn-info text-dark fw-bold shadow-sm ms-1" title="Open Fixed 96-Quarter Day-Ahead Auction Bidding Sheet (11:00 CET Pre-Auction Commitment)">
                     <i class="fa-solid fa-file-signature me-1"></i> Day-Ahead Auction (96Q)
                 </a>
 
                 <!-- Dispatch Batch 1 (Q1-Q9) Button (Opens in New Tab) -->
-                <a href="/dispatch_batch_1?area={{ price_area }}&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ tomorrow_str if active_tab == 'live' else selected_date }}&num_quarters=9" target="_blank" class="btn btn-sm btn-warning text-dark fw-bold shadow-sm ms-1" title="Open Q1-Q9 Intraday Dispatch in a New Tab (D-1 21:45 Cutoff)">
+                <a href="/dispatch_batch_1?area={{ price_area }}&capital={{ capital }}&volume={{ trade_volume }}&profile={{ profile }}&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ tomorrow_str if active_tab == 'live' else selected_date }}&num_quarters=9" target="_blank" class="btn btn-sm btn-warning text-dark fw-bold shadow-sm ms-1" title="Open Q1-Q9 Intraday Dispatch in a New Tab (D-1 21:45 Cutoff)">
                     <i class="fa-solid fa-arrow-up-right-from-square me-1"></i> Dispatch Batch 1 (Q1–Q9)
+                </a>
+
+                <!-- 96-Quarter Full Day Intraday Schedule (Next Day Delivery) -->
+                <a href="/dispatch_96quarter?area={{ price_area }}&capital={{ capital }}&profile={{ profile }}&version=v3" target="_blank" class="btn btn-sm btn-info text-dark fw-bold shadow-sm ms-1" title="Open Full 96-Quarter Next Day Intraday Trading Schedule (All 12 Batches, D+1)">
+                    <i class="fa-solid fa-calendar-days me-1"></i> 96-Quarter Intraday (D+1)
+                </a>
+
+                <!-- Historical Predictions Explorer (Custom Date Range / Git Snapshots) -->
+                <a href="/historical_predictions" target="_blank" class="btn btn-sm btn-outline-secondary text-white fw-bold shadow-sm ms-1" title="Explore Historical Forecasts from SQLite across Custom Date Ranges">
+                    <i class="fa-solid fa-database me-1 text-info"></i> Predictions Explorer
                 </a>
             </div>
         </div>
@@ -191,7 +218,7 @@
                 <h5 class="fw-bold text-white mb-0">
                     <i class="fa-solid fa-ranking-star text-warning me-2"></i> 
                     V3 Optimeering Model Suite Leaderboard 
-                    <span class="badge bg-dark border border-secondary text-info ms-2">Area: {{ price_area }} | Volume: {{ trade_volume }} MWh</span>
+                    <span class="badge bg-dark border border-secondary text-info ms-2">Area: {{ price_area }} | Sizing: {{ profile | replace('_', ' ') | title }}</span>
                     {% if active_tab == 'live' %}
                         <span class="badge bg-success ms-2"><i class="fa-solid fa-satellite-dish me-1"></i> Live Market: {{ today_str }}</span>
                     {% else %}

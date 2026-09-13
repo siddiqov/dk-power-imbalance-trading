@@ -123,7 +123,7 @@ def plot_enhanced_4panel_dashboard(trading_summaries, price_area, mode='backtest
     plt.close()
     return save_path
 
-def generate_live_dashboard_plot(price_area, capital=100000.0):
+def generate_live_dashboard_plot(price_area, capital=20000.0):
     """Generates the live rolling horizon plot directly from the LiveIntradayLedger."""
     from src.live_intraday_ledger import LiveIntradayLedger
     from datetime import datetime

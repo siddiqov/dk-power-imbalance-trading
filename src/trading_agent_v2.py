@@ -22,7 +22,7 @@ class CommercialTradingAgent:
     Takes multi-model predictions and executes capital-constrained arbitrage trades.
     """
 
-    def __init__(self, initial_capital=100000.0, exchange_fee=0.06, tso_fee=0.20, slippage=0.25, tax_rate=0.22):
+    def __init__(self, initial_capital=20000.0, exchange_fee=0.06, tso_fee=0.20, slippage=0.25, tax_rate=0.22):
         self.initial_capital = initial_capital
         self.exchange_fee = exchange_fee
         self.tso_fee = tso_fee

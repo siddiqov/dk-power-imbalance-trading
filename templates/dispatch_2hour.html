@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2-Hour Forward Intraday Dispatch (T-2h Gate Closure) | {{ price_area }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg-dark: #090d16;
+            --card-bg: #111827;
+            --card-border: #1f2937;
+            --accent-blue: #38bdf8;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --accent-yellow: #f59e0b;
+        }
+        body {
+            background-color: var(--bg-dark);
+            color: #f3f4f6;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            padding: 20px 25px;
+        }
+        .card, .metric-card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 10px;
+        }
+        .metric-card {
+            padding: 1.1rem 1.25rem;
+        }
+        .table-dark {
+            --bs-table-bg: var(--card-bg);
+            --bs-table-striped-bg: #141d2e;
+            --bs-table-hover-bg: #1e293b;
+            border-color: var(--card-border);
+        }
+        thead th {
+            position: sticky;
+            top: 0;
+            background-color: #0b1120 !important;
+            z-index: 10;
+            border-bottom: 2px solid var(--card-border) !important;
+            padding: 10px 8px !important;
+            text-align: center;
+        }
+        .btn-zone {
+            font-weight: 600;
+            border-radius: 6px;
+        }
+        .pulse-circle {
+            display: inline-block;
+            width: 9px; height: 9px;
+            border-radius: 50%;
+            background-color: #10b981;
+            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header Section -->
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+        <div class="d-flex align-items-center gap-3">
+            <a href="/" class="btn btn-outline-secondary btn-sm" title="Back to Dashboard">
+                <i class="fa-solid fa-arrow-left me-1"></i> Dashboard
+            </a>
+            <div>
+                <h4 class="fw-bold text-white mb-0 d-flex align-items-center gap-2">
+                    <i class="fa-solid fa-paper-plane text-warning"></i>
+                    2-Hour Forward Intraday Dispatch
+                    <span class="badge bg-warning text-dark fs-6" id="dispBatchBadge">Batch {{ current_batch or 'Auto' }}</span>
+                    <span class="badge bg-primary text-white fs-6">{{ price_area }}</span>
+                </h4>
+                <div class="small text-muted mt-1">
+                    Target Delivery Date: <span class="text-warning fw-bold" id="dispTargetDate">{{ selected_date or 'Auto' }}</span> | 
+                    Delivery Window: <span class="text-info fw-bold" id="dispWindow">--</span> | 
+                    Gate Closure: <span class="text-success fw-bold" id="dispCutoff">--</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <!-- Batch Selector Dropdown -->
+            <div class="dropdown">
+                <button class="btn btn-sm btn-outline-warning dropdown-toggle fw-bold" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="fa-solid fa-layer-group me-1"></i> <span id="selectedBatchLabel">Batch: {{ current_batch or '⚡ Auto (T-2h)' }}</span>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-dark">
+                    <li><a class="dropdown-item text-warning fw-bold" href="javascript:void(0)" onclick="selectBatch('auto')"><i class="fa-solid fa-bolt me-1"></i> ⚡ Auto (Upcoming T-2h)</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item" href="javascript:void(0)" onclick="selectBatch(1)">Batch 1: Q1–Q8 (00:00–02:00 CET) [Cutoff 21:45 D-1]</a></li>
+                    <li><a class="dropdown-item" href="javascript:void(0)" onclick="selectBatch(2)">Batch 2: Q9–Q16 (02:00–04:00 CET) [Cutoff 23:45 D-1]</a></li>
+                    <li><a class="dropdown-item" href="javascript:void(0)" onclick="selectBatch(3)">Batch 3: Q17–Q24 (04:00–06:00 CET) [Cutoff 01:45]</a></li>
+                    <li><a class="dropdown-item" href="javascript:void(0)" onclick="selectBatch(4)">Batch 4: Q25–Q32 (06:00–08:00 CET) [Cutoff 03:45]</a></li>
+                    <li><a class="dropdown-item" href="javascript:void(0)" onclick="selectBatch(5)">Batch 5: Q33–Q40 (08:00–10:00 CET) [Cutoff 05:45]</a></li>
+                    <li><a class="dropdown-item" href="javascript:void(0)" onclick="selectBatch(6)">Batch 6: Q41–Q48 (10:00–12:00 CET) [Cutoff 07:45]</a></li>
+                    <li><a class="dropdown-item" href="javascript:void(0)" onclick="selectBatch(7)">Batch 7: Q49–Q56 (12:00–14:00 CET) [Cutoff 09:45]</a></li>
+                    <li><a class="dropdown-item" href="javascript:void(0)" onclick="selectBatch(8)">Batch 8: Q57–Q64 (14:00–16:00 CET) [Cutoff 11:45]</a></li>
+                    <li><a class="dropdown-item" href="javascript:void(0)" onclick="selectBatch(9)">Batch 9: Q65–Q72 (16:00–18:00 CET) [Cutoff 13:45]</a></li>
+                    <li><a class="dropdown-item" href="javascript:void(0)" onclick="selectBatch(10)">Batch 10: Q73–Q80 (18:00–20:00 CET) [Cutoff 15:45]</a></li>
+                    <li><a class="dropdown-item" href="javascript:void(0)" onclick="selectBatch(11)">Batch 11: Q81–Q88 (20:00–22:00 CET) [Cutoff 17:45]</a></li>
+                    <li><a class="dropdown-item" href="javascript:void(0)" onclick="selectBatch(12)">Batch 12: Q89–Q96 (22:00–24:00 CET) [Cutoff 19:45]</a></li>
+                </ul>
+            </div>
+
+            <!-- Risk Profile Selector -->
+            <div class="btn-group" role="group">
+                <span class="input-group-text bg-dark border-secondary text-info fw-bold small px-2">Risk:</span>
+                <button type="button" class="btn btn-sm btn-outline-secondary text-light" id="profBtnT1" onclick="setProfile('tier1_conservative')">Tier 1 (1-15 MW)</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary text-light" id="profBtnT2" onclick="setProfile('tier2_standard')">Tier 2 (2-20 MW)</button>
+                <button type="button" class="btn btn-sm btn-danger fw-bold text-white" id="profBtnT3" onclick="setProfile('tier3_aggressive')">Tier 3 (0.5-25 MW)</button>
+            </div>
+
+            <!-- Price Area Switcher -->
+            <div class="btn-group" role="group">
+                <button type="button" class="btn btn-sm btn-zone {% if price_area == 'DK1' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}" onclick="setArea('DK1')">
+                    <i class="fa-solid fa-wind me-1"></i> DK1 (West)
+                </button>
+                <button type="button" class="btn btn-sm btn-zone {% if price_area == 'DK2' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}" onclick="setArea('DK2')">
+                    <i class="fa-solid fa-city me-1"></i> DK2 (East)
+                </button>
+            </div>
+
+            <!-- Copy for Google Docs / Sheets Button -->
+            <button class="btn btn-sm btn-success fw-bold px-3 shadow" id="btnCopyDispatch" onclick="copyDispatchToClipboard()">
+                <i class="fa-solid fa-copy me-1"></i> <span id="copyBtnText">Copy for Google Docs / Sheets</span>
+            </button>
+
+            <!-- Export CSV -->
+            <button class="btn btn-sm btn-outline-info fw-bold" onclick="downloadDispatchCsv()">
+                <i class="fa-solid fa-file-csv me-1"></i> Export CSV
+            </button>
+
+            <!-- Refresh Button -->
+            <button class="btn btn-sm btn-outline-warning fw-bold" onclick="loadDispatchData()" title="Refresh Live Predictions">
+                <i class="fa-solid fa-arrows-rotate me-1"></i> Refresh
+            </button>
+        </div>
+    </div>
+
+    <!-- Alert Context Banner -->
+    <div class="alert alert-warning bg-black border-warning py-2 px-3 mb-4 d-flex justify-content-between align-items-center">
+        <div class="small">
+            <i class="fa-solid fa-shield-halved text-warning me-2"></i>
+            <strong>Gate Closure Protocol (T-2h):</strong> Sized and locked 2 hours prior to physical delivery. Formatted for direct <code>Ctrl+V</code> paste into Google Docs and Google Sheets.
+        </div>
+        <div class="small text-muted">
+            <span class="pulse-circle me-1"></span> <span class="text-success fw-bold">24/7 AUTOMATED TELEMETRY</span>
+        </div>
+    </div>
+
+    <!-- Summary Metrics Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="metric-card text-center">
+                <div class="text-muted small text-uppercase fw-bold">Total Dispatched Volume</div>
+                <div class="fw-bold text-warning fs-4 mt-1" id="dispTotalVolume">-- MW</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="metric-card text-center">
+                <div class="text-muted small text-uppercase fw-bold">BUY (Up-Reg) Signals</div>
+                <div class="fw-bold text-success fs-4 mt-1" id="dispBuyCount">--</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="metric-card text-center">
+                <div class="text-muted small text-uppercase fw-bold">SELL (Down-Reg) Signals</div>
+                <div class="fw-bold text-danger fs-4 mt-1" id="dispSellCount">--</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="metric-card text-center">
+                <div class="text-muted small text-uppercase fw-bold">HOLD / Balanced</div>
+                <div class="fw-bold text-muted fs-4 mt-1" id="dispHoldCount">--</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dispatch Table Card -->
+    <div class="card p-3 shadow border-secondary mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+            <div class="d-flex align-items-center gap-3">
+                <h6 class="fw-bold text-white mb-0">
+                    <i class="fa-solid fa-list-check text-warning me-2"></i>
+                    <span id="tableTitle">2-Hour Order Execution Matrix</span>
+                </h6>
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" id="optShowRiskCols2H" onchange="toggleRiskColumns2H(this.checked)">
+                    <label class="form-check-label text-info small fw-bold" for="optShowRiskCols2H">
+                        <i class="fa-solid fa-chart-area me-1"></i> Show V3 Risk Columns
+                    </label>
+                </div>
+            </div>
+            <div class="small text-muted">
+                Model: <span class="badge bg-info text-dark fw-bold">Transformer-TFT</span> | 
+                Risk Profile: <span class="badge bg-danger text-white fw-bold" id="badgeProfile">tier3_aggressive</span> | 
+                Capital: <span class="badge bg-dark border border-secondary text-warning fw-bold">€20,000</span>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-dark table-sm table-striped text-center align-middle mb-0" id="dispatchTable2H">
+                <thead>
+                    <tr class="text-muted small text-uppercase">
+                        <th>Quarter</th>
+                        <th>Delivery Time (CET)</th>
+                        <th>Spot Price (€/MWh)</th>
+                        <th>Pred Imbalance (€/MWh)</th>
+                        <th>Pred Spread (€/MWh)</th>
+                        <th class="col-v3-risk">Quantiles (q10-q90)</th>
+                        <th class="col-v3-risk">P(Up) / P(Dn)</th>
+                        <th>Recommended Action</th>
+                        <th>Volume (MW)</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="dispatchTableBody">
+                    <tr><td colspan="10" class="py-5 text-muted"><div class="spinner-border text-warning mb-2"></div><br>Calculating 2-Hour Trade Decisions...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 9999;">
+        <div id="copyToast" class="toast align-items-center text-bg-success border-0" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="d-flex">
+                <div class="toast-body fw-bold">
+                    <i class="fa-solid fa-check-circle me-2"></i> 2-Hour Dispatch copied to clipboard! Paste into Google Docs / Sheets with Ctrl+V.
+                </div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let currentBatch = '{{ current_batch or "auto" }}';
+        let currentArea = '{{ price_area or "DK1" }}';
+        let currentProfile = '{{ profile or "tier3_aggressive" }}';
+        let currentDate = '{{ selected_date or "" }}';
+        let currentDispatchData = null;
+
+        function updateProfileButtons() {
+            document.getElementById('profBtnT1').className = currentProfile === 'tier1_conservative' ? 'btn btn-sm btn-info fw-bold text-dark' : 'btn btn-sm btn-outline-secondary text-light';
+            document.getElementById('profBtnT2').className = currentProfile === 'tier2_standard' ? 'btn btn-sm btn-info fw-bold text-dark' : 'btn btn-sm btn-outline-secondary text-light';
+            document.getElementById('profBtnT3').className = currentProfile === 'tier3_aggressive' ? 'btn btn-sm btn-danger fw-bold text-white' : 'btn btn-sm btn-outline-secondary text-light';
+            document.getElementById('badgeProfile').innerText = currentProfile;
+        }
+
+        function setProfile(p) {
+            currentProfile = p;
+            updateProfileButtons();
+            loadDispatchData();
+        }
+
+        function setArea(a) {
+            currentArea = a;
+            window.location.href = `/dispatch_2hour?area=${a}&batch=${currentBatch}&profile=${currentProfile}&date=${currentDate}`;
+        }
+
+        function selectBatch(b) {
+            currentBatch = b;
+            document.getElementById('selectedBatchLabel').innerText = b === 'auto' ? '⚡ Auto (T-2h)' : `Batch ${b}`;
+            loadDispatchData();
+        }
+
+        function loadDispatchData() {
+            const tbody = document.getElementById('dispatchTableBody');
+            tbody.innerHTML = `<tr><td colspan="10" class="py-5 text-muted"><div class="spinner-border text-warning mb-2"></div><br>Calculating 2-Hour Trade Decisions...</td></tr>`;
+
+            const apiUrl = `/api/dispatch_2hour?area=${currentArea}&batch=${currentBatch}&profile=${currentProfile}&date=${currentDate}`;
+
+            fetch(apiUrl)
+                .then(res => res.json())
+                .then(data => {
+                    if (!data.success) {
+                        tbody.innerHTML = `<tr><td colspan="10" class="py-5 text-danger">Failed to generate dispatch data: ${data.message || 'Error'}</td></tr>`;
+                        return;
+                    }
+                    currentDispatchData = data;
+                    document.getElementById('dispBatchBadge').innerText = `Batch ${data.batch_num} (${data.quarter_range})`;
+                    document.getElementById('dispTargetDate').innerText = data.date;
+                    document.getElementById('dispWindow').innerText = data.delivery_window;
+                    document.getElementById('dispCutoff').innerText = data.gate_closure_cutoff;
+                    document.getElementById('tableTitle').innerText = `${data.quarter_range} (${data.delivery_window}) Order Execution Matrix`;
+
+                    renderTable(data);
+                })
+                .catch(err => {
+                    console.error(err);
+                    tbody.innerHTML = `<tr><td colspan="10" class="py-5 text-danger">Network Error: Could not connect to dispatch API.</td></tr>`;
+                });
+        }
+
+        function toggleRiskColumns2H(show) {
+            document.querySelectorAll('#dispatchTable2H .col-v3-risk').forEach(el => {
+                el.style.display = show ? '' : 'none';
+            });
+        }
+
+        function renderTable(data) {
+            const tbody = document.getElementById('dispatchTableBody');
+            tbody.innerHTML = '';
+
+            let buyCount = 0;
+            let sellCount = 0;
+            let holdCount = 0;
+            let totalVol = 0;
+
+            data.trades.forEach(t => {
+                let badgeClass = 'bg-secondary';
+                if (t.action.includes('BUY')) {
+                    badgeClass = 'bg-success';
+                    buyCount++;
+                    totalVol += t.volume_mwh;
+                } else if (t.action.includes('SELL')) {
+                    badgeClass = 'bg-danger';
+                    sellCount++;
+                    totalVol += t.volume_mwh;
+                } else {
+                    holdCount++;
+                }
+
+                const spreadClass = t.pred_spread_eur >= 0 ? 'text-success' : 'text-danger';
+                const spreadSign = t.pred_spread_eur >= 0 ? '+' : '';
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="fw-bold text-warning">${t.quarter}</td>
+                    <td class="font-monospace text-light small">${t.time_dk}</td>
+                    <td class="text-light">€ ${t.spot_price_eur.toFixed(2)}</td>
+                    <td class="text-info fw-bold">€ ${t.pred_imbalance_eur.toFixed(2)}</td>
+                    <td class="${spreadClass} fw-bold">${spreadSign}€ ${t.pred_spread_eur.toFixed(2)}</td>
+                    <td class="small text-muted font-monospace col-v3-risk">€${t.q10_price_eur.toFixed(0)} - €${t.q90_price_eur.toFixed(0)}</td>
+                    <td class="small font-monospace col-v3-risk"><span class="text-success">${t.p_up}% Up</span> / <span class="text-danger">${t.p_down}% Dn</span></td>
+                    <td><span class="badge ${badgeClass} fs-6 px-3 py-1">${t.action}</span></td>
+                    <td class="text-light fw-bold">${t.volume_mwh > 0 ? t.volume_mwh.toFixed(1) + ' MW' : '--'}</td>
+                    <td><span class="badge bg-primary px-2 py-1"><i class="fa-solid fa-check me-1"></i>Ready</span></td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            document.getElementById('dispTotalVolume').innerText = totalVol.toFixed(1) + ' MW';
+            document.getElementById('dispBuyCount').innerText = buyCount + ' Quarters';
+            document.getElementById('dispSellCount').innerText = sellCount + ' Quarters';
+            document.getElementById('dispHoldCount').innerText = holdCount + ' Quarters';
+
+            const showRisk = document.getElementById('optShowRiskCols2H') ? document.getElementById('optShowRiskCols2H').checked : false;
+            toggleRiskColumns2H(showRisk);
+        }
+
+        function copyDispatchToClipboard() {
+            if (!currentDispatchData || !currentDispatchData.tsv_payload) {
+                alert('No dispatch data available to copy.');
+                return;
+            }
+
+            navigator.clipboard.writeText(currentDispatchData.tsv_payload).then(() => {
+                const toastEl = document.getElementById('copyToast');
+                const toast = new bootstrap.Toast(toastEl);
+                toast.show();
+                const copyBtn = document.getElementById('copyBtnText');
+                const originalText = copyBtn.innerText;
+                copyBtn.innerText = 'Copied!';
+                setTimeout(() => { copyBtn.innerText = originalText; }, 2000);
+            }).catch(err => {
+                console.error('Copy failed: ', err);
+                alert('Failed to copy to clipboard automatically. Please check browser permissions.');
+            });
+        }
+
+        function downloadDispatchCsv() {
+            if (!currentDispatchData || !currentDispatchData.csv_payload) {
+                alert('No data available to export.');
+                return;
+            }
+            const blob = new Blob([currentDispatchData.csv_payload], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.setAttribute('download', `dispatch_${currentArea}_Batch_${currentDispatchData.batch_num}_${currentDispatchData.date}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            var urlParams2H = new URLSearchParams(window.location.search);
+            var urlVersion2H = (urlParams2H.get('version') || "{{ version or 'v2' }}").toLowerCase();
+            var isV3_2H = (urlVersion2H === 'v3' || window.location.port === '5001');
+            var toggle = document.getElementById('optShowRiskCols2H');
+            if (toggle) toggle.checked = isV3_2H;
+
+            updateProfileButtons();
+            loadDispatchData();
+        });
+    </script>
+</body>
+</html>

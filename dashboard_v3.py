@@ -70,6 +70,7 @@ def index():
     price_area = request.args.get('area', 'DK1')
     initial_capital = float(request.args.get('capital', 20000.0))
     trade_volume = float(request.args.get('volume', 2.0))
+    profile = request.args.get('profile', 'tier1_conservative')
     active_tab = request.args.get('tab', 'live')
     raw_mode = request.args.get('mode', 'day_ahead')  # 'day_ahead' or 'intraday'
     market_mode = "DAY_AHEAD_D1" if raw_mode == 'day_ahead' else "INTRADAY_D0"
@@ -86,11 +87,11 @@ def index():
     else:
         target_df = table_gen.get_future_table(date_str=today_date_str)
 
-    # Run V3 Strategy Engine with selected Market Mode
-    strategy = V3CommercialStrategyEngine(price_area=price_area, capital=initial_capital, base_volume_mwh=trade_volume)
+    # Run V3 Strategy Engine with selected Market Mode and Profile
+    strategy = V3CommercialStrategyEngine(price_area=price_area, capital=initial_capital, base_volume_mwh=trade_volume, profile=profile)
     
     # Evaluate for default / winner model
-    ledger_summary = strategy.evaluate_trading_ledger(target_df, model_name="Transformer-TFT", market_mode=market_mode)
+    ledger_summary = strategy.evaluate_trading_ledger(target_df, model_name="Transformer-TFT", market_mode=market_mode, profile=profile)
     
     # Generate Optimeering Predictions & Chart
     preds = strategy.model_suite.predict_day_ahead_quantiles(target_df, market_mode=market_mode)
@@ -107,18 +108,19 @@ def index():
     leaderboard = []
     models = ["Transformer-TFT", "Hierarchical-LGBM+XGB", "Transfer-LightGBM", "Pure15m-CatBoost", "Deep-BiLSTM", "Stacking-MetaEnsemble"]
     for m in models:
-        s = strategy.evaluate_trading_ledger(target_df, model_name=m, market_mode=market_mode)
+        s = strategy.evaluate_trading_ledger(target_df, model_name=m, market_mode=market_mode, profile=profile)
         settled = [t for t in s["trades"] if t["is_settled"]]
         active = [t for t in settled if "BUY" in t["action"] or "SELL" in t["action"]]
         win_trades = [t for t in active if t["net_pnl_eur"].startswith("+€")]
         win_rate = (len(win_trades) / len(active) * 100.0) if active else 0.0
+        total_vol = sum(float(t.get("volume_mwh", 0.0)) for t in active)
 
         leaderboard.append({
             "Paradigm": "Optimeering V3",
             "Model Architecture": m,
             "Trades": s["trades_fraction_str"],
             "Win Rate": f"{win_rate:.1f}%",
-            "Volume (MWh)": f"{len(active) * trade_volume:.1f}",
+            "Volume (MWh)": f"{total_vol:.1f}",
             "Gross PnL": f"{'+EUR' if s['gross_pnl_so_far'] >= 0 else '-EUR'} {abs(s['gross_pnl_so_far']):,.2f}",
             "Fees & Slip": f"EUR {s['fees_so_far']:,.2f}",
             "Danish Tax (22%)": f"EUR {s['tax_so_far']:,.2f}",
@@ -143,6 +145,7 @@ def index():
         price_area=price_area,
         capital=initial_capital,
         trade_volume=trade_volume,
+        profile=profile,
         active_tab=active_tab,
         raw_mode=raw_mode,
         market_mode=market_mode,
@@ -168,6 +171,7 @@ def api_model_trades_ledger():
         model_name = model_name.replace(' ', '+')
     capital = float(request.args.get('capital', 20000.0))
     trade_volume = float(request.args.get('volume', 2.0))
+    profile = request.args.get('profile', 'tier1_conservative')
     tab = request.args.get('tab', 'live')
     raw_mode = request.args.get('mode', 'day_ahead')
     market_mode = "DAY_AHEAD_D1" if raw_mode == 'day_ahead' else "INTRADAY_D0"
@@ -180,8 +184,8 @@ def api_model_trades_ledger():
     table_gen = TournamentTableGenerator(price_area=price_area)
     target_df = table_gen.get_future_table(date_str=today_date_str) if tab == 'live' else table_gen.get_backtest_table(date_str=selected_date)
 
-    strategy = V3CommercialStrategyEngine(price_area=price_area, capital=capital, base_volume_mwh=trade_volume)
-    summary = strategy.evaluate_trading_ledger(target_df, model_name=model_name, market_mode=market_mode)
+    strategy = V3CommercialStrategyEngine(price_area=price_area, capital=capital, base_volume_mwh=trade_volume, profile=profile)
+    summary = strategy.evaluate_trading_ledger(target_df, model_name=model_name, market_mode=market_mode, profile=profile)
     return jsonify(summary)
 
 
@@ -194,6 +198,7 @@ def api_dispatch_batch_1():
         model_name = model_name.replace(' ', '+')
     capital = float(request.args.get('capital', 20000.0))
     trade_volume = float(request.args.get('volume', 2.0))
+    profile = request.args.get('profile', 'tier1_conservative')
     tab = request.args.get('tab', 'live')
     num_quarters = int(request.args.get('num_quarters', 9))
 
@@ -219,8 +224,8 @@ def api_dispatch_batch_1():
     if target_df.empty:
         target_df = table_gen.get_future_table()
         
-    strategy = V3CommercialStrategyEngine(price_area=price_area, capital=capital, base_volume_mwh=trade_volume)
-    summary = strategy.evaluate_trading_ledger(target_df, model_name=model_name, market_mode="INTRADAY_D0")
+    strategy = V3CommercialStrategyEngine(price_area=price_area, capital=capital, base_volume_mwh=trade_volume, profile=profile)
+    summary = strategy.evaluate_trading_ledger(target_df, model_name=model_name, market_mode="INTRADAY_D0", profile=profile)
     
     trades = summary.get("trades", [])[:num_quarters]
     
@@ -277,6 +282,7 @@ def api_dispatch_batch_1():
         "success": True,
         "price_area": price_area,
         "model_name": model_name,
+        "profile": profile,
         "date": actual_delivery_date,
         "delivery_window": "00:00 - 02:15 CET (Q1-Q9)",
         "gate_closure_cutoff": "D-1 21:45 CET",
@@ -293,6 +299,7 @@ def trade_ledger_v3():
     price_area = request.args.get('area', 'DK1')
     capital = float(request.args.get('capital', 20000.0))
     trade_volume = float(request.args.get('volume', 2.0))
+    profile = request.args.get('profile', 'tier1_conservative')
     tab = request.args.get('tab', 'live')
     raw_mode = request.args.get('mode', 'day_ahead')
     dk_now = get_danish_now()
@@ -305,6 +312,7 @@ def trade_ledger_v3():
         price_area=price_area,
         capital=capital,
         trade_volume=trade_volume,
+        profile=profile,
         active_tab=tab,
         raw_mode=raw_mode,
         selected_date=selected_date,
@@ -354,12 +362,78 @@ def deep_analysis():
     )
 
 
+@app.route('/dispatch_2hour')
+def dispatch_2hour_view_v3():
+    price_area = request.args.get('area', 'DK1')
+    batch = request.args.get('batch', 'auto')
+    profile = request.args.get('profile', 'tier3_aggressive')
+    date_str = request.args.get('date', None)
+
+    return render_template(
+        'dispatch_2hour.html',
+        price_area=price_area,
+        current_batch=batch,
+        profile=profile,
+        selected_date=date_str
+    )
+
+
+@app.route('/api/dispatch_2hour')
+def api_dispatch_2hour_v3():
+    price_area = request.args.get('area', 'DK1')
+    batch = request.args.get('batch', request.args.get('batch_num', 'auto'))
+    profile = request.args.get('profile', 'tier3_aggressive')
+    date_str = request.args.get('date', None)
+    model_name = request.args.get('model', 'Transformer-TFT')
+
+    from src.intraday_dispatch_engine import Intraday2HourDispatchEngine
+    engine = Intraday2HourDispatchEngine(price_area=price_area, profile=profile)
+    res = engine.export_and_save_batch(batch_num=batch, date_str=date_str)
+    return jsonify(res)
+
+
+@app.route('/dispatch_96quarter')
+@app.route('/intraday_96quarter')
+def dispatch_96quarter_view_v3():
+    price_area = request.args.get('area', 'DK1')
+    model_name = request.args.get('model', 'Transformer-TFT')
+    profile = request.args.get('profile', 'tier1_conservative')
+    date_str = request.args.get('date', None)
+    capital = float(request.args.get('capital', 20000.0))
+    version = request.args.get('version', 'v3')
+
+    return render_template(
+        'dispatch_96quarter.html',
+        price_area=price_area,
+        model_name=model_name,
+        profile=profile,
+        selected_date=date_str,
+        capital=capital,
+        version=version
+    )
+
+
+@app.route('/api/dispatch_96quarter')
+def api_dispatch_96quarter_v3():
+    price_area = request.args.get('area', 'DK1')
+    model_name = request.args.get('model', 'Transformer-TFT')
+    profile = request.args.get('profile', 'tier3_aggressive')
+    date_str = request.args.get('date', None)
+    capital = float(request.args.get('capital', 20000.0))
+
+    from src.intraday_dispatch_engine import Intraday2HourDispatchEngine
+    engine = Intraday2HourDispatchEngine(price_area=price_area, capital=capital, profile=profile)
+    res = engine.generate_full_day_96q(date_str=date_str, model_name=model_name)
+    return jsonify(res)
+
+
 @app.route('/dispatch_batch_1')
 def dispatch_batch_1_view():
     price_area = request.args.get('area', 'DK1')
     model_name = request.args.get('model', 'Transformer-TFT')
     capital = float(request.args.get('capital', 20000.0))
     trade_volume = float(request.args.get('volume', 2.0))
+    profile = request.args.get('profile', 'tier1_conservative')
     tab = request.args.get('tab', 'live')
     raw_mode = request.args.get('mode', 'intraday')
     dk_now = get_danish_now()
@@ -373,6 +447,7 @@ def dispatch_batch_1_view():
         model_name=model_name,
         capital=capital,
         trade_volume=trade_volume,
+        profile=profile,
         active_tab=tab,
         raw_mode=raw_mode,
         selected_date=selected_date,
@@ -414,6 +489,43 @@ def api_day_ahead_auction():
     engine = DayAheadAuctionEngine(price_area=price_area, capital=capital, base_volume_mwh=volume)
     res = engine.generate_fixed_auction_bids(delivery_date=date_str)
     return jsonify(res)
+
+
+@app.route('/historical_predictions')
+def historical_predictions_view_v3():
+    return render_template('historical_predictions.html')
+
+
+@app.route('/api/historical_predictions')
+def api_historical_predictions_v3():
+    start_date = request.args.get('start_date', None)
+    end_date = request.args.get('end_date', None)
+    zone = request.args.get('zone', 'ALL')
+    version = request.args.get('version', 'ALL')
+    snapshot_id = request.args.get('snapshot_id', None)
+    status = request.args.get('status', 'ALL')
+    view_mode = request.args.get('view_mode', 'all')
+
+    from src.historical_predictions_service import query_historical_predictions
+    res = query_historical_predictions(
+        start_date=start_date,
+        end_date=end_date,
+        zone=None if zone == 'ALL' else zone,
+        version=None if version == 'ALL' else version,
+        snapshot_id=int(snapshot_id) if snapshot_id else None,
+        status=None if status == 'ALL' else status,
+        view_mode=view_mode
+    )
+    return jsonify(res)
+
+
+@app.route('/api/historical_predictions_snapshots')
+def api_historical_predictions_snapshots_v3():
+    from src.historical_predictions_service import get_all_snapshots
+    snapshots = get_all_snapshots()
+    return jsonify({"success": True, "snapshots": snapshots})
+
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
     print("\n" + "=" * 80)

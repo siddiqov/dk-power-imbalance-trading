@@ -8,29 +8,37 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root {
-            --bg-dark: #090d16;
-            --card-bg: #111827;
-            --card-border: #1f2937;
+            --bg-dark: #111622;
+            --card-bg: #182030;
+            --card-surface: #1e283d;
+            --card-border: #2d384e;
+            --card-border-subtle: #232e42;
             --accent-blue: #38bdf8;
             --accent-green: #10b981;
+            --accent-red: #f43f5e;
             --accent-yellow: #f59e0b;
+            --accent-purple: #c084fc;
+            --text-main: #e2e8f0;
+            --text-secondary: #cbd5e1;
+            --text-muted: #8fa0b5;
         }
         body {
             background-color: var(--bg-dark);
-            color: #f3f4f6;
+            color: var(--text-main);
             font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
             padding: 15px 20px;
+            letter-spacing: 0.1px;
         }
         .table-dark {
             --bs-table-bg: var(--card-bg);
-            --bs-table-striped-bg: #141d2e;
-            --bs-table-hover-bg: #1e293b;
-            border-color: var(--card-border);
+            --bs-table-striped-bg: #151c2a;
+            --bs-table-hover-bg: #1e283d;
+            border-color: var(--card-border-subtle);
         }
         thead th {
             position: sticky;
             top: 0;
-            background-color: #0b1120 !important;
+            background-color: #141b29 !important;
             z-index: 10;
             border-bottom: 2px solid var(--card-border) !important;
             padding: 5px 2px !important;

@@ -1,0 +1,9 @@
+Quarter	Delivery Time (CET)	Spot Price (€/MWh)	Pred Imbalance (€/MWh)	Pred Spread (€/MWh)	Quantiles (q10-q90)	P(Up) / P(Dn)	Recommended Action	Volume (MW)	Status
+Q41	2026-09-12 10:00	€122.30	€125.07	+2.77 €/MWh	€121.5 - €122.6	0.3% Up / 0.5% Dn	BUY Spot	1.0 MW	Batch 6 Dispatched
+Q42	2026-09-12 10:15	€104.95	€109.04	+4.09 €/MWh	€104.2 - €105.2	0.3% Up / 0.5% Dn	BUY Spot	1.0 MW	Batch 6 Dispatched
+Q43	2026-09-12 10:30	€83.94	€88.88	+4.94 €/MWh	€83.2 - €84.2	0.3% Up / 0.5% Dn	BUY Spot	1.0 MW	Batch 6 Dispatched
+Q44	2026-09-12 10:45	€42.71	€47.16	+4.45 €/MWh	€41.9 - €43.0	0.3% Up / 0.5% Dn	BUY Spot	1.0 MW	Batch 6 Dispatched
+Q45	2026-09-12 11:00	€64.68	€68.81	+4.13 €/MWh	€63.5 - €64.9	0.3% Up / 0.5% Dn	BUY Spot	1.0 MW	Batch 6 Dispatched
+Q46	2026-09-12 11:15	€42.06	€47.32	+5.26 €/MWh	€41.3 - €42.3	0.3% Up / 0.5% Dn	BUY Spot	1.0 MW	Batch 6 Dispatched
+Q47	2026-09-12 11:30	€16.80	€22.91	+6.11 €/MWh	€16.0 - €17.1	0.3% Up / 0.5% Dn	BUY Spot	1.0 MW	Batch 6 Dispatched
+Q48	2026-09-12 11:45	€6.51	€12.08	+5.57 €/MWh	€5.7 - €6.8	0.3% Up / 0.5% Dn	BUY Spot	1.0 MW	Batch 6 Dispatched

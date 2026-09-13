@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>V3.1 Multi-Paradigm Tournament & Deep Learning Simulator (DK1 / DK2)</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg-dark: #111622;
+            --card-bg: #182030;
+            --card-surface: #1e283d;
+            --card-border: #2d384e;
+            --card-border-subtle: #232e42;
+            --accent-blue: #38bdf8;
+            --accent-green: #10b981;
+            --accent-red: #f43f5e;
+            --accent-yellow: #f59e0b;
+            --accent-purple: #c084fc;
+            --text-main: #e2e8f0;
+            --text-secondary: #cbd5e1;
+            --text-muted: #8fa0b5;
+        }
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            letter-spacing: 0.1px;
+        }
+        .navbar {
+            background-color: #141b29;
+            border-bottom: 1px solid var(--card-border);
+        }
+        .card, .metric-card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
+        }
+        .metric-card {
+            padding: 1.25rem;
+            background: linear-gradient(145deg, #1d2639 0%, #161e2e 100%);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+        }
+        .metric-val {
+            font-size: 1.65rem;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+        .table-dark {
+            --bs-table-bg: var(--card-bg);
+            --bs-table-striped-bg: #151c2a;
+            --bs-table-hover-bg: #1e283d;
+            --bs-table-border-color: var(--card-border-subtle);
+            color: var(--text-secondary);
+        }
+        .table-dark thead th {
+            color: #cbd5e1;
+            background-color: #141b29 !important;
+            border-bottom: 2px solid var(--card-border) !important;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+        }
+        .table-dark tbody td {
+            color: #cbd5e1;
+            vertical-align: middle;
+        }
+        .btn-zone {
+            font-weight: 600;
+            border-radius: 6px;
+        }
+        .btn-mode {
+            font-weight: 700;
+            border-radius: 6px;
+            letter-spacing: 0.3px;
+        }
+        .pulse-circle {
+            display: inline-block;
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            background-color: #10b981;
+            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+        .badge-tree {
+            background-color: #065f46;
+            color: #a7f3d0;
+            border: 1px solid #10b981;
+        }
+        .badge-neural {
+            background-color: #4c1d95;
+            color: #ddd6fe;
+            border: 1px solid #8b5cf6;
+        }
+        .badge-hybrid {
+            background-color: #78350f;
+            color: #fde68a;
+            border: 1px solid #f59e0b;
+        }
+        .badge-champ {
+            background: linear-gradient(135deg, #f59e0b 0%, #b45309 100%);
+            color: #ffffff;
+            font-weight: 800;
+            box-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Top Navbar -->
+    <nav class="navbar navbar-expand-lg px-4 py-3 mb-4">
+        <div class="container-fluid">
+            <span class="navbar-brand text-white fw-bold d-flex align-items-center">
+                <i class="fa-solid fa-trophy text-warning me-2 fs-4"></i>
+                V3.1 Financial Tournament & Deep Learning Trader
+                <span class="badge bg-warning text-dark ms-3 fs-6">PORT 5003</span>
+            </span>
+            <div class="d-flex align-items-center gap-3">
+                <!-- Market Mode Selector (Day-Ahead vs Intraday) -->
+                <div class="btn-group me-2" role="group">
+                    <a href="/?area={{ price_area }}&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}&mode=day_ahead&date={{ selected_date }}&model={{ selected_model }}" class="btn btn-sm btn-mode {% if raw_mode == 'day_ahead' %}btn-success text-white shadow{% else %}btn-outline-secondary text-light{% endif %}">
+                        <i class="fa-solid fa-calendar-day me-1"></i> Pure Day-Ahead (D-1 Fixed)
+                    </a>
+                    <a href="/?area={{ price_area }}&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}&mode=intraday&date={{ selected_date }}&model={{ selected_model }}" class="btn btn-sm btn-mode {% if raw_mode == 'intraday' %}btn-warning text-dark fw-bold shadow{% else %}btn-outline-secondary text-light{% endif %}">
+                        <i class="fa-solid fa-bolt me-1"></i> Continuous Intraday (D-0 Rolling)
+                    </a>
+                </div>
+
+                <!-- Risk Profile Selector -->
+                <div class="btn-group" role="group">
+                    <span class="input-group-text bg-dark border-secondary text-info fw-bold small px-2">
+                        <i class="fa-solid fa-gauge-high me-1"></i> Sizing:
+                    </span>
+                    <a href="/?area={{ price_area }}&capital={{ capital }}&profile=tier1_conservative&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}&model={{ selected_model }}" class="btn btn-sm {% if profile == 'tier1_conservative' %}btn-info fw-bold text-dark{% else %}btn-outline-secondary text-light{% endif %}" title="Tier 1 Conservative (1.0 - 15.0 MW)">Tier 1 (2 MW)</a>
+                    <a href="/?area={{ price_area }}&capital={{ capital }}&profile=tier2_standard&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}&model={{ selected_model }}" class="btn btn-sm {% if profile == 'tier2_standard' or not profile %}btn-info fw-bold text-dark{% else %}btn-outline-secondary text-light{% endif %}" title="Tier 2 Standard (2.0 - 20.0 MW)">Tier 2 (5 MW)</a>
+                    <a href="/?area={{ price_area }}&capital={{ capital }}&profile=tier3_aggressive&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}&model={{ selected_model }}" class="btn btn-sm {% if profile == 'tier3_aggressive' %}btn-danger fw-bold text-white{% else %}btn-outline-secondary text-light{% endif %}" title="Tier 3 Aggressive (0.5 - 25.0 MW)">Tier 3 (10 MW)</a>
+                </div>
+
+                <!-- Price Area Selector -->
+                <a href="/?area=DK1&capital={{ capital }}&volume={{ trade_volume }}&profile={{ profile }}&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}&model={{ selected_model }}" class="btn btn-zone {% if price_area == 'DK1' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
+                    <i class="fa-solid fa-wind me-1"></i> DK1 (West)
+                </a>
+                <a href="/?area=DK2&capital={{ capital }}&volume={{ trade_volume }}&profile={{ profile }}&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}&model={{ selected_model }}" class="btn btn-zone {% if price_area == 'DK2' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
+                    <i class="fa-solid fa-city me-1"></i> DK2 (East)
+                </a>
+
+                <!-- Side-by-Side Compare V3 vs V3.1 Button -->
+                <a href="/compare_v3_vs_v3_1?area={{ price_area }}&capital={{ capital }}&profile={{ profile }}&date={{ selected_date }}" class="btn btn-sm btn-outline-info text-info fw-bold shadow-sm ms-1" title="Compare V3 Baseline vs V3.1 Multi-Paradigm Tournament Suite">
+                    <i class="fa-solid fa-code-compare me-1"></i> Compare V3 vs V3.1
+                </a>
+
+                <!-- 96-Quarter Full Day Intraday Schedule (Next Day Delivery) -->
+                <a href="/dispatch_96quarter?area={{ price_area }}&capital={{ capital }}&profile={{ profile }}&model={{ selected_model }}" target="_blank" class="btn btn-sm btn-info text-dark fw-bold shadow-sm ms-1" title="Open Full 96-Quarter Next Day Intraday Trading Schedule">
+                    <i class="fa-solid fa-calendar-days me-1"></i> 96-Quarter Intraday
+                </a>
+
+                <!-- Back to V3 button -->
+                <a href="http://127.0.0.1:5001/?area={{ price_area }}" target="_blank" class="btn btn-sm btn-outline-secondary text-white fw-bold shadow-sm ms-1" title="Open V3 Optimeering Baseline on Port 5001">
+                    <i class="fa-solid fa-arrow-up-right-from-square me-1"></i> V3 (Port 5001)
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid px-4 pb-5">
+
+        <!-- Top Status & Real-Time Performance Monitor Cards -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div class="text-muted small text-uppercase fw-bold">Active Market Horizon</div>
+                        <div><span class="pulse-circle me-1"></span> <span class="small text-success fw-bold">LIVE TOURNAMENT</span></div>
+                    </div>
+                    <div class="metric-val {% if raw_mode == 'day_ahead' %}text-success{% else %}text-warning{% endif %} mt-1 fs-5">
+                        {% if raw_mode == 'day_ahead' %}
+                            <i class="fa-solid fa-lock me-1"></i> Day-Ahead (D-1 Fixed)
+                        {% else %}
+                            <i class="fa-solid fa-arrows-spin me-1"></i> Intraday (D-0 Rolling)
+                        {% endif %}
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center mt-1 text-muted small">
+                        <span class="text-light"><i class="fa-regular fa-clock me-1 text-warning"></i> <span id="liveClock">Live CET</span></span>
+                        <span class="badge bg-dark border border-secondary text-info fw-bold">{{ today_str }}</span>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div class="text-muted small text-uppercase fw-bold">Live Champion Architecture</div>
+                        <span class="badge badge-champ"><i class="fa-solid fa-crown me-1"></i> RANK #1</span>
+                    </div>
+                    <div class="metric-val text-info mt-1 fs-5">{{ champion.get('model_name', 'Hierarchical-LGBM+XGB') }}</div>
+                    <div class="text-muted small mt-1">
+                        Type: <span class="badge {% if champion.get('model_type') == 'Tree' %}badge-tree{% elif champion.get('model_type') == 'Deep Neural' %}badge-neural{% else %}badge-hybrid{% endif %}">{{ champion.get('model_type', 'Tree') }}</span>
+                        | Win Rate: <span class="text-light fw-bold">{{ champion.get('win_rate_pct', 0.0) }}%</span>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div class="text-muted small text-uppercase fw-bold">Champion Net Profit</div>
+                        <span class="badge bg-primary">After 22% Tax & Fees</span>
+                    </div>
+                    <div class="metric-val text-success mt-1">€ {{ "{:,.2f}".format(champion.get('net_pnl_eur', 0.0)) }}</div>
+                    <div class="text-muted small mt-1">ROC: <span class="text-success fw-bold">{{ champion.get('roc_pct', 0.0) }}%</span> | MAE: €{{ champion.get('mae_eur', 0.0) }}/MWh</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div class="text-muted small text-uppercase fw-bold">Active Inspecting Model</div>
+                        <span class="badge bg-warning text-dark"><i class="fa-solid fa-binoculars me-1"></i> Active View</span>
+                    </div>
+                    <div class="metric-val text-warning mt-1 fs-5">{{ selected_model }}</div>
+                    <div class="text-muted small mt-1">Realized Net PnL: <span class="text-light fw-bold">{{ summary.net_realized_profit_so_far_str }}</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 1. Real-Time Financial Tournament Leaderboard -->
+        <div class="card p-3 mb-4 shadow-sm border-secondary">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <div>
+                    <h5 class="fw-bold text-white mb-0">
+                        <i class="fa-solid fa-trophy text-warning me-2"></i> 
+                        V3.1 Real-Time Financial Tournament Leaderboard 
+                        <span class="badge bg-dark border border-secondary text-info ms-2">Area: {{ price_area }} | Sizing: {{ profile | replace('_', ' ') | title }}</span>
+                        {% if active_tab == 'live' %}
+                            <span class="badge bg-success ms-2"><i class="fa-solid fa-satellite-dish me-1"></i> Live Market: {{ today_str }}</span>
+                        {% else %}
+                            <span class="badge bg-warning text-dark ms-2"><i class="fa-solid fa-clock-rotate-left me-1"></i> Backtest: {{ selected_date }}</span>
+                        {% endif %}
+                    </h5>
+                    <div class="text-muted small mt-1">
+                        Ranked dynamically by <strong>Realized Net PnL (€)</strong> under genuine Energinet settlement rules (€0.51/MWh fee, 22% Danish corporate tax). Compares Optuna-tuned trees vs Native PyTorch deep networks.
+                    </div>
+                </div>
+                <div>
+                    <span class="badge bg-dark border border-warning text-warning fs-6 px-3 py-2">
+                        <i class="fa-solid fa-crown me-1"></i> Operational Champion: <strong>{{ champion.get('model_name', 'Hierarchical-LGBM+XGB') }}</strong>
+                    </span>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-dark table-hover align-middle mb-0">
+                    <thead>
+                        <tr class="text-muted small text-uppercase">
+                            <th>Rank</th>
+                            <th>Model Architecture</th>
+                            <th>Paradigm & Type</th>
+                            <th>Net Realized Profit (€)</th>
+                            <th>Win Rate</th>
+                            <th>Profit Factor</th>
+                            <th>ROC %</th>
+                            <th>MAE (€/MWh)</th>
+                            <th>Trades (W/L/H)</th>
+                            <th>Status</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in leaderboard %}
+                        <tr {% if row.model_name == selected_model %}class="table-active" style="background-color: #1e293b !important;"{% endif %}>
+                            <td class="fw-bold {% if row.rank == 1 %}text-warning fs-5{% else %}text-muted{% endif %}">
+                                {% if row.rank == 1 %}🥇 #1{% elif row.rank == 2 %}🥈 #2{% elif row.rank == 3 %}🥉 #3{% else %}#{{ row.rank }}{% endif %}
+                            </td>
+                            <td class="fw-bold text-light">
+                                {{ row.model_name }}
+                                {% if row.is_champion %}<span class="badge badge-champ ms-2"><i class="fa-solid fa-trophy me-1"></i>CHAMPION</span>{% endif %}
+                            </td>
+                            <td>
+                                <span class="badge {% if row.model_type == 'Tree' %}badge-tree{% elif row.model_type == 'Deep Neural' %}badge-neural{% else %}badge-hybrid{% endif %} me-1">
+                                    {{ row.badge }}
+                                </span>
+                                <span class="small text-muted d-block mt-1">{{ row.paradigm }}</span>
+                            </td>
+                            <td class="fw-bold fs-6 {% if row.net_pnl_eur >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                € {{ "{:,.2f}".format(row.net_pnl_eur) }}
+                            </td>
+                            <td class="text-success fw-bold">{{ row.win_rate_pct }}%</td>
+                            <td class="text-light fw-bold">{{ row.profit_factor }}</td>
+                            <td class="fw-bold {% if row.roc_pct >= 0 %}text-success{% else %}text-danger{% endif %}">{{ "{:+.2f}".format(row.roc_pct) }}%</td>
+                            <td class="text-info font-monospace">€{{ row.mae_eur }}</td>
+                            <td class="small">
+                                <span class="text-success fw-bold">{{ row.win_count }}W</span> / 
+                                <span class="text-danger fw-bold">{{ row.loss_count }}L</span> / 
+                                <span class="text-muted">{{ row.hold_trades }}H</span>
+                            </td>
+                            <td>
+                                {% if row.is_champion %}
+                                    <span class="badge bg-success"><i class="fa-solid fa-check me-1"></i>Dispatched</span>
+                                {% else %}
+                                    <span class="badge bg-dark border border-secondary text-muted">Benchmarking</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-nowrap">
+                                <div class="btn-group" role="group">
+                                    <a href="/?area={{ price_area }}&capital={{ capital }}&volume={{ trade_volume }}&profile={{ profile }}&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}&model={{ row.model_name }}" 
+                                       class="btn btn-sm {% if row.model_name == selected_model %}btn-warning fw-bold text-dark{% else %}btn-outline-secondary text-light{% endif %}" 
+                                       title="Inspect {{ row.model_name }} on Dashboard (updates Quantile Fan Chart and bottom summary)">
+                                        <i class="fa-solid fa-chart-line me-1"></i> Inspect
+                                    </a>
+                                    <a href="/trade_ledger_v3_1?area={{ price_area }}&model={{ row.model_name }}&capital={{ capital }}&volume={{ trade_volume }}&profile={{ profile }}&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}" 
+                                       target="_blank" 
+                                       class="btn btn-sm btn-info text-dark fw-bold" 
+                                       title="Open Full 96-Quarter Live Audited Trading Ledger for {{ row.model_name }} in a New Tab">
+                                        <i class="fa-solid fa-table-list me-1"></i> Live Q1–96
+                                    </a>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 2. Operations & Backtesting Workspace Tabs -->
+        <div class="card p-3 mb-4 border-secondary">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                <ul class="nav nav-pills" id="mainTabs" role="tablist">
+                    <li class="nav-item">
+                        <a class="nav-link {% if active_tab == 'live' %}active bg-info text-dark fw-bold{% else %}text-light{% endif %}" href="/?area={{ price_area }}&capital={{ capital }}&volume={{ trade_volume }}&tab=live&mode={{ raw_mode }}&date={{ selected_date }}&model={{ selected_model }}">
+                            <i class="fa-solid fa-satellite-dish me-1"></i> 📡 Live Real-Time Market (Day D)
+                        </a>
+                    </li>
+                    <li class="nav-item ms-2">
+                        <a class="nav-link {% if active_tab == 'backtest' %}active bg-info text-dark fw-bold{% else %}text-light{% endif %}" href="/?area={{ price_area }}&capital={{ capital }}&volume={{ trade_volume }}&tab=backtest&mode={{ raw_mode }}&date={{ selected_date }}&model={{ selected_model }}">
+                            <i class="fa-solid fa-calendar-check me-1"></i> 📅 Historical Backtest Tournament
+                        </a>
+                    </li>
+                </ul>
+
+                <!-- Calendar Date Picker (Active in Backtest Tab) -->
+                {% if active_tab == 'backtest' %}
+                <form method="GET" action="/" class="d-flex align-items-center gap-2">
+                    <input type="hidden" name="area" value="{{ price_area }}">
+                    <input type="hidden" name="capital" value="{{ capital }}">
+                    <input type="hidden" name="volume" value="{{ trade_volume }}">
+                    <input type="hidden" name="tab" value="backtest">
+                    <input type="hidden" name="mode" value="{{ raw_mode }}">
+                    <input type="hidden" name="model" value="{{ selected_model }}">
+                    
+                    <span class="text-muted small fw-bold text-uppercase"><i class="fa-regular fa-calendar me-1 text-warning"></i> Select Date:</span>
+                    <input type="date" name="date" class="form-control form-control-sm bg-dark text-light border-secondary" value="{{ selected_date }}" style="width: 160px;">
+                    <button type="submit" class="btn btn-sm btn-warning fw-bold text-dark">
+                        <i class="fa-solid fa-play me-1"></i> Run Backtest
+                    </button>
+                </form>
+                {% endif %}
+            </div>
+
+            <!-- Header Context Banner -->
+            <div class="alert {% if active_tab == 'live' %}alert-primary{% else %}alert-secondary{% endif %} bg-dark border-secondary text-light py-2 px-3 d-flex justify-content-between align-items-center mb-3">
+                <div>
+                    {% if active_tab == 'live' %}
+                        <i class="fa-solid fa-satellite-dish text-info me-2"></i>
+                        <strong>Live Market Feed:</strong> Ingesting real-time Day-Ahead auction prices and rolling Energinet 15-minute settlements. Currently inspecting: <strong class="text-warning">{{ selected_model }}</strong>.
+                    {% else %}
+                        <i class="fa-solid fa-clock-rotate-left text-warning me-2"></i>
+                        <strong>Historical Backtest Date:</strong> <span class="badge bg-warning text-dark fs-6">{{ selected_date }}</span> | Currently inspecting: <strong class="text-warning">{{ selected_model }}</strong>.
+                    {% endif %}
+                </div>
+                <div class="small text-muted">
+                    Zero Synthetic Data Guarantee | Danish Tax: 22% | Friction: €0.51/MWh
+                </div>
+            </div>
+
+            <!-- Visual Optimeering Horizon Fan Chart & Direction Probabilities -->
+            <div class="card bg-dark border-secondary p-3 mb-4">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="fw-bold mb-0 text-white">
+                        <i class="fa-solid fa-cloud-bolt text-info me-2"></i>
+                        Optimeering Quantile Fan Chart & Direction Probabilities ({{ price_area }} - {{ selected_model }})
+                    </h6>
+                    <span class="badge bg-dark border border-secondary text-info">
+                        {% if active_tab == 'backtest' %}Date: {{ selected_date }}{% else %}Live Refreshed: {{ today_str }}{% endif %}
+                    </span>
+                </div>
+                <div class="text-center py-2">
+                    {% if chart_exists %}
+                        <img src="/static/results/{{ chart_filename }}?t={{ ts }}" class="img-fluid rounded border border-secondary shadow" alt="V3.1 Optimeering Dashboard">
+                    {% else %}
+                        <div class="py-5 text-muted"><div class="spinner-border text-info mb-3"></div><br>Generating Optimeering Quantile Fan Chart...</div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Integrated 96-Quarter Audited Execution Ledger -->
+            <div class="card bg-dark border-secondary p-3">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h6 class="fw-bold mb-0 text-white">
+                        <i class="fa-solid fa-list-check text-warning me-2"></i>
+                        Audited 96-Quarter Settlement Ledger for {{ selected_model }} ({{ price_area }})
+                    </h6>
+                    <div>
+                        <span class="badge bg-dark border border-secondary text-light me-2">
+                            Executed: {{ summary.trades_fraction_str }} | Net Realized PnL: <span class="{% if summary.net_realized_profit_so_far >= 0 %}text-success{% else %}text-danger{% endif %} fw-bold">{{ summary.net_realized_profit_so_far_str }}</span>
+                        </span>
+                        <a href="/trade_ledger_v3_1?area={{ price_area }}&model={{ selected_model }}&capital={{ capital }}&volume={{ trade_volume }}&profile={{ profile }}&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}" 
+                           target="_blank" 
+                           class="btn btn-sm btn-outline-warning fw-bold">
+                            <i class="fa-solid fa-expand me-1"></i> Fullscreen Audit (New Tab)
+                        </a>
+                    </div>
+                </div>
+                <div class="table-responsive" style="max-height: 480px; overflow-y: auto;">
+                    <table class="table table-dark table-sm table-striped text-center align-middle" style="font-size: 0.85rem;">
+                        <thead class="sticky-top bg-dark">
+                            <tr class="text-muted small">
+                                <th>Quarter</th>
+                                <th>Time (DK)</th>
+                                <th>Spot (€)</th>
+                                <th>Pred Imbalance (€)</th>
+                                <th>Pred Spread (€)</th>
+                                <th>Quantiles (q10-q90)</th>
+                                <th>P(Up) / P(Down)</th>
+                                <th>Decision</th>
+                                <th>Volume</th>
+                                <th>DA Cash Flow</th>
+                                <th>Actual Settled (€)</th>
+                                <th>Settlement Flow</th>
+                                <th>Fees (€)</th>
+                                <th>Net PnL (€)</th>
+                                <th>Running Capital</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for t in summary.trades %}
+                            <tr>
+                                <td class="fw-bold text-warning">{{ t.quarter }}</td>
+                                <td class="font-monospace text-light small">{{ t.time_dk }}</td>
+                                <td class="text-light">€ {{ "%.2f"|format(t.spot_price_eur) }}</td>
+                                <td class="text-info">€ {{ "%.2f"|format(t.pred_imbalance_eur) }}</td>
+                                <td class="{% if t.pred_spread_eur >= 0 %}text-success{% else %}text-danger{% endif %} fw-bold">
+                                    {{ "+" if t.pred_spread_eur >= 0 else "" }}€ {{ "%.2f"|format(t.pred_spread_eur) }}
+                                </td>
+                                <td class="small text-muted font-monospace">€{{ "%.0f"|format(t.q10_price_eur) }} - €{{ "%.0f"|format(t.q90_price_eur) }}</td>
+                                <td class="small font-monospace"><span class="text-success">{{ t.p_up }}%</span> / <span class="text-danger">{{ t.p_down }}%</span></td>
+                                <td>
+                                    <span class="badge {% if 'BUY' in t.action %}bg-success{% elif 'SELL' in t.action %}bg-danger{% elif 'Shield' in t.action %}bg-warning text-dark{% else %}bg-secondary{% endif %}">
+                                        {{ t.action }}
+                                    </span>
+                                </td>
+                                <td class="text-light">{% if t.volume_mwh > 0 %}{{ "%.1f"|format(t.volume_mwh) }} MWh{% else %}--{% endif %}</td>
+                                <td class="small font-monospace {% if t.da_cash_flow.startswith('-') %}text-danger{% elif t.da_cash_flow.startswith('+') %}text-success{% else %}text-muted{% endif %}">{{ t.da_cash_flow }}</td>
+                                <td class="text-info fw-bold">{{ t.actual_settled_eur }}</td>
+                                <td class="small font-monospace {% if t.settle_cash_flow.startswith('+') %}text-success{% elif t.settle_cash_flow.startswith('-') %}text-danger{% else %}text-muted{% endif %}">{{ t.settle_cash_flow }}</td>
+                                <td class="text-danger small">{% if t.roundtrip_fees_eur > 0 %}-€ {{ "%.2f"|format(t.roundtrip_fees_eur) }}{% else %}--{% endif %}</td>
+                                <td class="{% if t.net_pnl_eur.startswith('+€') %}text-success fw-bold{% elif t.net_pnl_eur.startswith('-€') %}text-danger fw-bold{% else %}text-muted{% endif %}">{{ t.net_pnl_eur }}</td>
+                                <td class="fw-bold text-light">{{ t.running_capital }}</td>
+                                <td>
+                                    <span class="badge {% if 'Settled' in t.status %}bg-success{% elif 'Locked' in t.status %}bg-primary{% else %}bg-dark border border-secondary text-muted{% endif %}">
+                                        {{ t.status }}
+                                    </span>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function updateLiveClock() {
+            var now = new Date();
+            var timeStr = now.toLocaleTimeString('en-GB', { timeZone: 'Europe/Copenhagen', hour12: false });
+            var clockEl = document.getElementById('liveClock');
+            if (clockEl) clockEl.innerText = timeStr + ' CET';
+        }
+        setInterval(updateLiveClock, 1000);
+        updateLiveClock();
+    </script>
+</body>
+</html>

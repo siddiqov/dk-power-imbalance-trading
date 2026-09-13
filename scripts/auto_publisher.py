@@ -103,6 +103,21 @@ def main():
             except Exception as e_auc:
                 logger.warning(f"  ⚠️ Day-Ahead local sheet generation note: {e_auc}")
 
+            # 3. Generate and lock 2-Hour Forward Intraday Dispatch Batches (T-2h Gate Closure)
+            try:
+                from src.intraday_dispatch_engine import Intraday2HourDispatchEngine
+                for area in ["DK1", "DK2"]:
+                    dispatch_engine = Intraday2HourDispatchEngine(price_area=area, profile="tier3_aggressive")
+                    disp_res = dispatch_engine.export_and_save_batch(batch_num="auto")
+                    logger.info(
+                        f"  ⚡ [2-Hour Intraday Dispatch] Auto-generated Batch {disp_res['batch_num']} "
+                        f"({disp_res['quarter_range']}, {disp_res['delivery_window']}) for {area} on {disp_res['date']}. "
+                        f"Dispatched: {disp_res['summary_metrics']['total_dispatched_mw']} MW. "
+                        f"Saved to: {disp_res['saved_tsv_file']}"
+                    )
+            except Exception as e_disp:
+                logger.warning(f"  ⚠️ 2-Hour Intraday Dispatch generation note: {e_disp}")
+
             logger.info(f"[Cycle #{iteration}] ✅ Cycle complete! Updated {total_pushed} records across Supabase & Local Ledger.")
 
         except KeyboardInterrupt:

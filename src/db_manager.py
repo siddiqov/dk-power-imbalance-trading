@@ -115,7 +115,7 @@ def fetch_daily_ledger(date_str, area, model_used="Stacking-MetaEnsemble"):
     trade_log_df.loc[trade_log_df["action"] == "BUY", "action"] = "LONG_SPOT"
     trade_log_df.loc[trade_log_df["action"] == "SELL", "action"] = "SHORT_SPOT"
     
-    capital_curve = [100000.0]
+    capital_curve = [20000.0]
     for pnl in df['net_pnl_eur']:
         capital_curve.append(capital_curve[-1] + (pnl if pd.notnull(pnl) else 0.0))
         
@@ -127,8 +127,8 @@ def fetch_daily_ledger(date_str, area, model_used="Stacking-MetaEnsemble"):
         "slippage_paid": df[df['action'] != 'HOLD']['volume_mwh'].sum() * 0.25,
         "tax_paid": 0,
         "net_profit": df['net_pnl_eur'].sum(),
-        "return_pct": (df['net_pnl_eur'].sum() / 100000.0) * 100,
-        "initial_capital": 100000.0,
+        "return_pct": (df['net_pnl_eur'].sum() / 20000.0) * 100,
+        "initial_capital": 20000.0,
         "trade_log": trade_log_df,
         "capital_curve": capital_curve,
     }

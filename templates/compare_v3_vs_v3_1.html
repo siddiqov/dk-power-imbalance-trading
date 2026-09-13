@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>V3 vs V3.1 Comprehensive Head-to-Head Comparison</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg-dark: #111622;
+            --card-bg: #182030;
+            --card-surface: #1e283d;
+            --card-border: #2d384e;
+            --accent-blue: #38bdf8;
+            --accent-green: #10b981;
+            --accent-red: #f43f5e;
+            --accent-yellow: #f59e0b;
+            --text-main: #e2e8f0;
+            --text-secondary: #cbd5e1;
+            --text-muted: #8fa0b5;
+        }
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        }
+        .navbar {
+            background-color: #141b29;
+            border-bottom: 1px solid var(--card-border);
+        }
+        .card, .metric-card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 10px;
+        }
+        .metric-card {
+            padding: 1.25rem;
+            background: linear-gradient(145deg, #1d2639 0%, #161e2e 100%);
+        }
+        .table-dark {
+            --bs-table-bg: var(--card-bg);
+            --bs-table-striped-bg: #151c2a;
+            --bs-table-hover-bg: #1e283d;
+            --bs-table-border-color: var(--card-border);
+            color: var(--text-secondary);
+        }
+        .table-dark thead th {
+            background-color: #141b29 !important;
+            border-bottom: 2px solid var(--card-border) !important;
+            color: #cbd5e1;
+        }
+        .badge-tree {
+            background-color: #065f46;
+            color: #a7f3d0;
+            border: 1px solid #10b981;
+        }
+        .badge-neural {
+            background-color: #4c1d95;
+            color: #ddd6fe;
+            border: 1px solid #8b5cf6;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg px-4 py-3 mb-4">
+        <div class="container-fluid">
+            <span class="navbar-brand text-white fw-bold d-flex align-items-center">
+                <i class="fa-solid fa-code-compare text-info me-2 fs-4"></i>
+                V3 vs V3.1 Comprehensive Head-to-Head Comparison
+            </span>
+            <div class="d-flex align-items-center gap-3">
+                <a href="http://127.0.0.1:5001/?area={{ price_area }}" target="_blank" class="btn btn-sm btn-outline-secondary text-white fw-bold">
+                    <i class="fa-solid fa-arrow-up-right-from-square me-1"></i> V3 Dashboard (Port 5001)
+                </a>
+                <a href="/?area={{ price_area }}" class="btn btn-sm btn-warning text-dark fw-bold">
+                    <i class="fa-solid fa-trophy me-1"></i> V3.1 Dashboard (Port 5003)
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid px-4 pb-5">
+
+        <!-- Context Overview Banner -->
+        <div class="card p-3 mb-4 border-info">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h5 class="fw-bold text-white mb-1"><i class="fa-solid fa-microchip text-info me-2"></i> Architectural & Algorithmic Evolution</h5>
+                    <p class="text-muted small mb-0">
+                        Comparing <strong>V3.0 Baseline</strong> (Fixed heuristic hyperparameters, gradient boosted trees) against <strong>V3.1 Suite</strong> (Optuna Bayesian Optimization, Dual Suites with Native PyTorch BiLSTM & Temporal Attention, and Real-Time Financial Tournament).
+                    </p>
+                </div>
+                <div class="text-end">
+                    <span class="badge bg-dark border border-secondary text-info fs-6 px-3 py-2">Price Area: {{ price_area }}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dynamic Metrics Loading Container -->
+        <div id="loadingState" class="text-center py-5">
+            <div class="spinner-border text-info mb-3" style="width: 3rem; height: 3rem;"></div>
+            <h5 class="text-light">Calculating Head-to-Head Comparative Metrics...</h5>
+            <p class="text-muted small">Simulating 96 quarters under Danish market settlement rules (€0.51/MWh fee, 22% tax)...</p>
+        </div>
+
+        <div id="comparisonContent" style="display: none;">
+            <!-- Comparison KPI Cards -->
+            <div class="row g-3 mb-4">
+                <div class="col-md-4">
+                    <div class="metric-card border-secondary">
+                        <div class="text-muted small text-uppercase fw-bold">V3.0 Baseline Net Profit</div>
+                        <div class="text-info fs-4 fw-bold mt-1" id="v3Pnl">--</div>
+                        <div class="text-muted small mt-1">Win Rate: <span class="text-light fw-bold" id="v3Wr">--</span> | ROC: <span class="text-light fw-bold" id="v3Roc">--</span></div>
+                        <div class="text-muted small mt-1">Model: <span class="text-light font-monospace" id="v3Model">--</span></div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="metric-card border-warning">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div class="text-muted small text-uppercase fw-bold">V3.1 Tournament Champion</div>
+                            <span class="badge bg-warning text-dark fw-bold"><i class="fa-solid fa-crown me-1"></i> WINNER</span>
+                        </div>
+                        <div class="text-success fs-4 fw-bold mt-1" id="v31Pnl">--</div>
+                        <div class="text-muted small mt-1">Win Rate: <span class="text-light fw-bold" id="v31Wr">--</span> | ROC: <span class="text-light fw-bold" id="v31Roc">--</span></div>
+                        <div class="text-muted small mt-1">Model: <span class="text-warning font-monospace" id="v31Model">--</span></div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="metric-card border-success">
+                        <div class="text-muted small text-uppercase fw-bold">Performance Delta (Improvement)</div>
+                        <div class="fs-4 fw-bold mt-1" id="deltaPnl">--</div>
+                        <div class="text-muted small mt-1">Win Rate Delta: <span class="fw-bold" id="deltaWr">--</span></div>
+                        <div class="text-muted small mt-1">Optimization Winner: <span class="badge bg-success" id="overallWinner">--</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Detailed Comparison Table -->
+            <div class="card p-3 mb-4 border-secondary">
+                <h5 class="fw-bold text-white mb-3"><i class="fa-solid fa-table-columns text-warning me-2"></i> Side-by-Side Dimension Breakdown</h5>
+                <div class="table-responsive">
+                    <table class="table table-dark table-striped align-middle mb-0">
+                        <thead>
+                            <tr class="text-muted small text-uppercase">
+                                <th style="width: 20%;">Evaluation Dimension</th>
+                                <th style="width: 40%;">V3.0 Baseline (Port 5001)</th>
+                                <th style="width: 40%;">V3.1 Tournament & Deep Learning (Port 5003)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="fw-bold text-info">Hyperparameter Tuning</td>
+                                <td class="text-muted">Fixed heuristic defaults (learning_rate=0.05, max_depth=6, num_leaves=31) without Bayesian search.</td>
+                                <td class="text-success fw-bold">Optuna Bayesian Optimization with 48-Hour Purged TimeSeriesSplit cross-validation.</td>
+                            </tr>
+                            <tr>
+                                <td class="fw-bold text-info">Model Architectures</td>
+                                <td class="text-muted">Single paradigm tree models (LGBM, CatBoost, XGBoost) and heuristic ensemble.</td>
+                                <td class="text-success fw-bold">Dual Suites: 3 Boosted Trees + 2 Native PyTorch Deep Networks (BiLSTM, Temporal Self-Attention) + Stacking Meta-Learner.</td>
+                            </tr>
+                            <tr>
+                                <td class="fw-bold text-info">Model Selection Strategy</td>
+                                <td class="text-muted">Static default selection (Transformer-TFT by default).</td>
+                                <td class="text-success fw-bold">Dynamic Real-Time Financial Tournament: continuously ranks candidate models on Realized Net PnL (€) and auto-promotes Champion.</td>
+                            </tr>
+                            <tr>
+                                <td class="fw-bold text-info">Quantile Forecasting</td>
+                                <td class="text-muted">Basic pinball quantile loss (q10, q50, q90).</td>
+                                <td class="text-success fw-bold">Optimeering calibrated quantile bands (q10, q50, q90) + Tri-State direction softmax.</td>
+                            </tr>
+                            <tr>
+                                <td class="fw-bold text-info">Market Horizon Support</td>
+                                <td class="text-muted">Dual-market (Day-Ahead D-1 & Intraday D-0).</td>
+                                <td class="text-success fw-bold">Dual-market (Day-Ahead D-1 & Intraday D-0) with dedicated 26-feature and 44-feature trained suites.</td>
+                            </tr>
+                            <tr>
+                                <td class="fw-bold text-info">Settlement Fidelity</td>
+                                <td class="text-muted">Genuine Energinet settlement data, €0.51/MWh fee, 22% Danish tax.</td>
+                                <td class="text-success fw-bold">Identical 100% genuine Energinet settlement rules (€0.51/MWh fee, 22% tax) for rigorous comparability.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Full V3.1 Tournament Leaderboard -->
+            <div class="card p-3 mb-4 border-secondary">
+                <h5 class="fw-bold text-white mb-3"><i class="fa-solid fa-trophy text-warning me-2"></i> V3.1 Model Suite Tournament Leaderboard</h5>
+                <div class="table-responsive">
+                    <table class="table table-dark table-hover align-middle mb-0" id="tournTable">
+                        <thead>
+                            <tr class="text-muted small text-uppercase">
+                                <th>Rank</th>
+                                <th>Architecture</th>
+                                <th>Type & Paradigm</th>
+                                <th>Net Realized Profit (€)</th>
+                                <th>Win Rate</th>
+                                <th>Profit Factor</th>
+                                <th>ROC %</th>
+                                <th>MAE (€/MWh)</th>
+                                <th>Trades (W/L/H)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tournBody">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        fetch(`/api/compare_v3_vs_v3_1?area={{ price_area }}&capital={{ capital }}&profile={{ profile }}&date={{ selected_date }}`)
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('loadingState').style.display = 'none';
+                document.getElementById('comparisonContent').style.display = 'block';
+
+                if (!data.success) {
+                    alert('Could not compute comparative data: ' + data.message);
+                    return;
+                }
+
+                const v3 = data.v3_baseline;
+                const v31 = data.v3_1_suite;
+                const delta = data.comparison_delta;
+
+                document.getElementById('v3Pnl').innerText = '€ ' + v3.net_pnl_eur.toLocaleString('en-US', {minimumFractionDigits: 2});
+                document.getElementById('v3Wr').innerText = v3.win_rate_pct + '%';
+                document.getElementById('v3Roc').innerText = (v3.roc_pct >= 0 ? '+' : '') + v3.roc_pct.toFixed(2) + '%';
+                document.getElementById('v3Model').innerText = v3.model_name;
+
+                document.getElementById('v31Pnl').innerText = '€ ' + v31.net_pnl_eur.toLocaleString('en-US', {minimumFractionDigits: 2});
+                document.getElementById('v31Wr').innerText = v31.win_rate_pct + '%';
+                document.getElementById('v31Roc').innerText = (v31.roc_pct >= 0 ? '+' : '') + v31.roc_pct.toFixed(2) + '%';
+                document.getElementById('v31Model').innerText = v31.model_name;
+
+                const deltaEl = document.getElementById('deltaPnl');
+                deltaEl.innerText = (delta.delta_net_pnl_eur >= 0 ? '+€ ' : '-€ ') + Math.abs(delta.delta_net_pnl_eur).toLocaleString('en-US', {minimumFractionDigits: 2}) + ' (' + (delta.delta_pnl_pct >= 0 ? '+' : '') + delta.delta_pnl_pct + '%)';
+                deltaEl.className = 'fs-4 fw-bold mt-1 ' + (delta.delta_net_pnl_eur >= 0 ? 'text-success' : 'text-danger');
+
+                const deltaWrEl = document.getElementById('deltaWr');
+                deltaWrEl.innerText = (delta.delta_win_rate_pct >= 0 ? '+' : '') + delta.delta_win_rate_pct + '%';
+                deltaWrEl.className = 'fw-bold ' + (delta.delta_win_rate_pct >= 0 ? 'text-success' : 'text-danger');
+
+                document.getElementById('overallWinner').innerText = delta.winner;
+
+                // Render tournament table
+                const tournBody = document.getElementById('tournBody');
+                tournBody.innerHTML = '';
+                data.tournament_leaderboard.forEach(r => {
+                    const tr = document.createElement('tr');
+                    const badgeClass = r.model_type === 'Tree' ? 'badge-tree' : (r.model_type === 'Deep Neural' ? 'badge-neural' : 'badge-warning text-dark');
+                    const rankStr = r.rank === 1 ? '🥇 #1' : (r.rank === 2 ? '🥈 #2' : (r.rank === 3 ? '🥉 #3' : '#' + r.rank));
+                    tr.innerHTML = `
+                        <td class="fw-bold ${r.rank === 1 ? 'text-warning fs-5' : 'text-muted'}">${rankStr}</td>
+                        <td class="fw-bold text-light">${r.model_name} ${r.is_champion ? '<span class="badge bg-warning text-dark ms-2">CHAMPION</span>' : ''}</td>
+                        <td><span class="badge ${badgeClass}">${r.badge}</span> <span class="small text-muted d-block mt-1">${r.paradigm}</span></td>
+                        <td class="fw-bold ${r.net_pnl_eur >= 0 ? 'text-success' : 'text-danger'}">€ ${r.net_pnl_eur.toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
+                        <td class="text-success fw-bold">${r.win_rate_pct}%</td>
+                        <td class="text-light fw-bold">${r.profit_factor}</td>
+                        <td class="fw-bold ${r.roc_pct >= 0 ? 'text-success' : 'text-danger'}">${r.roc_pct >= 0 ? '+' : ''}${r.roc_pct.toFixed(2)}%</td>
+                        <td class="text-info font-monospace">€${r.mae_eur}</td>
+                        <td class="small"><span class="text-success fw-bold">${r.win_count}W</span> / <span class="text-danger fw-bold">${r.loss_count}L</span> / <span class="text-muted">${r.hold_trades}H</span></td>
+                    `;
+                    tournBody.appendChild(tr);
+                });
+            })
+            .catch(err => {
+                console.error(err);
+                document.getElementById('loadingState').innerHTML = '<div class="text-danger">Failed to load comparative metrics.</div>';
+            });
+    </script>
+</body>
+</html>

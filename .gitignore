@@ -50,6 +50,8 @@ models/*.onnx
 models/*.bin
 models_v3/
 models_v3/*.pkl
+models_v3_1/
+models_v3_1/*.pkl
 *.pkl
 *.pt
 *.part

@@ -13,6 +13,16 @@ from src.model_trainer_v3 import V3QuantileModelSuite
 from src.trade_journal import V3TradeJournal
 
 
+VOLUME_PROFILES = {
+    "tier1_conservative": {"v_min": 1.0, "v_max": 15.0, "label": "Tier 1: Conservative (1.0 - 15.0 MW)"},
+    "tier2_standard":     {"v_min": 2.0, "v_max": 20.0, "label": "Tier 2: Standard (2.0 - 20.0 MW)"},
+    "tier3_aggressive":   {"v_min": 0.5, "v_max": 25.0, "label": "Tier 3: Aggressive (0.5 - 25.0 MW)"},
+    "fixed_2mwh":         {"v_min": 2.0, "v_max": 2.0,  "label": "Fixed: 2.0 MWh / Trade"},
+    "fixed_5mwh":         {"v_min": 5.0, "v_max": 5.0,  "label": "Fixed: 5.0 MWh / Trade"},
+    "fixed_10mwh":        {"v_min": 10.0, "v_max": 10.0, "label": "Fixed: 10.0 MWh / Trade"},
+}
+
+
 class V3CommercialStrategyEngine:
     """
     Executes commercial trading decisions utilizing Optimeering Quantiles,
@@ -20,22 +30,39 @@ class V3CommercialStrategyEngine:
     Supports both Pure Day-Ahead (D-1) and Continuous Intraday (D-0).
     """
 
-    def __init__(self, price_area='DK1', capital=20000.0, base_volume_mwh=2.0):
+    def __init__(self, price_area='DK1', capital=20000.0, base_volume_mwh=2.0, profile="tier1_conservative", v_min=None, v_max=None):
         self.price_area = price_area
         self.capital = float(capital)
         self.base_volume_mwh = float(base_volume_mwh)
+        self.profile = profile
+        self.v_min = v_min
+        self.v_max = v_max
         self.fee_per_mwh = 0.51  # €0.06 Nord Pool + €0.20 TSO + €0.25 Slippage
         self.tax_rate = 0.22  # Danish 22% Corporate Tax
         self.model_suite = V3QuantileModelSuite(price_area=price_area)
         self.journal = V3TradeJournal()
 
-    def compute_conviction_volume(self, pred_spread: float, p_up: float, p_down: float, action: str, v_min: float = 1.0, v_max: float = 15.0) -> float:
+    def compute_conviction_volume(self, pred_spread: float, p_up: float, p_down: float, action: str,
+                                  profile: str = "tier1_conservative", v_min: float = None, v_max: float = None) -> float:
         """
-        Calculates dynamic trade volume in range [1.0 MW, 15.0 MW] based on
-        joint Spread Magnitude and Directional Classifier Conviction.
+        Calculates dynamic trade volume based on Tiered Risk Profile ranges:
+          - Tier 1 (Conservative): [1.0 MW - 15.0 MW]
+          - Tier 2 (Standard):     [2.0 MW - 20.0 MW]
+          - Tier 3 (Aggressive):   [0.5 MW - 25.0 MW]
+
+        Calibrated with 3 confidence buckets:
+          - Low confidence (< 20%): Sized at floor (v_min)
+          - Medium confidence (20% - 50%): Scaled across mid conviction (0.0 to 0.60)
+          - High confidence (>= 50%): Aggressively ramped up to max ceiling (0.60 to 1.00)
         """
         if "BUY" not in action and "SELL" not in action:
             return 0.0
+
+        # Resolve tier limits
+        target_profile = profile or self.profile or "tier1_conservative"
+        tier_cfg = VOLUME_PROFILES.get(target_profile, VOLUME_PROFILES["tier1_conservative"])
+        resolved_v_min = v_min if v_min is not None else (self.v_min if self.v_min is not None else tier_cfg["v_min"])
+        resolved_v_max = v_max if v_max is not None else (self.v_max if self.v_max is not None else tier_cfg["v_max"])
 
         p_up_norm = p_up / 100.0 if p_up > 1.0 else p_up
         p_down_norm = p_down / 100.0 if p_down > 1.0 else p_down
@@ -46,16 +73,26 @@ class V3CommercialStrategyEngine:
         spread_mag = abs(pred_spread)
         m_spread = min(max((spread_mag - 1.20) / (8.00 - 1.20), 0.0), 1.0)
 
-        # 2. Probability Factor (0.0 at 0% prob, 1.0 at 75%+ prob)
-        m_prob = min(max(p_target / 0.75, 0.0), 1.0)
+        # 2. Probability Factor with 3 Confidence Buckets (<20%, 20-50%, >=50%)
+        if p_target < 0.20:
+            m_prob = 0.0
+        elif p_target < 0.50:
+            m_prob = ((p_target - 0.20) / (0.50 - 0.20)) * 0.60
+        else:
+            m_prob = 0.60 + ((p_target - 0.50) / (1.00 - 0.50)) * 0.40
+
+        m_prob = min(max(m_prob, 0.0), 1.0)
 
         # 3. Joint Multiplicative Conviction
-        conviction = m_spread * m_prob
+        if target_profile.startswith("fixed_"):
+            return float(resolved_v_min)
 
-        vol = v_min + (v_max - v_min) * conviction
+        conviction = m_spread * m_prob
+        vol = resolved_v_min + (resolved_v_max - resolved_v_min) * conviction
         return round(vol, 1)
 
-    def evaluate_trading_ledger(self, df_day_d, model_name="Transformer-TFT", market_mode="DAY_AHEAD_D1"):
+    def evaluate_trading_ledger(self, df_day_d, model_name="Transformer-TFT", market_mode="DAY_AHEAD_D1",
+                                profile: str = None, v_min: float = None, v_max: float = None):
         """
         Evaluates 96-quarter commercial ledger with strict Gate Closure order locking.
         
@@ -123,7 +160,8 @@ class V3CommercialStrategyEngine:
                         action = "SELL Spot (Short)"
                         direction = "DOWN-REGULATION (-1)"
 
-                trade_vol = self.compute_conviction_volume(pred_spread, p_up, p_down, action)
+                trade_vol = self.compute_conviction_volume(pred_spread, p_up, p_down, action,
+                                                           profile=profile, v_min=v_min, v_max=v_max)
 
                 # Persist order to Immutable Journal
                 order_to_lock = {

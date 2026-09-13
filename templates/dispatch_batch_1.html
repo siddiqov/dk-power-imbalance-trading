@@ -84,13 +84,20 @@
             </div>
         </div>
 
-        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <!-- Risk Profile Selector -->
+            <div class="btn-group" role="group">
+                <span class="input-group-text bg-dark border-secondary text-info fw-bold small px-2">Risk:</span>
+                <a href="/dispatch_batch_1?area={{ price_area }}&capital={{ capital }}&volume={{ trade_volume }}&profile=tier1_conservative&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}&num_quarters={{ num_quarters }}" class="btn btn-sm {% if profile == 'tier1_conservative' or not profile %}btn-info fw-bold text-dark{% else %}btn-outline-secondary text-light{% endif %}" title="Tier 1 Conservative (1.0 - 15.0 MW)">Tier 1 (1-15 MW)</a>
+                <a href="/dispatch_batch_1?area={{ price_area }}&capital={{ capital }}&volume={{ trade_volume }}&profile=tier2_standard&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}&num_quarters={{ num_quarters }}" class="btn btn-sm {% if profile == 'tier2_standard' %}btn-info fw-bold text-dark{% else %}btn-outline-secondary text-light{% endif %}" title="Tier 2 Standard (2.0 - 20.0 MW)">Tier 2 (2-20 MW)</a>
+                <a href="/dispatch_batch_1?area={{ price_area }}&capital={{ capital }}&volume={{ trade_volume }}&profile=tier3_aggressive&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}&num_quarters={{ num_quarters }}" class="btn btn-sm {% if profile == 'tier3_aggressive' %}btn-danger fw-bold text-white{% else %}btn-outline-secondary text-light{% endif %}" title="Tier 3 Aggressive (0.5 - 25.0 MW)">Tier 3 (0.5-25 MW)</a>
+            </div>
+
             <!-- Price Area Switcher -->
             <div class="btn-group" role="group">
-                <a href="/dispatch_batch_1?area=DK1&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}&num_quarters={{ num_quarters }}" class="btn btn-sm btn-zone {% if price_area == 'DK1' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
+                <a href="/dispatch_batch_1?area=DK1&capital={{ capital }}&volume={{ trade_volume }}&profile={{ profile }}&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}&num_quarters={{ num_quarters }}" class="btn btn-sm btn-zone {% if price_area == 'DK1' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
                     <i class="fa-solid fa-wind me-1"></i> DK1 (West)
                 </a>
-                <a href="/dispatch_batch_1?area=DK2&capital={{ capital }}&volume={{ trade_volume }}&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}&num_quarters={{ num_quarters }}" class="btn btn-sm btn-zone {% if price_area == 'DK2' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
+                <a href="/dispatch_batch_1?area=DK2&capital={{ capital }}&volume={{ trade_volume }}&profile={{ profile }}&tab={{ active_tab }}&mode={{ raw_mode }}&date={{ selected_date }}&num_quarters={{ num_quarters }}" class="btn btn-sm btn-zone {% if price_area == 'DK2' %}btn-primary{% else %}btn-outline-secondary text-white{% endif %}">
                     <i class="fa-solid fa-city me-1"></i> DK2 (East)
                 </a>
             </div>
@@ -197,7 +204,7 @@
             const tbody = document.getElementById('batch1TableBody');
             tbody.innerHTML = `<tr><td colspan="10" class="py-5 text-muted"><div class="spinner-border text-warning mb-2"></div><br>Calculating Q1–Q9 Trade Decisions for {{ selected_date }}...</td></tr>`;
 
-            const apiUrl = `/api/dispatch_batch_1?area={{ price_area }}&tab={{ active_tab }}&date={{ selected_date }}&volume={{ trade_volume }}&capital={{ capital }}&num_quarters={{ num_quarters }}`;
+            const apiUrl = `/api/dispatch_batch_1?area={{ price_area }}&tab={{ active_tab }}&date={{ selected_date }}&volume={{ trade_volume }}&capital={{ capital }}&num_quarters={{ num_quarters }}&profile={{ profile }}`;
 
             fetch(apiUrl)
                 .then(res => res.json())

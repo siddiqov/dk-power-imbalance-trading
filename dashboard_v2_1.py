@@ -60,10 +60,46 @@ def download_decision_feature_guide():
 
 
 @app.route('/')
-def index():
+@app.route('/historical_predictions')
+def historical_predictions_view():
+    return render_template('historical_predictions.html')
+
+
+@app.route('/api/historical_predictions')
+def api_historical_predictions():
+    start_date = request.args.get('start_date', None)
+    end_date = request.args.get('end_date', None)
+    zone = request.args.get('zone', 'ALL')
+    version = request.args.get('version', 'ALL')
+    snapshot_id = request.args.get('snapshot_id', None)
+    status = request.args.get('status', 'ALL')
+    view_mode = request.args.get('view_mode', 'all')
+
+    from src.historical_predictions_service import query_historical_predictions
+    res = query_historical_predictions(
+        start_date=start_date,
+        end_date=end_date,
+        zone=None if zone == 'ALL' else zone,
+        version=None if version == 'ALL' else version,
+        snapshot_id=int(snapshot_id) if snapshot_id else None,
+        status=None if status == 'ALL' else status,
+        view_mode=view_mode
+    )
+    return jsonify(res)
+
+
+@app.route('/api/historical_predictions_snapshots')
+def api_historical_predictions_snapshots():
+    from src.historical_predictions_service import get_all_snapshots
+    snapshots = get_all_snapshots()
+    return jsonify({"success": True, "snapshots": snapshots})
+
+
+@app.route('/day_ahead_auction')
+def day_ahead_auction_view():
     price_area = request.args.get('area', 'DK1')
     volume = float(request.args.get('volume', 2.0))
-    capital = float(request.args.get('capital', 100000.0))
+    capital = float(request.args.get('capital', 20000.0))
     date_str = request.args.get('date', None)
 
     engine = DayAheadAuctionEngine(price_area=price_area, capital=capital, base_volume_mwh=volume)
@@ -82,16 +118,11 @@ def index():
     )
 
 
-@app.route('/day_ahead_auction')
-def day_ahead_auction_view():
-    return index()
-
-
 @app.route('/api/day_ahead_auction')
 def api_day_ahead_auction():
     price_area = request.args.get('area', 'DK1')
     volume = float(request.args.get('volume', 2.0))
-    capital = float(request.args.get('capital', 100000.0))
+    capital = float(request.args.get('capital', 20000.0))
     date_str = request.args.get('date', None)
 
     engine = DayAheadAuctionEngine(price_area=price_area, capital=capital, base_volume_mwh=volume)
@@ -102,6 +133,7 @@ def api_day_ahead_auction():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5002))
     print("\n" + "=" * 80)
-    print(f"  V2.1 DAY-AHEAD AUCTION COMMERCIAL SERVER RUNNING ON http://127.0.0.1:{port}")
+    print(f"  HISTORICAL PREDICTIONS & DAY-AHEAD SERVER RUNNING ON http://127.0.0.1:{port}")
     print("=" * 80, flush=True)
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+
