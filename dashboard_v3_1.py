@@ -124,6 +124,8 @@ def index():
     tomorrow_str = tomorrow_dt.strftime("%Y-%m-%d")
     tomorrow_display = tomorrow_dt.strftime("%d %B %Y")
     today_str = dk_now.strftime("%d %B %Y")
+    today_date_str = dk_now.strftime("%Y-%m-%d")
+    is_after_13 = (dk_now.hour >= 13)
 
     return render_template(
         'dashboard_v3_1.html',
@@ -135,8 +137,10 @@ def index():
         raw_mode=raw_mode,
         market_mode=market_mode,
         selected_date=selected_date,
+        today_date_str=today_date_str,
         tomorrow_str=tomorrow_str,
         tomorrow_display=tomorrow_display,
+        is_after_13=is_after_13,
         leaderboard=leaderboard,
         champion=champion,
         selected_model=selected_model,
@@ -320,28 +324,126 @@ def api_compare_v3_vs_v3_1():
 @app.route('/dispatch_96quarter')
 @app.route('/intraday_96quarter')
 def dispatch_96quarter_view_v3_1():
+    """Renders 16-column D+1 Intraday 96-quarter trade ledger for V3.1."""
     price_area = request.args.get('area', 'DK1')
-    model_name = request.args.get('model', 'Hierarchical-LGBM+XGB')
+    model_name = request.args.get('model', 'Transfer-LightGBM')
+    if ' ' in model_name:
+        model_name = model_name.replace(' ', '+')
     profile = request.args.get('profile', 'tier2_standard')
     date_str = request.args.get('date', None)
     capital = float(request.args.get('capital', 20000.0))
 
     dk_now = get_danish_now()
+    is_after_13 = (dk_now.hour >= 13)
+    tomorrow_str = (dk_now + timedelta(days=1)).strftime("%Y-%m-%d")
+    today_str = dk_now.strftime("%Y-%m-%d")
+
     if not date_str:
-        if dk_now.hour >= 13:
-            date_str = (dk_now + timedelta(days=1)).strftime("%Y-%m-%d")
-        else:
-            date_str = dk_now.strftime("%Y-%m-%d")
+        selected_date = tomorrow_str if is_after_13 else today_str
+    else:
+        selected_date = date_str
 
     return render_template(
-        'dispatch_96quarter.html',
+        'intraday_96quarter_v3_1.html',
         price_area=price_area,
         model_name=model_name,
         profile=profile,
-        selected_date=date_str,
+        selected_date=selected_date,
         capital=capital,
+        is_after_13=is_after_13,
+        tomorrow_str=tomorrow_str,
+        today_str=today_str,
         version="v3_1"
     )
+
+
+@app.route('/api/intraday_96quarter_ledger')
+def api_intraday_96quarter_ledger_v3_1():
+    """Generates the 96-quarter trade ledger with all 16 audited columns for D+1 or chosen date, supporting Approach A (Midnight Boundary Bridge) and Approach B (Forward Quantile Trajectory)."""
+    price_area = request.args.get('area', 'DK1')
+    model_name = request.args.get('model', 'Transfer-LightGBM')
+    if ' ' in model_name:
+        model_name = model_name.replace(' ', '+')
+    capital = float(request.args.get('capital', 20000.0))
+    profile = request.args.get('profile', 'tier2_standard')
+    date_str = request.args.get('date', None)
+    req_approach = request.args.get('approach', 'both')
+
+    dk_now = get_danish_now()
+    today_str = dk_now.strftime("%Y-%m-%d")
+    tomorrow_str = (dk_now + timedelta(days=1)).strftime("%Y-%m-%d")
+    if not date_str:
+        if dk_now.hour >= 13:
+            date_str = tomorrow_str
+        else:
+            date_str = today_str
+
+    table_gen = TournamentTableGenerator(price_area=price_area)
+    try:
+        target_df = table_gen.generate_and_save_future_table(date_str=date_str)
+    except Exception:
+        target_df = table_gen.get_backtest_table(date_str=date_str)
+    if target_df.empty:
+        target_df = table_gen.get_future_table(date_str=date_str)
+
+    # Load Day D table for Midnight Bridge if evaluating D+1
+    try:
+        t_col = "time_dk" if "time_dk" in target_df.columns else "time_utc"
+        first_dt = pd.to_datetime(target_df.iloc[0][t_col])
+        prev_date_str = (first_dt - timedelta(days=1)).strftime("%Y-%m-%d")
+        if prev_date_str == today_str:
+            df_prev_day = table_gen.get_future_table(date_str=today_str)
+        else:
+            df_prev_day = table_gen.get_backtest_table(date_str=prev_date_str)
+    except Exception:
+        df_prev_day = None
+
+    strategy = V31CommercialStrategyEngine(price_area=price_area, capital=capital, profile=profile)
+    summary_A = strategy.evaluate_trading_ledger(target_df, model_name=model_name, market_mode="INTRADAY_D0", profile=profile, approach="A", df_prev_day=df_prev_day)
+    summary_B = strategy.evaluate_trading_ledger(target_df, model_name=model_name, market_mode="INTRADAY_D0", profile=profile, approach="B", df_prev_day=df_prev_day)
+
+    pnl_A = float(summary_A.get("net_realized_profit_so_far", 0.0))
+    pnl_B = float(summary_B.get("net_realized_profit_so_far", 0.0))
+    mid_A = float(summary_A.get("midnight_pnl_eur", 0.0))
+    mid_B = float(summary_B.get("midnight_pnl_eur", 0.0))
+
+    if pnl_A > pnl_B:
+        recommended = "Approach A (Midnight Boundary Bridge)"
+        reason = f"Approach A delivers superior net return (+€ {pnl_A - pnl_B:,.2f}) by capitalizing on continuous physical grid inertia carried across midnight."
+    elif pnl_B > pnl_A:
+        recommended = "Approach B (Forward Quantile Trajectory)"
+        reason = f"Approach B delivers superior net return (+€ {pnl_B - pnl_A:,.2f}) by eliminating stale prior-day inertia and responding purely to forward market forces."
+    else:
+        recommended = "Approach A & B Tied"
+        reason = "Both models converged on consistent dispatch orders across the delivery horizon."
+
+    comparison = {
+        "pnl_A": pnl_A,
+        "pnl_B": pnl_B,
+        "pnl_diff": round(pnl_A - pnl_B, 2),
+        "pnl_A_str": summary_A.get("net_realized_profit_so_far_str", "€ 0.00"),
+        "pnl_B_str": summary_B.get("net_realized_profit_so_far_str", "€ 0.00"),
+        "midnight_pnl_A": mid_A,
+        "midnight_pnl_B": mid_B,
+        "midnight_diff": round(mid_A - mid_B, 2),
+        "midnight_pnl_A_str": summary_A.get("midnight_pnl_str", "€ 0.00"),
+        "midnight_pnl_B_str": summary_B.get("midnight_pnl_str", "€ 0.00"),
+        "win_rate_A": summary_A.get("win_rate_pct", 0.0),
+        "win_rate_B": summary_B.get("win_rate_pct", 0.0),
+        "active_trades_A": summary_A.get("active_trades", 0),
+        "active_trades_B": summary_B.get("active_trades", 0),
+        "recommended_approach": recommended,
+        "recommendation_reason": reason
+    }
+
+    active_summary = summary_B if req_approach == "B" else summary_A
+    response_data = dict(active_summary)
+    response_data["approach_a"] = summary_A
+    response_data["approach_b"] = summary_B
+    response_data["comparison"] = comparison
+    response_data["active_approach"] = req_approach if req_approach in ["A", "B"] else "A"
+
+    return jsonify(response_data)
 
 
 @app.route('/trade_ledger_v3_1')

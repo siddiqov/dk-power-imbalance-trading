@@ -251,7 +251,7 @@ class V31QuantileModelSuite:
             return True
         return False
 
-    def predict_day_ahead_quantiles(self, df_day_d, market_mode="DAY_AHEAD_D1"):
+    def predict_day_ahead_quantiles(self, df_day_d, market_mode="DAY_AHEAD_D1", approach="A", df_prev_day=None):
         if not self.models:
             loaded = self.load_models()
             if not loaded:
@@ -266,6 +266,98 @@ class V31QuantileModelSuite:
             df_feat = self.feature_engine.build_day_ahead_features(df_day_d)
         else:
             df_feat = self.feature_engine.build_intraday_features(df_day_d)
+
+        # Check if actual settlement is present or if we are forecasting D+1 / live D-0 quarters
+        has_actual_settlement = ("reg_persistence_quarters" in df_feat.columns and df_feat["reg_persistence_quarters"].abs().sum() > 0)
+        
+        if market_mode != "DAY_AHEAD_D1" and not has_actual_settlement:
+            # Synthetic forward persistence for D+1 Intraday
+            available_cols_base = [c for c in feat_cols if c in df_feat.columns]
+            X_base = df_feat[available_cols_base].fillna(0.0).values
+            
+            # Use preliminary spread predictions to determine trajectory
+            if "Transfer-LightGBM" in suite:
+                s_prelim = suite["Transfer-LightGBM"].predict(X_base)
+            elif "Quantile_q50" in suite:
+                s_prelim = suite["Quantile_q50"].predict(X_base)
+            else:
+                s_prelim = np.zeros(len(df_feat))
+                
+            dir_proj = np.where(s_prelim > 1.2, 1, np.where(s_prelim < -1.2, -1, 0))
+            
+            tail_streak = 0
+            tail_dir = 0
+            if approach == "A":
+                # Approach A: Continuous Midnight Boundary Bridge
+                # Check df_prev_day for actual settlements or latest available telemetry
+                if df_prev_day is None:
+                    try:
+                        from datetime import timedelta
+                        t_col = "time_dk" if "time_dk" in df_day_d.columns else "time_utc"
+                        first_dt = pd.to_datetime(df_day_d.iloc[0][t_col])
+                        prev_date_str = (first_dt - timedelta(days=1)).strftime("%Y-%m-%d")
+                        p_file = f"results/96Q_backtest_table_{self.price_area}_{prev_date_str}.csv"
+                        if os.path.exists(p_file):
+                            df_prev_day = pd.read_csv(p_file)
+                        else:
+                            live_file = f"results/96Q_future_table_{self.price_area}.csv"
+                            if os.path.exists(live_file):
+                                df_prev_day = pd.read_csv(live_file)
+                    except Exception:
+                        df_prev_day = None
+                        
+                if df_prev_day is not None and not df_prev_day.empty:
+                    p_sp = df_prev_day["spot_price_eur"].values if "spot_price_eur" in df_prev_day.columns else np.zeros(len(df_prev_day))
+                    p_act_num = None
+                    for c in ["actual_settled_imbalance_eur", "imbalance_price_eur", "ImbalancePriceEUR"]:
+                        if c in df_prev_day.columns:
+                            cleaned = df_prev_day[c].astype(str).str.replace("€", "").str.replace(",", "").str.strip()
+                            parsed = pd.to_numeric(cleaned.replace("--", np.nan), errors="coerce")
+                            if parsed.notnull().any():
+                                p_act_num = parsed
+                                break
+
+                    p_pred_spread = None
+                    for c in ["pred_spread_eur", "transfer_lgb_eur", "hierarchical_eur", "pure15m_catboost_eur"]:
+                        if c in df_prev_day.columns:
+                            if "pred_spread" in c:
+                                p_pred_spread = pd.to_numeric(df_prev_day[c].astype(str).str.replace("€", "").str.replace("+", "").str.strip(), errors="coerce").fillna(0.0).values
+                            else:
+                                p_pred_spread = (pd.to_numeric(df_prev_day[c], errors="coerce").values - p_sp)
+                            break
+                    if p_pred_spread is None:
+                        p_pred_spread = np.zeros(len(df_prev_day))
+
+                    if p_act_num is not None:
+                        act_spread = (p_act_num - p_sp).values
+                        spread_blended = np.where(pd.notnull(act_spread), act_spread, p_pred_spread)
+                    else:
+                        spread_blended = p_pred_spread
+
+                    dir_d = np.where(spread_blended > 1.2, 1, np.where(spread_blended < -1.2, -1, 0))
+                    cs, cd = 0, 0
+                    for d in dir_d:
+                        if d != 0 and d == cd:
+                            cs += 1
+                        else:
+                            cd = d
+                            cs = 1 if d != 0 else 0
+                    tail_streak, tail_dir = cs, cd
+                                
+            # Sequential streak propagation across the delivery horizon
+            persistence = np.zeros(len(df_feat))
+            cur_s = tail_streak if approach == "A" else 0
+            cur_d = tail_dir if approach == "A" else 0
+            for i in range(len(df_feat)):
+                d = dir_proj[i]
+                if d != 0 and d == cur_d:
+                    cur_s += 1
+                else:
+                    cur_d = d
+                    cur_s = 1 if d != 0 else 0
+                persistence[i] = cur_s * cur_d
+                
+            df_feat["reg_persistence_quarters"] = persistence
 
         available_cols = [c for c in feat_cols if c in df_feat.columns]
         X = df_feat[available_cols].fillna(0.0).values

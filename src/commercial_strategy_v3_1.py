@@ -74,7 +74,8 @@ class V31CommercialStrategyEngine:
         return round(vol, 1)
 
     def evaluate_trading_ledger(self, df_day_d, model_name="Transfer-LightGBM", market_mode="DAY_AHEAD_D1",
-                                profile: str = None, v_min: float = None, v_max: float = None):
+                                profile: str = None, v_min: float = None, v_max: float = None,
+                                approach: str = "A", df_prev_day=None):
         if not self.model_suite.models:
             self.model_suite.load_models()
 
@@ -82,10 +83,12 @@ class V31CommercialStrategyEngine:
         first_dt = pd.to_datetime(df_day_d.iloc[0][t_col])
         delivery_date_str = first_dt.strftime("%Y-%m-%d")
 
-        preds = self.model_suite.predict_day_ahead_quantiles(df_day_d, market_mode=market_mode)
+        preds = self.model_suite.predict_day_ahead_quantiles(df_day_d, market_mode=market_mode, approach=approach, df_prev_day=df_prev_day)
         point_preds = preds.get(model_name, {}).get("pred_spread", np.zeros(len(df_day_d)))
         quantiles = preds["quantiles"]
         probs = preds["probabilities"]
+
+        journal_mode = f"{market_mode}_{approach}" if approach and market_mode == "INTRADAY_D0" else market_mode
 
         trades = []
         running_capital = self.capital
@@ -101,7 +104,7 @@ class V31CommercialStrategyEngine:
             t_dk_str = str(row[t_col])[:16]
             p_spot = float(row.get("spot_price_eur") or row.get("DayAheadPriceEUR") or row.get("SpotPriceEUR") or 0.0)
 
-            existing_order = self.journal.get_order(market_mode, self.price_area, model_name, delivery_date_str, q_idx)
+            existing_order = self.journal.get_order(journal_mode, self.price_area, model_name, delivery_date_str, q_idx)
 
             if existing_order is None:
                 pred_spread = float(point_preds[i])
@@ -134,7 +137,7 @@ class V31CommercialStrategyEngine:
 
                 order_to_lock = {
                     "trade_id": str(uuid.uuid4()),
-                    "market_mode": market_mode,
+                    "market_mode": journal_mode,
                     "price_area": self.price_area,
                     "model_name": model_name,
                     "delivery_date": delivery_date_str,
@@ -243,9 +246,16 @@ class V31CommercialStrategyEngine:
         trades_str = f"{active_count}/{occurred_count}" if occurred_count > 0 else "0/0"
         tax_val = max(0.0, (gross_pnl_acc - fees_acc) * self.tax_rate)
 
+        midnight_trades = [t for t in trades[:8] if t.get("volume_mwh", 0) > 0]
+        midnight_pnl = sum(t.get("net_pnl_val", 0.0) for t in trades[:8])
+        active_trades_list = [t for t in trades if t.get("volume_mwh", 0) > 0]
+        win_trades = [t for t in active_trades_list if t.get("net_pnl_val", 0.0) > 0]
+        win_rate = (len(win_trades) / len(active_trades_list) * 100.0) if active_trades_list else 0.0
+
         return {
             "model_name": model_name,
             "market_mode": market_mode,
+            "approach": approach,
             "price_area": self.price_area,
             "profile": profile or self.profile,
             "delivery_date": delivery_date_str,
@@ -268,5 +278,9 @@ class V31CommercialStrategyEngine:
             "tax_so_far": round(tax_val, 2),
             "live_roc_percent": round(roc, 2),
             "roc_percent": round(roc, 2),
+            "midnight_pnl_eur": round(midnight_pnl, 2),
+            "midnight_pnl_str": f"{'+€' if midnight_pnl >= 0 else '-€'} {abs(midnight_pnl):,.2f}",
+            "midnight_active_trades": len(midnight_trades),
+            "win_rate_pct": round(win_rate, 1),
             "trades": trades
         }
