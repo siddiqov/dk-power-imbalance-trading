@@ -306,8 +306,8 @@
                         <th>Spot (€)</th>
                         <th>Pred Imb (€)</th>
                         <th>Pred Spread</th>
+                        <th>P(Up) / P(Dn)</th>
                         <th class="col-v3-risk">Quantiles (q10–q90)</th>
-                        <th class="col-v3-risk">P(Up) / P(Dn)</th>
                         <th>Decision</th>
                         <th>Volume</th>
                         <th>DA Flow (€)</th>
@@ -452,7 +452,9 @@
                 }
 
                 var qBounds = (t.q10_price_eur && t.q90_price_eur) ? `€${t.q10_price_eur.toFixed(1)} - €${t.q90_price_eur.toFixed(1)}` : '--';
-                var pRatio = (t.p_up && t.p_down) ? `${t.p_up}% / ${t.p_down}%` : '--';
+                var pUpVal = t.p_up !== undefined ? parseFloat(t.p_up) : 50;
+                var pDownVal = t.p_down !== undefined ? parseFloat(t.p_down) : 50;
+                var pRatioBadge = `<span class="badge ${pUpVal >= 55 ? 'bg-success text-white' : (pDownVal >= 55 ? 'bg-danger text-white' : 'bg-dark border border-secondary text-light')} font-monospace" style="font-size:0.78rem;">${pUpVal.toFixed(0)}% / ${pDownVal.toFixed(0)}%</span>`;
                 var volStr = t.action !== 'HOLD' ? `${t.volume_mwh.toFixed(1)} MWh` : '--';
 
                 html += `<tr>
@@ -463,8 +465,8 @@
                     <td class="text-light">€ ${t.spot_price_eur.toFixed(2)}</td>
                     <td class="text-info fw-bold">€ ${t.pred_imbalance_eur.toFixed(2)}</td>
                     <td class="${spreadColor}">${spreadPrefix}${Math.abs(t.pred_spread_eur).toFixed(2)}</td>
+                    <td class="fw-bold">${pRatioBadge}</td>
                     <td class="small text-muted col-v3-risk">${qBounds}</td>
-                    <td class="small text-muted col-v3-risk">${pRatio}</td>
                     <td>${actionBadge}</td>
                     <td class="fw-bold text-light">${volStr}</td>
                     <td class="small text-muted">${t.da_cash_flow}</td>
