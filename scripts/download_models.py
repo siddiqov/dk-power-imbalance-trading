@@ -1,6 +1,6 @@
 """
-Helper script to download pre-trained machine learning and deep learning models (V2, V3, V3.1)
-from Google Drive into the local 'models/', 'models_v3/', and 'models_v3_1/' directories.
+Helper script to download pre-trained machine learning and deep learning models (V2, V3, V3.1, V3.2, V4)
+from Google Drive into the local 'models/', 'models_v3/', 'models_v3_1/', 'models_v3_2/', and 'models_v4/' directories.
 
 Usage:
     python scripts/download_models.py
@@ -15,6 +15,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 MODELS_DIR = BASE_DIR / "models"
 MODELS_V3_DIR = BASE_DIR / "models_v3"
 MODELS_V3_1_DIR = BASE_DIR / "models_v3_1"
+MODELS_V3_2_DIR = BASE_DIR / "models_v3_2"
+MODELS_V4_DIR = BASE_DIR / "models_v4"
 
 # --------------------------------------------------------------------------
 # GOOGLE DRIVE CONFIGURATION
@@ -26,7 +28,9 @@ def download_models():
     os.makedirs(MODELS_DIR, exist_ok=True)
     os.makedirs(MODELS_V3_DIR, exist_ok=True)
     os.makedirs(MODELS_V3_1_DIR, exist_ok=True)
-    print(f"[INFO] Target models directories:\n  - {MODELS_DIR}\n  - {MODELS_V3_DIR}\n  - {MODELS_V3_1_DIR}")
+    os.makedirs(MODELS_V3_2_DIR, exist_ok=True)
+    os.makedirs(MODELS_V4_DIR, exist_ok=True)
+    print(f"[INFO] Target models directories:\n  - {MODELS_DIR}\n  - {MODELS_V3_DIR}\n  - {MODELS_V3_1_DIR}\n  - {MODELS_V3_2_DIR}\n  - {MODELS_V4_DIR}")
 
     try:
         import gdown

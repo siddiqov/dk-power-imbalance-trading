@@ -177,8 +177,9 @@ class V3DeskFeatureEngine:
             reg_persistence = np.zeros(len(df))
             cur_streak = 0
             cur_dir = 0
+            reg_dirs = df["reg_direction"].values
             for i in range(len(df)):
-                d = df.loc[i, "reg_direction"]
+                d = reg_dirs[i]
                 if d != 0 and d == cur_dir:
                     cur_streak += 1
                 else:

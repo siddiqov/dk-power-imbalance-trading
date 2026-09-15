@@ -58,7 +58,12 @@ class SupabasePublisher:
         url = os.getenv("SUPABASE_URL")
         key = os.getenv("SUPABASE_SERVICE_KEY")
         if not url or not key:
-            raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_KEY must be set in .env")
+            logger.info("[SupabasePublisher] SUPABASE_URL / SUPABASE_SERVICE_KEY not configured. Running in Local Ledger mode (local SQLite & TSV dispatches updated).")
+            self.client = None
+            self.table = None
+            self.log_table = None
+            self.logs_table = None
+            return
         # Lazy import to avoid requiring supabase for non-publisher usage
         from supabase import create_client
         self.client = create_client(url, key)
@@ -87,6 +92,13 @@ class SupabasePublisher:
         if not trades:
             logger.warning(f"No trades to publish for {price_area} {delivery_date} [{market_mode}] model={model_name}")
             return 0
+
+        if not self.client:
+            logger.info(
+                f"  [Local Ledger] Processed {len(trades)} quarters for {price_area} "
+                f"({delivery_date}) [{market_mode}] model={model_name}"
+            )
+            return len(trades)
 
         cph_tz = zoneinfo.ZoneInfo("Europe/Copenhagen")
         d_parts = [int(p) for p in delivery_date.split("-")]
@@ -225,8 +237,11 @@ class SupabasePublisher:
             logger.warning(f"  [Reconciliation] Failed to query ImbalancePrice: {e}")
             return 0
 
-        if not settled_dict:
-            logger.info(f"  [Reconciliation] No settled records yet for {price_area} on {delivery_date}")
+        if not settled_dict or not self.client:
+            if not self.client:
+                logger.info(f"  [Local Ledger] Skipping remote Supabase settlement reconciliation for {price_area} on {delivery_date}.")
+            else:
+                logger.info(f"  [Reconciliation] No settled records yet for {price_area} on {delivery_date}")
             return 0
 
         # Query pending records from Supabase
