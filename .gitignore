@@ -52,8 +52,6 @@ models_v3/
 models_v3/*.pkl
 models_v3_1/
 models_v3_1/*.pkl
-models_v3_2/
-models_v3_2/*.pkl
 models_v4/
 models_v4/*.pkl
 *.pkl
@@ -63,6 +61,11 @@ models_v4/*.pkl
 # Keep Python code in models directory
 !models/*.py
 !models/**/
+
+# Track trained V3.2 meta models for remote runner sync
+!models_v3_2/
+!models_v3_2/*.pkl
+
 
 # Runtime SQLite Database WAL & lock files
 *.db-wal

@@ -2,10 +2,16 @@ import { Cpu } from 'lucide-react';
 
 export const AVAILABLE_MODELS = [
   {
+    id: 'V3.2-FlowAware',
+    shortName: 'V3.2 Flow-Aware',
+    fullName: 'V3.2 Flow-Aware Meta (Multi-Horizon Flow & Physical Circuit Breaker)',
+    badge: 'V3.2',
+  },
+  {
     id: 'Transfer-LightGBM',
     shortName: 'Transfer-LightGBM',
     fullName: 'Transfer-LightGBM (Target Domain Transfer)',
-    badge: 'Active',
+    badge: 'LGBM',
   },
   {
     id: 'Transformer-TFT',

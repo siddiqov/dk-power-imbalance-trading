@@ -40,7 +40,7 @@ const BASE_COLUMNS: ColumnDef[] = [
   {
     key: 'pred_imbalance',
     label: 'Pred Imb (€)',
-    tooltip: 'Transformer-TFT model forecast for the final Energinet imbalance settlement price (€/MWh).',
+    tooltip: 'V3.2 Flow-Aware Meta model forecast for the final Energinet imbalance settlement price (€/MWh).',
     align: 'right',
   },
   {
@@ -58,7 +58,7 @@ const BASE_COLUMNS: ColumnDef[] = [
   {
     key: 'decision',
     label: 'Decision',
-    tooltip: 'Recommended trading signal: BUY Spot (Long), SELL Spot (Short), or HOLD (including Spike Shield protection).',
+    tooltip: 'Recommended trading signal: BUY Spot (Long), SELL Spot (Short), or HOLD (Circuit Breaker).',
     align: 'left',
   },
   {

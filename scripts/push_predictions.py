@@ -101,17 +101,22 @@ def push_predictions(
                 # Step 2: Loop through requested models and market modes
                 for mode in market_modes:
                     for model_name in models:
-                        logger.info(f"  Evaluating [{mode}] model={model_name} (Approach A: Midnight Bridge)...")
-                        summary = strategy.evaluate_trading_ledger(
-                            df, 
-                            model_name=model_name, 
-                            market_mode=mode, 
-                            profile="tier3_aggressive",
-                            approach="A", 
-                            df_prev_day=df_prev_day
-                        )
+                        logger.info(f"  Evaluating [{mode}] model={model_name}...")
+                        if model_name == "V3.2-FlowAware":
+                            from src.v3_2_inference_engine import V32InferenceEngine
+                            v32_engine = V32InferenceEngine(price_area=area)
+                            trades = v32_engine.evaluate_96q_schedule(df, current_date)
+                        else:
+                            summary = strategy.evaluate_trading_ledger(
+                                df, 
+                                model_name=model_name, 
+                                market_mode=mode, 
+                                profile="tier3_aggressive",
+                                approach="A", 
+                                df_prev_day=df_prev_day
+                            )
+                            trades = summary.get("trades", [])
 
-                        trades = summary.get("trades", [])
                         if not trades:
                             continue
 

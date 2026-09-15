@@ -28,7 +28,7 @@ function getInitialParams(): {
     const zone = params.get('zone')?.toUpperCase();
     const start = params.get('start') || undefined;
     const end = params.get('end') || undefined;
-    const model = params.get('model') || 'Transfer-LightGBM';
+    const model = params.get('model') || 'V3.2-FlowAware';
     const modeParam = params.get('mode')?.toUpperCase() === 'DAY_AHEAD_D1' ? 'DAY_AHEAD_D1' : 'INTRADAY_D0';
 
     // Only unlock the full UI when manually navigating to /all or /today
@@ -52,7 +52,7 @@ function getInitialParams(): {
       isAllScreen: false,
       initialMode: 'live',
       initialZone: 'DK1',
-      initialModel: 'Transfer-LightGBM',
+      initialModel: 'V3.2-FlowAware',
       initialMarketMode: 'INTRADAY_D0',
     };
   }
@@ -99,7 +99,7 @@ function App() {
           ? url.searchParams.set('zone', 'DK2')
           : url.searchParams.delete('zone');
 
-        if (isAllScreen && model && model !== 'Transfer-LightGBM') {
+        if (isAllScreen && model && model !== 'V3.2-FlowAware') {
           url.searchParams.set('model', model);
         } else {
           url.searchParams.delete('model');
@@ -151,7 +151,7 @@ function App() {
       effectiveMode,
       undefined,
       dateRange,
-      isAllScreen ? selectedModel : 'Transfer-LightGBM',
+      isAllScreen ? selectedModel : 'V3.2-FlowAware',
       isAllScreen ? marketMode : 'INTRADAY_D0'
     );
 
@@ -169,7 +169,7 @@ function App() {
               : effectiveDate
           }
           isDayAhead={isAllScreen && marketMode === 'DAY_AHEAD_D1'}
-          selectedModel={isAllScreen ? selectedModel : 'Transfer-LightGBM'}
+          selectedModel={isAllScreen ? selectedModel : 'V3.2-FlowAware'}
           isAllScreen={isAllScreen}
         />
 
@@ -177,7 +177,7 @@ function App() {
             BASE URL  /  →  CUSTOMER VIEW
             Clean: countdown timer + next 8 quarters only.
             No ViewToggle, no RangeFilterBar, no filters.
-            Strictly Transfer-LightGBM + INTRADAY_D0.
+            Strictly V3.2-FlowAware + INTRADAY_D0.
             ════════════════════════════════════════════════════ */}
         {!isAllScreen && (
           <>

@@ -132,7 +132,7 @@ export function usePredictions(
   viewMode: PortalViewMode = 'live',
   targetDate?: string,
   dateTimeRange?: DateTimeRange,
-  selectedModel: string = 'Transfer-LightGBM',
+  selectedModel: string = 'V3.2-FlowAware',
   selectedMarketMode: string = 'INTRADAY_D0'
 ) {
   const [predictions, setPredictions] = useState<QuarterPrediction[]>([]);
@@ -152,11 +152,10 @@ export function usePredictions(
         .select('*')
         .eq('price_area', priceArea);
 
-      // Model filtering: For root customer portal, strictly filter for 'Transfer-LightGBM'
-      if (viewMode === 'live' || !selectedModel || selectedModel === 'Transfer-LightGBM') {
-        query = query.eq('model_name', 'Transfer-LightGBM');
-      } else if (selectedModel !== 'ALL') {
-        query = query.eq('model_name', selectedModel);
+      // Model filtering: For root customer portal, strictly filter for 'V3.2-FlowAware'
+      const modelToQuery = (viewMode === 'live' || !selectedModel) ? 'V3.2-FlowAware' : selectedModel;
+      if (modelToQuery !== 'ALL') {
+        query = query.eq('model_name', modelToQuery);
       }
 
       // Market mode filtering: For root customer portal, strictly filter for 'INTRADAY_D0'
