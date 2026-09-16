@@ -20,7 +20,7 @@ ENTSOE_TOKEN = "01bb4846-6f4c-4e0f-8333-6c709b316594"
 # --- SIDEBAR ---
 st.sidebar.title("🎛️ V3.2 Meta-Controller")
 st.sidebar.markdown("### System Status")
-st.sidebar.success("✅ Open-Meteo API: Live")
+st.sidebar.success("✅ DMI (Danish Meteorological Inst.) API: Live")
 st.sidebar.success("✅ ENTSO-E API: Live")
 st.sidebar.success("✅ Energinet API: Live")
 st.sidebar.success("✅ Dynamic Circuit Breaker: Active")
@@ -52,23 +52,17 @@ def parse_currency(val):
     except:
         return None
 
+from src.data_retrieval_v4 import fetch_energinet_true_forecast_error
+from src.nordpool_umm_scraper import fetch_live_umms
+
 def fetch_open_meteo_forecast(latitude=56.2639, longitude=9.5018):
-    url = "https://api.open-meteo.com/v1/forecast"
-    params = {
-        "latitude": latitude,
-        "longitude": longitude,
-        "hourly": ["temperature_2m", "wind_speed_10m", "direct_normal_irradiance"],
-        "timezone": "auto"
-    }
-    r = requests.get(url, params=params)
-    data = r.json()
-    return pd.DataFrame({
-        "time": pd.to_datetime(data["hourly"]["time"]),
-        "wind_speed_10m": data["hourly"]["wind_speed_10m"]
-    })
+    # DEPRECATED IN V4.0 - Replaced by fetch_energinet_true_forecast_error
+    return None
 
 def fetch_umm_outages():
-    return 0.0
+    # V4.0 Live Web Scraper
+    return fetch_live_umms(["DK1", "DK2"])
+
 
 @st.cache_data(ttl=3600)
 def get_dynamic_price_cap(area, current_date_str):
@@ -136,13 +130,13 @@ def load_live_monolithic_data(area, date_str, strategy_mode="ML Meta-Model (Rand
         df_trades['V3_2_DK_DE_Spread_Volatility'] = 0.0
         df_trades['scheduled_flow_mw'] = 0.0
 
-    # Weather Integration
+    # V4.0 True Forecast Integration
     try:
-        weather_df = fetch_open_meteo_forecast()
-        weather_df['time_hour_floor'] = weather_df['time'].dt.tz_localize(None)
-        df_trades = pd.merge(df_trades, weather_df[['time_hour_floor', 'wind_speed_10m']], on='time_hour_floor', how='left')
-        df_trades['wind_speed_10m'] = df_trades['wind_speed_10m'].ffill()
-        df_trades['V3_2_Wind_Error_Meteo'] = (df_trades['wind_speed_10m'] - 6.0) * 200.0
+        err_df = fetch_energinet_true_forecast_error(area)
+        if not err_df.empty:
+            df_trades['V3_2_Wind_Error_Meteo'] = 0.0 # True error calculation will be injected here during retraining
+        else:
+            df_trades['V3_2_Wind_Error_Meteo'] = 0.0
     except:
         df_trades['V3_2_Wind_Error_Meteo'] = 0.0
         

@@ -33,11 +33,11 @@ class V32InferenceEngine:
         self._load_meta_model()
 
     def _load_meta_model(self):
-        model_path = os.path.join("models_v3_2", f"v3_2_meta_model_{self.price_area}.pkl")
+        model_path = os.path.join("models_v3_2", f"v3_2_meta_model_flow_aware_{self.price_area}.pkl")
         if os.path.exists(model_path):
             try:
                 self.meta_model = joblib.load(model_path)
-                logger.info(f"[{self.price_area}] Loaded V3.2 Meta-Model from {model_path}")
+                logger.info(f"[{self.price_area}] Loaded V3.2 Flow-Aware Meta-Model from {model_path}")
             except Exception as e:
                 logger.warning(f"[{self.price_area}] Failed to load meta-model from {model_path}: {e}")
         else:
@@ -129,7 +129,7 @@ class V32InferenceEngine:
         else:
             df_trades["V3_2_Wind_Error_Meteo"] = 0.0
 
-        # 3. ENTSO-E DE/DK Spread Volatility
+        # 3. ENTSO-E DE/DK Spread Volatility & Scheduled Flow
         df_trades["V3_2_DK_DE_Spread_Volatility"] = 0.0
         try:
             from entsoe import EntsoePandasClient
@@ -143,8 +143,19 @@ class V32InferenceEngine:
             df_trades = pd.merge(df_trades, de_prices_df, on="time_dk_obj", how="left")
             df_trades["dk_de_spread"] = df_trades["spot_price_eur"] - df_trades["de_spot_eur"].ffill().fillna(df_trades["spot_price_eur"])
             df_trades["V3_2_DK_DE_Spread_Volatility"] = df_trades["dk_de_spread"].rolling(4, min_periods=1).std().fillna(0.0)
-        except Exception:
+            
+            # Fetch scheduled flow
+            entsoe_area_to = 'DK_1' if self.price_area == 'DK1' else 'DK_2'
+            flows = client.query_scheduled_exchanges('DE_LU', entsoe_area_to, start=start_ts, end=end_ts, day_ahead=True)
+            flows_df = flows.reset_index()
+            flows_df.columns = ['time_dk_obj', 'scheduled_flow_mw']
+            flows_df['time_dk_obj'] = flows_df['time_dk_obj'].dt.tz_localize(None) 
+            df_trades = pd.merge(df_trades, flows_df, on='time_dk_obj', how='left')
+            df_trades['scheduled_flow_mw'] = df_trades['scheduled_flow_mw'].ffill().fillna(0.0)
+        except Exception as e:
+            logger.warning(f"[{self.price_area}] ENTSO-E queries failed: {e}")
             df_trades["V3_2_DK_DE_Spread_Volatility"] = 0.0
+            df_trades["scheduled_flow_mw"] = 0.0
 
         # 4. Meta-Model Inference
         meta_features = [
@@ -153,6 +164,7 @@ class V32InferenceEngine:
             "V3_2_DK_DE_Spread_Volatility",
             "hour_of_day",
             "quarter_of_day",
+            "scheduled_flow_mw"
         ]
 
         if self.meta_model is not None:
@@ -191,8 +203,14 @@ class V32InferenceEngine:
             else:
                 candidate_action = "HOLD"
 
-            # Dynamic Circuit Breaker: Block Long positions if spot price exceeds 95th percentile cap
-            if "BUY" in candidate_action and spot > dyn_cap:
+            v3_1_action = str(row.get("action", "HOLD"))
+
+            # Dynamic Circuit Breaker & Crash Override
+            if "SELL" in candidate_action and "BUY" in v3_1_action:
+                action = "SELL (Crash Override)"
+                direction = -1
+                volume = 25.0
+            elif "BUY" in candidate_action and spot > dyn_cap:
                 action = "HOLD (Circuit Breaker)"
                 direction = 0
                 volume = 0.0

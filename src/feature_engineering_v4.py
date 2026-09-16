@@ -142,11 +142,18 @@ class V4GridFeatureEngine:
             df_out['wind_offshore'] = df_15.get('OffshoreWindPower', 0.0)
             df_out['wind_onshore'] = df_15.get('OnshoreWindPower', 0.0)
             df_out['total_wind'] = df_out['wind_offshore'] + df_out['wind_onshore']
+            df_out['flow_de'] = df_15.get('ExchangeGermany', 0.0)
+            df_out['flow_nl'] = df_15.get('ExchangeNetherlands', 0.0)
+            df_out['flow_great_belt'] = df_15.get('ExchangeGreatBelt', 0.0)
+            df_out['flow_no'] = df_15.get('ExchangeNorway', 0.0)
+            df_out['flow_se'] = df_15.get('ExchangeSweden', 0.0)
+            df_out['flow_gb'] = df_15.get('ExchangeGreatBritain', 0.0)
             df_out['solar'] = df_15.get('SolarPower', 0.0)
-            df_out['exchange_continent'] = df_15.get('ExchangeGermany', 0.0) + df_15.get('ExchangeNetherlands', 0.0)
-            df_out['exchange_great_belt'] = df_15.get('ExchangeGreatBelt', 0.0)
-            df_out['exchange_nordic'] = df_15.get('ExchangeNorway', 0.0) + df_15.get('ExchangeSweden', 0.0)
-            df_out['exchange_gb'] = df_15.get('ExchangeGreatBritain', 0.0)
+            
+            df_out['exchange_continent'] = df_out['flow_de'] + df_out['flow_nl']
+            df_out['exchange_great_belt'] = df_out['flow_great_belt']
+            df_out['exchange_nordic'] = df_out['flow_no'] + df_out['flow_se']
+            df_out['exchange_gb'] = df_out['flow_gb']
             df_out['net_exchange'] = (df_out['exchange_continent'] + df_out['exchange_great_belt'] + 
                                       df_out['exchange_nordic'] + df_out['exchange_gb'])
             prod_tot = (df_15.get('ProductionLt100MW', 0.0) + df_15.get('ProductionGe100MW', 0.0) + 
@@ -250,11 +257,24 @@ class V4GridFeatureEngine:
         df['net_system_surplus_mw'] = df['net_load_balance_mw'] + df['net_exchange']
         df['renewable_penetration'] = df['physical_gen_mw'] / (df['total_load'] + 1e-4)
 
-        # Flow Components
-        df['flow_continent'] = df['exchange_continent'].ffill().fillna(0.0)
-        df['flow_nordic'] = df['exchange_nordic'].ffill().fillna(0.0)
-        df['flow_gb'] = df['exchange_gb'].ffill().fillna(0.0)
-        df['flow_great_belt'] = df['exchange_great_belt'].ffill().fillna(0.0)
+        # Flow Components (Dedicated 8-Cable Telemetry)
+        for flow_col, fallback_col in [
+            ('flow_de', 'exchange_continent'),
+            ('flow_nl', None),
+            ('flow_no', 'exchange_nordic'),
+            ('flow_se', None),
+            ('flow_gb', 'exchange_gb'),
+            ('flow_great_belt', 'exchange_great_belt')
+        ]:
+            if flow_col in df.columns:
+                df[flow_col] = pd.Series(df[flow_col]).ffill().fillna(0.0)
+            elif fallback_col and fallback_col in df.columns:
+                df[flow_col] = pd.Series(df[fallback_col]).ffill().fillna(0.0)
+            else:
+                df[flow_col] = 0.0
+
+        df['flow_continent'] = df['exchange_continent'].ffill().fillna(0.0) if 'exchange_continent' in df.columns else 0.0
+        df['flow_nordic'] = df['exchange_nordic'].ffill().fillna(0.0) if 'exchange_nordic' in df.columns else 0.0
 
         # -------------------------------------------------------------
         # LAYER 2: Deviations from Expectation (Forecast Errors & Revisions)

@@ -109,7 +109,9 @@ def build_pdf_report():
         "  * Tier 3 (Asymmetric Tail-Risk Crash Override): When physical renewables and massive cross-border imports guarantee oversupply, "
         "the model aggressively overrides statistical BUY signals into high-conviction SHORTS (25 MW allocation).\n"
         "  * Tier 4 (95th-Percentile Volatility Circuit Breaker): Evaluates a rolling 30-day dynamic price ceiling to violently block long "
-        "exposure during extreme spot price spikes, shielding capital from tail-risk crashes."
+        "exposure during extreme spot price spikes, shielding capital from tail-risk crashes.\n"
+        "  * Tier 5 (Intraday Evening Ramping Guard): Mitigates late-night (21:30-23:45 / Q87-Q96) liquidity collapse and TSO downward balancing dumps "
+        "by capping conviction sizing to standard 10 MW and enforcing a 10% tighter dynamic spot ceiling threshold."
     )
     pdf.chapter_body(body2)
 

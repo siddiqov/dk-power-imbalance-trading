@@ -6,8 +6,9 @@ interface DirectionBadgeProps {
 
 export function DirectionBadge({ decision }: DirectionBadgeProps) {
   const isCircuitBreaker = decision.includes('Circuit Breaker');
-  const isBuy = !isCircuitBreaker && (decision.includes('BUY') || decision.includes('Long'));
-  const isSell = !isCircuitBreaker && (decision.includes('SELL') || decision.includes('Short'));
+  const isCrashOverride = decision.includes('Crash Override') || decision.includes('CRASH PRED');
+  const isBuy = !isCircuitBreaker && !isCrashOverride && (decision.includes('BUY') || decision.includes('Long'));
+  const isSell = !isCircuitBreaker && !isCrashOverride && (decision.includes('SELL') || decision.includes('Short'));
   
   let Icon = ArrowRight;
   let colorClass = 'bg-gray-500/20 text-gray-400 border-gray-500/30';
@@ -17,6 +18,10 @@ export function DirectionBadge({ decision }: DirectionBadgeProps) {
     Icon = ShieldAlert;
     colorClass = 'bg-amber-500/20 text-amber-400 border-amber-500/40 font-bold shadow-sm shadow-amber-500/10';
     label = 'HOLD (Circuit Breaker)';
+  } else if (isCrashOverride) {
+    Icon = ArrowDown;
+    colorClass = 'bg-rose-500/30 text-rose-300 border-rose-500/50 font-bold shadow-sm shadow-rose-500/20';
+    label = '🔥 SELL (Crash Override)';
   } else if (isBuy) {
     Icon = ArrowUp;
     colorClass = 'bg-green-500/20 text-green-400 border-green-500/30';

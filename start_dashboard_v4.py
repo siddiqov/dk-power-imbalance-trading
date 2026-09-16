@@ -8,7 +8,7 @@ import sys
 import subprocess
 
 def start_dashboard():
-    port = 5005
+    port = 5004
     print(f"Starting Nurex V4.0 Dashboard on http://127.0.0.1:{port}/ ...")
     
     streamlit_exe = r"C:\Users\Hafeez\anaconda3\Scripts\streamlit.exe"

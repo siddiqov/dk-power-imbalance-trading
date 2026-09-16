@@ -54,6 +54,8 @@ models_v3_1/
 models_v3_1/*.pkl
 models_v4/
 models_v4/*.pkl
+models_v4_1/
+models_v4_1/*.pkl
 *.pkl
 *.pt
 *.part
