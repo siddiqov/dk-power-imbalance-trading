@@ -33,15 +33,20 @@ class V32InferenceEngine:
         self._load_meta_model()
 
     def _load_meta_model(self):
-        model_path = os.path.join("models_v3_2", f"v3_2_meta_model_flow_aware_{self.price_area}.pkl")
-        if os.path.exists(model_path):
-            try:
-                self.meta_model = joblib.load(model_path)
-                logger.info(f"[{self.price_area}] Loaded V3.2 Flow-Aware Meta-Model from {model_path}")
-            except Exception as e:
-                logger.warning(f"[{self.price_area}] Failed to load meta-model from {model_path}: {e}")
-        else:
-            logger.warning(f"[{self.price_area}] Meta-model file not found at {model_path}")
+        candidates = [
+            f"v3_2_meta_model_{self.price_area}.pkl",
+            f"v3_2_meta_model_flow_aware_{self.price_area}.pkl",
+        ]
+        for candidate in candidates:
+            model_path = os.path.join("models_v3_2", candidate)
+            if os.path.exists(model_path):
+                try:
+                    self.meta_model = joblib.load(model_path)
+                    logger.info(f"[{self.price_area}] Loaded V3.2 Flow-Aware Meta-Model from {model_path}")
+                    return
+                except Exception as e:
+                    logger.warning(f"[{self.price_area}] Failed to load meta-model from {model_path}: {e}")
+        logger.warning(f"[{self.price_area}] Meta-model file not found in models_v3_2 (candidates: {candidates})")
 
     def fetch_open_meteo_wind(self) -> pd.DataFrame:
         """Fetches Open-Meteo wind speed forecast for Denmark."""
@@ -158,16 +163,22 @@ class V32InferenceEngine:
             df_trades["scheduled_flow_mw"] = 0.0
 
         # 4. Meta-Model Inference
-        meta_features = [
-            "V3_1_BiLSTM_Score",
-            "V3_2_Wind_Error_Meteo",
-            "V3_2_DK_DE_Spread_Volatility",
-            "hour_of_day",
-            "quarter_of_day",
-            "scheduled_flow_mw"
-        ]
+        if self.meta_model is not None and hasattr(self.meta_model, "feature_names_in_"):
+            meta_features = list(self.meta_model.feature_names_in_)
+        else:
+            meta_features = [
+                "V3_1_BiLSTM_Score",
+                "V3_2_Wind_Error_Meteo",
+                "V3_2_DK_DE_Spread_Volatility",
+                "hour_of_day",
+                "quarter_of_day",
+            ]
 
         if self.meta_model is not None:
+            # Ensure all required features exist in df_trades
+            for f in meta_features:
+                if f not in df_trades.columns:
+                    df_trades[f] = 0.0
             X_meta = df_trades[meta_features].fillna(0.0)
             df_trades["V3_2_Meta_Score"] = self.meta_model.predict(X_meta)
         else:
