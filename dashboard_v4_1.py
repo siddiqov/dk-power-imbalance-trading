@@ -1,3 +1,6 @@
+import os
+from dotenv import load_dotenv
+load_dotenv()
 # ==============================================================================
 # dashboard_v4_1.py
 # Nurex V4.1: Institutional High-Alpha Microstructure & Cross-Border Balancing Engine
@@ -26,9 +29,10 @@ import altair as alt
 from datetime import datetime, date, timedelta
 
 sys.path.append(os.path.abspath('.'))
-from train_v4_1 import StackingSuperEnsembleV41
+
 from src.tournament_tables_v2 import TournamentTableGenerator
 from src.commercial_strategy_v3_1 import V31CommercialStrategyEngine
+from v4_1_intraday import dashboard_adapter as v41id  # V4.1 intraday engine (point-in-time, gate closure)
 from src.feature_engineering_v4_1 import V41FeatureEngine, CABLE_CAPACITIES
 from src.balancing_market_v4_1 import fetch_mfrr_energy_activations, fetch_afrr_energy_activations, get_latest_balancing_state
 from src.smard_client import get_german_system_balance_telemetry
@@ -36,6 +40,8 @@ from src.order_flow_v4_1 import OrderFlowEngineV41, compute_order_flow_microstru
 from src.data_retrieval_v4 import fetch_energinet_true_forecast_error, fetch_energinet_system_frequency
 from src.nordpool_umm_scraper import fetch_live_umms
 from src.dmi_client import get_dmi_zone_weather_telemetry
+
+COST_EUR_MWH = v41id.cost_per_mwh()  # fee + imbalance fee + BRP + slippage (config_v41.yaml)
 
 st.set_page_config(
     page_title="Nurex V4.1 Institutional High-Alpha Engine",
@@ -117,38 +123,54 @@ def load_models_and_logs(area):
             cols = joblib.load(m4_feat_path) if os.path.exists(m4_feat_path) else []
             bundle_v4 = {"model": raw, "feature_cols": cols}
 
-    # Load V4.1 Model
-    m41_path = f"models_v4_1/v4_1_champion_model_{area}.pkl"
-    m41_feat_path = f"models_v4_1/v4_1_features_{area}.pkl"
-    m41_log_path = f"models_v4_1/grid_search_results_{area}.json"
-    
-    bundle_v41 = None
-    if os.path.exists(m41_path):
-        raw41 = joblib.load(m41_path)
-        if isinstance(raw41, dict) and "model" in raw41:
-            bundle_v41 = raw41
-        else:
-            cols41 = joblib.load(m41_feat_path) if os.path.exists(m41_feat_path) else []
-            bundle_v41 = {"model": raw41, "feature_cols": cols41}
-            
-    log_v41 = None
-    if os.path.exists(m41_log_path):
-        with open(m41_log_path, 'r') as f:
-            log_v41 = json.load(f)
+    # Load V4.1 Intraday Model (trained by: python train_v4_1.py train)
+    bundle_v41 = v41id.load_bundle(area)
+    log_v41 = v41id.model_info(area)
 
     return bundle_v4, bundle_v41, log_v41
 
 bundle_v4, bundle_v41, log_v41 = load_models_and_logs(selected_area)
 
 # 4. Champion Model Specifications Sidebar Box
-if log_v41 and "champion" in log_v41:
-    champ = log_v41["champion"]
+if log_v41:
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### 🏆 V4.1 Champion Model Specs")
-    st.sidebar.markdown(f"**Family:** `{champ.get('family', 'LightGBM')}`")
-    st.sidebar.markdown(f"**CV MAE:** `{champ.get('cv_mae', 0.0)} EUR/MWh`")
-    st.sidebar.markdown(f"**Directional Hit Rate:** `{champ.get('cv_directional_accuracy_pct', 0.0)}%`")
-    st.sidebar.caption("5-Fold TimeSeriesSplit Walk-Forward with MARI/PICASSO + SMARD + XBID Features")
+    st.sidebar.markdown("### 🏆 V4.1 Intraday Model")
+    st.sidebar.markdown(f"**Model:** `LightGBM direction + regime size + quantiles`")
+    st.sidebar.markdown(f"**Decision time:** `delivery − {log_v41.get('gate_lead_minutes', 60)} min`")
+    st.sidebar.markdown(f"**Trained on:** `{log_v41.get('n_train', 0):,} quarters until {str(log_v41.get('trained_until', ''))[:16]} UTC`")
+    st.sidebar.markdown(f"**Cost model:** `{log_v41.get('cost_eur_mwh', 0):.2f} EUR/MWh`")
+    dp = log_v41.get('decision_params', {}) or {}
+    st.sidebar.markdown(f"**BUY rule:** `{dp.get('buy') or 'off'}`  \n**SELL rule:** `{dp.get('sell') or 'off'}`")
+    rp = log_v41.get('replay')
+    if rp:
+        st.sidebar.markdown(f"**Walk-forward replay:** `{rp.get('trades', 0)} trades, {rp.get('net_eur', 0):,.0f} EUR "
+                            f"({rp.get('net_eur_per_mwh') or 0:.2f} EUR/MWh), 2x costs {rp.get('net_eur_at_stress_costs', 0):,.0f} EUR`")
+    st.sidebar.caption("Walk-forward replay, point-in-time features, leakage-tested. Simulation only. "
+                       "Past days shown in the ledger use the CURRENT model (in-sample); the honest out-of-sample "
+                       "history is the replay report in results/v4_1_intraday/.")
+elif bundle_v41 is None:
+    st.sidebar.warning("V4.1 intraday model not trained yet: run `python train_v4_1.py all`")
+
+with st.sidebar.expander("🔒 V4.1 paper-trading journal (locked decisions)", expanded=False):
+    try:
+        from v4_1_intraday import journal as _J
+        _js = _J.summary(v41id.config())
+        if _js.empty:
+            st.caption("No locked decisions yet - schedule `python train_v4_1.py cycle` every 15 min "
+                       "(scripts_v41/install_tasks_v41.ps1).")
+        else:
+            st.dataframe(_js[["area", "trades", "mwh", "net_eur", "eur_per_mwh", "win_rate_pct", "missed_gates"]],
+                         hide_index=True, use_container_width=True)
+            st.caption("Only these locked decisions count as honest live performance.")
+    except Exception as e:
+        st.caption(f"journal unavailable: {e}")
+
+with st.sidebar.expander("📡 V4.1 data sources (coverage)", expanded=False):
+    try:
+        st.dataframe(v41id.sources_status(), hide_index=True, use_container_width=True)
+        st.caption("Update: `python train_v4_1.py update` + `collect`; live Nord Pool: `record-intraday` (24/7).")
+    except Exception as e:
+        st.caption(f"coverage unavailable: {e}")
 
 # 5. Dedicated Single Deep-Dive Architecture Expander
 st.sidebar.markdown("---")
@@ -198,7 +220,8 @@ def parse_val(v):
     except:
         return None
 
-ENTSOE_TOKEN = "01bb4846-6f4c-4e0f-8333-6c709b316594"
+load_dotenv(os.path.join("Nurex_V4_2", ".env"))
+ENTSOE_TOKEN = os.environ.get("ENTSOE_TOKEN") or os.environ.get("ENTSOE_API_KEY", "")
 
 @st.cache_data(ttl=3600)
 def get_dynamic_price_cap(area, current_date_str):
@@ -252,7 +275,7 @@ def get_v4_1_trading_day_data(area, date_str):
         t_row = pd.to_datetime(row['time_dk'])
         raw_settled = parse_val(row.get('actual_settled_eur'))
         is_past = (t_row <= current_time_dk)
-        is_settled = (raw_settled is not None and raw_settled > 0.0 and is_past)
+        is_settled = (raw_settled is not None and not pd.isna(raw_settled) and is_past)  # negative prices are valid
         
         is_settled_list.append(is_settled)
         settled_vals.append(raw_settled if is_settled else np.nan)
@@ -297,7 +320,7 @@ def get_v4_1_trading_day_data(area, date_str):
         df_trades['scheduled_flow_mw'] = 0.0
 
     # Build High-Alpha Matrix (V4.1 Engine)
-    df_matrix = fe41.build_feature_matrix_v4_1(df_trades)
+    df_matrix = fe41.build_feature_matrix(df_trades)
     df_matrix['Dynamic_Cap_EUR'] = dynamic_cap
     if 'de_spot_eur' not in df_matrix.columns:
         df_matrix['de_spot_eur'] = df_trades['de_spot_eur']
@@ -340,8 +363,9 @@ def get_v4_1_trading_day_data(area, date_str):
         
         if row['is_settled']:
             spread = row['actual_spread_eur']
-            fees = vol * 0.51
-            pnl = (spread * vol - fees) if act == "BUY" else (-spread * vol - fees) if act == "SELL" else 0.0
+            mwh_q = vol * 0.25  # quarterly product: MW / 4 = MWh
+            fees = mwh_q * COST_EUR_MWH
+            pnl = (spread * mwh_q - fees) if act == "BUY" else (-spread * mwh_q - fees) if act == "SELL" else 0.0
         else:
             pnl = np.nan
             
@@ -402,8 +426,9 @@ def get_v4_1_trading_day_data(area, date_str):
 
         if row['is_settled']:
             spread = row['actual_spread_eur']
-            fees = vol32 * 0.51
-            pnl32 = (spread * vol32 - fees) if act32 == "BUY" else (-spread * vol32 - fees) if act32 == "SELL" else 0.0
+            mwh_q = vol32 * 0.25  # quarterly product: MW / 4 = MWh
+            fees = mwh_q * COST_EUR_MWH
+            pnl32 = (spread * mwh_q - fees) if act32 == "BUY" else (-spread * mwh_q - fees) if act32 == "SELL" else 0.0
         else:
             pnl32 = np.nan
 
@@ -460,8 +485,9 @@ def get_v4_1_trading_day_data(area, date_str):
 
         if row['is_settled']:
             spread = row['actual_spread_eur']
-            fees = vol * 0.51
-            pnl4 = (spread * vol - fees) if act == "BUY" else (-spread * vol - fees) if act == "SELL" else 0.0
+            mwh_q = vol * 0.25  # quarterly product: MW / 4 = MWh
+            fees = mwh_q * COST_EUR_MWH
+            pnl4 = (spread * mwh_q - fees) if act == "BUY" else (-spread * mwh_q - fees) if act == "SELL" else 0.0
         else:
             pnl4 = np.nan
 
@@ -473,87 +499,46 @@ def get_v4_1_trading_day_data(area, date_str):
     df_matrix['V4_Volume_MW'] = v4_vols
     df_matrix['PnL_V4_0'] = v4_pnls
 
-    # --- MODEL 4: V4.1 Institutional High-Alpha Model ---
-    if bundle_v41 and "model" in bundle_v41:
-        m41 = bundle_v41["model"]
-        cols41 = bundle_v41.get("feature_cols", [])
-        
-        # Attach DK1 Foundation Prior for DK2 if required
-        if 'DK1_Foundation_Prior' in cols41 and 'DK1_Foundation_Prior' not in df_matrix.columns:
-            try:
-                m_dk1_bundle, _, _ = load_models_and_logs('DK1')
-                if m_dk1_bundle and "model" in m_dk1_bundle:
-                    dk1_cols = m_dk1_bundle.get("feature_cols", [])
-                    X_dk1_tmp = df_matrix.reindex(columns=dk1_cols).ffill().bfill().fillna(0.0)
-                    df_matrix['DK1_Foundation_Prior'] = m_dk1_bundle["model"].predict(X_dk1_tmp)
-                else:
-                    df_matrix['DK1_Foundation_Prior'] = df_matrix['V3_1_BiLSTM_Score']
-            except Exception:
-                df_matrix['DK1_Foundation_Prior'] = df_matrix['V3_1_BiLSTM_Score']
-
-        for c in cols41:
-            if c not in df_matrix.columns: df_matrix[c] = 0.0
-        X41 = df_matrix[cols41].ffill().bfill().fillna(0)
-        df_matrix['V4_1_Predicted_Spread_EUR'] = m41.predict(X41)
+    # --- MODEL 4: V4.1 Intraday (gate-closure, point-in-time) ---
+    # Decisions come from v4_1_intraday: each quarter is decided with the information published
+    # before delivery - 60 min. Settlement uses the published imbalance price (negative prices included).
+    v41_decisions, v41_vols, v41_pnls = [], [], []
+    v41 = pd.DataFrame()
+    if bundle_v41 is not None:
+        try:
+            v41 = v41id.day_decisions(area, date_str)
+        except Exception as e:
+            st.warning(f"V4.1 intraday engine unavailable: {e}")
+    key = pd.to_datetime(df_matrix['time_dk']).dt.strftime('%Y-%m-%d %H:%M') if 'time_dk' in df_matrix.columns else None
+    if not v41.empty and key is not None:
+        m = v41.set_index('time_dk_str')
+        pick = lambda c, d=np.nan: key.map(m[c]).fillna(d) if c in m.columns else d
+        df_matrix['V4_1_Predicted_Spread_EUR'] = pick('exp_spread', 0.0).astype(float)
+        df_matrix['p_down'] = pick('p_down')
+        df_matrix['p_none'] = pick('p_flat')
+        df_matrix['p_up'] = pick('p_up')
+        df_matrix['spread_q10'] = pick('q10')
+        df_matrix['spread_q50'] = pick('q50')
+        df_matrix['spread_q90'] = pick('q90')
+        df_matrix['V4_1_MWh'] = pick('mwh', 0.0).astype(float)
+        df_matrix['V4_1_Final'] = key.map(m['decision_final']).fillna(False)
+        df_matrix['V4_1_Settled'] = key.map(m['settled']).fillna(False)
+        acts = key.map(m['action']).fillna('HOLD')
+        pn = key.map(m['pnl_eur'])
+        srcs = key.map(m['source']).fillna('recomputed') if 'source' in m.columns else pd.Series('recomputed', index=key.index)
+        for a_, mw_, fin_, p_, src_ in zip(acts, df_matrix['V4_1_MWh'], df_matrix['V4_1_Final'], pn, srcs):
+            tag = " 🔒" if src_ == "LOCKED" else (" (missed gate)" if src_ == "MISSED" else ("" if fin_ else " (provisional)"))
+            v41_decisions.append(("🟢 BUY" if a_ == "BUY" else "🔴 SELL" if a_ == "SELL" else "⚪ HOLD") + tag)
+            v41_vols.append(float(mw_) * 4.0)          # MWh per quarter -> MW
+            v41_pnls.append(float(p_) if pd.notna(p_) else np.nan)
     else:
-        # Fallback to V4.0 spread plus order flow micro-adjustment
-        df_matrix['V4_1_Predicted_Spread_EUR'] = df_matrix['V4_Predicted_Spread_EUR'] + (df_matrix.get('order_flow_skew', 0.0) * 1.5)
+        df_matrix['V4_1_Predicted_Spread_EUR'] = 0.0
+        df_matrix['V4_1_Settled'] = False
+        v41_decisions = ["⚪ HOLD (model not trained)"] * len(df_matrix)
+        v41_vols = [0.0] * len(df_matrix)
+        v41_pnls = [np.nan] * len(df_matrix)
 
     df_matrix['V4_1_Pred_Imb_EUR'] = df_matrix['spot_price_eur'] + df_matrix['V4_1_Predicted_Spread_EUR']
-
-    v41_decisions, v41_vols, v41_pnls = [], [], []
-    for _, row in df_matrix.iterrows():
-        v41_score = row['V4_1_Predicted_Spread_EUR']
-        v4_score = row['V4_Predicted_Spread_EUR']
-        v31_score = row['V3_1_BiLSTM_Score']
-        spot = row['spot_price_eur']
-        cap = row['Dynamic_Cap_EUR']
-        surplus_mw = row.get('net_system_surplus_mw', 0.0)
-        smard_res = row.get('smard_residual_load_mw', 0.0)
-        mfrr_down = row.get('mfrr_down_mw', 0.0)
-        mfrr_up = row.get('mfrr_up_mw', 0.0)
-        skew = row.get('order_flow_skew', 0.0)
-        h = row.get('hour_of_day', 12.0)
-        is_late_evening = (h >= 21.5)
-
-        # Base Thresholds for V4.1
-        if v41_score > 2.0:
-            base_decision, act = "🟢 BUY", "BUY"
-            # Scale up on strong XBID bid skew or high mFRR up-activation
-            is_high_conv = (v41_score > 8.0 or skew > 0.4 or mfrr_up > 200.0)
-            vol = standard_vol if (use_evening_guard and is_late_evening) else (high_conviction_vol if is_high_conv else standard_vol)
-        elif v41_score < -2.0:
-            base_decision, act = "🔴 SELL", "SELL"
-            is_high_conv = (v41_score < -8.0 or skew < -0.4 or mfrr_down > 200.0 or smard_res < -2000.0)
-            vol = standard_vol if (use_evening_guard and is_late_evening) else (high_conviction_vol if is_high_conv else standard_vol)
-        else:
-            base_decision, act, vol = "⚪ HOLD", "HOLD", 0.0
-
-        # Physical Surplus & Downward Activation Defense (MARI / PICASSO + SMARD Grid)
-        if (surplus_mw > 350.0 or mfrr_down > 250.0 or (smard_res < -3000.0 and surplus_mw > 100.0)) and act == "BUY":
-            base_decision, act, vol = "⚪ MARI SURPLUS SHIELD (HOLD)", "HOLD", 0.0
-
-        # Structural Crash Protection Override with XBID Order Flow Confirmation
-        if crash_protection_enabled and (v41_score < -2.5 or skew < -0.5) and v31_score > 1.5:
-            base_decision, act = "🔥 CRASH PRED (SELL)", "SELL"
-            vol = standard_vol if (use_evening_guard and is_late_evening) else high_conviction_vol
-
-        # Dynamic Circuit Breaker
-        effective_cap = (cap * 0.90) if (use_evening_guard and is_late_evening) else cap
-        if use_circuit_breaker and spot > effective_cap and act == "BUY":
-            base_decision, act, vol = "🛑 C.BREAKER (HOLD)", "HOLD", 0.0
-
-        if row['is_settled']:
-            spread = row['actual_spread_eur']
-            fees = vol * 0.51
-            pnl41 = (spread * vol - fees) if act == "BUY" else (-spread * vol - fees) if act == "SELL" else 0.0
-        else:
-            pnl41 = np.nan
-
-        v41_decisions.append(base_decision)
-        v41_vols.append(vol)
-        v41_pnls.append(pnl41)
-
     df_matrix['V4_1_Decision'] = v41_decisions
     df_matrix['V4_1_Volume_MW'] = v41_vols
     df_matrix['PnL_V4_1'] = v41_pnls
@@ -573,7 +558,7 @@ st.title(f"⚡ Nurex V4.1 Institutional High-Alpha Command Center ({selected_are
 st.markdown("### Real-Time MARI/PICASSO Balancing • SMARD German Grid • XBID Level-2 Order Flow Microstructure")
 
 settled_mask = df_day['is_settled'] if ('is_settled' in df_day.columns) else pd.Series([False]*len(df_day))
-v41_realized = df_day.loc[settled_mask, 'PnL_V4_1'].sum() if not df_day.empty else 0.0
+v41_realized = float(np.nansum(df_day['PnL_V4_1'])) if not df_day.empty else 0.0
 v40_realized = df_day.loc[settled_mask, 'PnL_V4_0'].sum() if not df_day.empty else 0.0
 v32_realized = df_day.loc[settled_mask, 'PnL_V3_2'].sum() if not df_day.empty else 0.0
 v31_realized = df_day.loc[settled_mask, 'PnL_V3_1'].sum() if not df_day.empty else 0.0
@@ -770,6 +755,7 @@ with tab_unified_ledger:
             v41_spread = row.get('V4_1_Predicted_Spread_EUR', 0.0)
             v41_imb = spot_val + v41_spread
             v41_vol = row.get('V4_1_Volume_MW', 0.0)
+            v41_mwh = row.get('V4_1_MWh', v41_vol / 4.0)  # energy per quarter
             v41_pnl = row.get('PnL_V4_1', np.nan)
             
             # Settled
@@ -794,16 +780,16 @@ with tab_unified_ledger:
 
             # Cash flows
             if "BUY" in v41_dec:
-                da_outlay = f"-€{spot_val * v41_vol:,.2f}"
-                settle_cf = f"+€{settled_val * v41_vol:,.2f}" if is_settled and pd.notna(settled_val) else "Pending Gate Closure"
-                gross = f"€{(settled_val - spot_val) * v41_vol:+,.2f}" if is_settled and pd.notna(settled_val) else "Pending"
-                fees = f"-€{v41_vol * 0.51:,.2f}"
+                da_outlay = f"-€{spot_val * v41_mwh:,.2f}"
+                settle_cf = f"+€{settled_val * v41_mwh:,.2f}" if is_settled and pd.notna(settled_val) else "Pending Gate Closure"
+                gross = f"€{(settled_val - spot_val) * v41_mwh:+,.2f}" if is_settled and pd.notna(settled_val) else "Pending"
+                fees = f"-€{v41_mwh * COST_EUR_MWH:,.2f}"
                 net_cf = f"€{v41_pnl:+,.2f}" if is_settled and pd.notna(v41_pnl) else "Pending"
             elif "SELL" in v41_dec:
-                da_outlay = f"+€{spot_val * v41_vol:,.2f}"
-                settle_cf = f"-€{settled_val * v41_vol:,.2f}" if is_settled and pd.notna(settled_val) else "Pending Gate Closure"
-                gross = f"€{(spot_val - settled_val) * v41_vol:+,.2f}" if is_settled and pd.notna(settled_val) else "Pending"
-                fees = f"-€{v41_vol * 0.51:,.2f}"
+                da_outlay = f"+€{spot_val * v41_mwh:,.2f}"
+                settle_cf = f"-€{settled_val * v41_mwh:,.2f}" if is_settled and pd.notna(settled_val) else "Pending Gate Closure"
+                gross = f"€{(spot_val - settled_val) * v41_mwh:+,.2f}" if is_settled and pd.notna(settled_val) else "Pending"
+                fees = f"-€{v41_mwh * COST_EUR_MWH:,.2f}"
                 net_cf = f"€{v41_pnl:+,.2f}" if is_settled and pd.notna(v41_pnl) else "Pending"
             else:
                 da_outlay, settle_cf, gross, fees, net_cf = "€0.00", "€0.00", "€0.00", "€0.00", "€0.00 (Capital Protected)"
@@ -887,7 +873,7 @@ with tab_unified_ledger:
                             <div class="cf-row"><span>Day-Ahead Outlay / Cash Flow:</span><b>{da_outlay}</b></div>
                             <div class="cf-row"><span>Real-Time Settlement Cash Flow:</span><b>{settle_cf}</b></div>
                             <div class="cf-row"><span>Gross Realized Trading PnL:</span><b>{gross}</b></div>
-                            <div class="cf-row"><span>Exchange Fees (€0.51/MWh):</span><b style="color:#DC2626;">{fees}</b></div>
+                            <div class="cf-row"><span>Costs (€{COST_EUR_MWH:.2f}/MWh):</span><b style="color:#DC2626;">{fees}</b></div>
                             <div class="cf-row total"><span>Net Realized PnL:</span><b style="font-size:13px; color:{'#16A34A' if pd.notna(v41_pnl) and v41_pnl > 0 else ('#DC2626' if pd.notna(v41_pnl) and v41_pnl < 0 else '#64748B')};">{net_cf}</b></div>
                         </div>
                     </div>
@@ -1665,11 +1651,12 @@ with tab_xbid:
                 v41_vol = sub['V4_1_Volume_MW'].mean() if 'V4_1_Volume_MW' in sub.columns else sub.get('V4_Volume_MW', pd.Series(10.0)).mean()
                 
                 # Best Bid / Ask estimation grounded in authentic ML spread & conviction
-                bid_qty = max(0.1, round(abs(v41_vol) * 0.35 + 1.2, 1))
-                bid_price = round(dam_spot + v41_spread - 1.15, 2)
-                ask_price = round(dam_spot + v41_spread + 1.25, 2)
-                ask_qty = max(0.1, round(abs(v41_vol) * 0.45 + 0.9, 1))
-                vwap = round((bid_price * bid_qty + ask_price * ask_qty) / (bid_qty + ask_qty), 2)
+                # Removed fake mathematical UI interpolation
+                bid_price = row.get('xbid_vwap_eur', dam_spot) - 1.0 if not pd.isna(row.get('xbid_vwap_eur')) else dam_spot - 1.0
+                ask_price = row.get('xbid_vwap_eur', dam_spot) + 1.0 if not pd.isna(row.get('xbid_vwap_eur')) else dam_spot + 1.0
+                bid_qty = 0.0
+                ask_qty = 0.0
+                vwap = row.get('xbid_vwap_eur', dam_spot)
                 dam_diff = round(vwap - dam_spot, 2)
                 
                 # Cross-Border Flows & Capacities
@@ -1734,11 +1721,12 @@ with tab_xbid:
                 v41_spread = row.get('V4_1_Predicted_Spread_EUR', row.get('V4_Predicted_Spread_EUR', 0.0))
                 v41_vol = row.get('V4_1_Volume_MW', row.get('V4_Volume_MW', 10.0))
                 
-                bid_qty = max(0.1, round(abs(v41_vol) * 0.35 + 1.0, 1))
-                bid_price = round(dam_spot + v41_spread - 1.15, 2)
-                ask_price = round(dam_spot + v41_spread + 1.25, 2)
-                ask_qty = max(0.1, round(abs(v41_vol) * 0.45 + 0.8, 1))
-                vwap = round((bid_price * bid_qty + ask_price * ask_qty) / (bid_qty + ask_qty), 2)
+                # Removed fake mathematical UI interpolation
+                bid_price = row.get('xbid_vwap_eur', dam_spot) - 1.0 if not pd.isna(row.get('xbid_vwap_eur')) else dam_spot - 1.0
+                ask_price = row.get('xbid_vwap_eur', dam_spot) + 1.0 if not pd.isna(row.get('xbid_vwap_eur')) else dam_spot + 1.0
+                bid_qty = 0.0
+                ask_qty = 0.0
+                vwap = row.get('xbid_vwap_eur', dam_spot)
                 dam_diff = round(vwap - dam_spot, 2)
                 
                 f_de = row.get('flow_de', row.get('scheduled_flow_mw', 0.0))
@@ -1970,8 +1958,16 @@ with tab_xbid:
     ob_col1, ob_col2 = st.columns([1.5, 1])
     with ob_col1:
         st.markdown("#### Live Level-2 Continuous Order Book Ladder (Top 5 Levels)")
-        bids_df = pd.DataFrame(of_snap['bids'])
-        asks_df = pd.DataFrame(of_snap['asks'])
+        bids_list = of_snap.get('bids', [])
+        if not bids_list:
+            bids_list = [{"level": i+1, "orders": 0, "volume_mw": 0.0, "price_eur": 0.0} for i in range(5)]
+        
+        asks_list = of_snap.get('asks', [])
+        if not asks_list:
+            asks_list = [{"level": i+1, "orders": 0, "volume_mw": 0.0, "price_eur": 0.0} for i in range(5)]
+            
+        bids_df = pd.DataFrame(bids_list)
+        asks_df = pd.DataFrame(asks_list)
         
         book_display = pd.DataFrame({
             "Bid Orders": bids_df['orders'],

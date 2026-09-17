@@ -1,0 +1,87 @@
+# ==============================================================================
+# Nurex V4.1 Intraday — configuration
+# Loaded ON TOP of Nurex_V4_2/config.yaml (same database, same risk engine).
+# Only the keys below are overridden.
+# All money in EUR, volumes in MWh per 15-minute quarter, all times UTC unless *_local.
+# ==============================================================================
+
+# --- Trading moment ------------------------------------------------------------
+intraday:
+  # Decision time = delivery start - gate_lead_minutes.
+  # 60 = Nordic cross-border intraday gate closure (confirm Danish local gate closure with the BRP).
+  gate_lead_minutes: 60
+  # Extra leads used ONLY as additional training rows (same quarter, earlier information).
+  # lead_min is a model feature, so the model learns how information decays.
+  train_extra_leads_minutes: [90]
+  # Retraining cadence in the walk-forward replay
+  retrain_every_days: 30
+  min_train_days: 120
+  validation_days: 60
+  # Paper-trading journal: decisions are locked this many minutes before their gate closure
+  lock_ahead_minutes: 20
+
+# --- Point-in-time availability (minutes after the 15-min quarter END) ---------
+# Observed on Energi Data Service 17 Sep 2026: satisfied demand / aFRR volumes of the
+# last quarter appeared within ~7 min, the imbalance price within ~22 min.
+# The values below keep a safety margin; raise them if the BRP/EDS feed is slower.
+availability:
+  imbalance_lag_minutes: 30          # imbalance PRICE (spread) of a quarter
+  fast_state_lag_minutes: 15         # satisfied demand (NRV), dominating direction, aFRR volumes
+  psrn_lag_minutes: 5                # PowerSystemRightNow 1-min data, 15-min buckets
+  forecast_1h_minutes_before: 60     # Forecast1Hour known 60 min before delivery
+  entsoe_actual_lag_minutes: 90      # ENTSO-E actual load / physical flows (after quarter end)
+  entsoe_dayahead_publish_local: "13:00"   # load forecast, schedules, NTC (D-1)
+  entsoe_wsfc_publish_local: "18:00"       # wind & solar day-ahead forecast (D-1)
+  weather_known_before_minutes: 1440 # Open-Meteo previous-day run
+  frequency_lag_minutes: 5           # Fingrid 3-min frequency
+
+# --- Cost model for an intraday position left open into imbalance settlement ---
+# ASSUMPTIONS until the BRP contract / Nord Pool intraday fee sheet is confirmed.
+# The traded price is approximated by the day-ahead price + slippage, because no
+# Nord Pool intraday price history is available yet.
+costs:
+  nordpool_dayahead_eur_mwh: 0.20    # used here as the Nord Pool INTRADAY trading fee (assumption)
+  imbalance_fee_eur_mwh: 1.15
+  brp_service_eur_mwh: 0.50
+  slippage_eur_mwh: 0.50             # half bid-ask of a thin Danish 15-min contract (assumption)
+  stress_multiplier: 2.0
+
+# --- Risk (per quarter, no batches intraday) ------------------------------------
+risk:
+  batch_risk_fraction: 0.10          # stressed loss of ONE quarter <= 10% of collateral
+  max_mwh_per_quarter: 10.0
+  drawdown_window_days: 7            # drawdown guard looks at the equity peak of the last 7 days
+
+decision:
+  margin_grid: [0.0, 2.0, 5.0, 10.0, 20.0, 40.0]
+  prob_grid: [0.45, 0.50, 0.55, 0.60, 0.65, 0.70]
+
+model:
+  direction_deadband_eur: 0.5
+  lgbm:
+    n_estimators: 300
+    learning_rate: 0.03
+    num_leaves: 31
+    min_child_samples: 100
+    subsample: 0.8
+    subsample_freq: 1
+    colsample_bytree: 0.7
+    reg_lambda: 2.0
+    verbose: -1
+    n_jobs: 2
+
+# --- Nord Pool Intraday API (read-only, live market data) ------------------------
+# Credentials: NORDPOOL_ID_USERNAME / NORDPOOL_ID_PASSWORD in Nurex_V4_2/.env
+# Hosts follow Nord Pool's public example (test hosts have ".test."); override if Nord Pool
+# gives you different production addresses.
+intraday_api:
+  sso_url: https://sso.nordpoolgroup.com/connect/token
+  market_data_host: intraday-pmd-api-ws-nordpool.nordpoolgroup.com
+  price_divisor: 100.0        # API prices are EUR cents
+  qty_divisor: 1000.0         # API quantity -> MW (verify with `probe-nordpool`)
+  area_ids: {}                # e.g. {DK1: 1, DK2: 2} only if deliveryAreas is not received
+intraday_data_dir: Nurex_V4_2/data/nordpool_id
+
+models_dir: models_v4_1_intraday
+journal_path: data/v41_journal.sqlite
+reports_dir: results/v4_1_intraday
