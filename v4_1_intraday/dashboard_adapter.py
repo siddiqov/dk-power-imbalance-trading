@@ -133,3 +133,56 @@ def sources_status() -> pd.DataFrame:
     df = df.rename(columns={"n": "rows"})
     df["last"] = pd.to_datetime(df["last"]).dt.strftime("%Y-%m-%d %H:%M")
     return df[["source", "rows", "last"]]
+
+
+# Border label shown in the ledger, per zone, in display order.
+FLOW_BORDERS = {
+    "DK1": [("DE_LU", "DE"), ("NO_2", "NO2"), ("SE_3", "SE3"), ("NL", "NL"), ("GB", "GB"), ("DK_2", "DK2")],
+    "DK2": [("DE_LU", "DE"), ("SE_4", "SE4"), ("DK_1", "DK1")],
+}
+
+
+def day_flows(area: str, date_str: str) -> pd.DataFrame:
+    """Per-quarter cross-border exchange for one local day, from ENTSO-E rows in the store.
+
+    Columns per border: 'sched_<label>' (day-ahead scheduled exchange, MW, positive = export
+    from `area`) and 'dev_<label>' (realised physical flow minus schedule, MW, where published).
+    Authentic values only: a quarter with no published row stays NaN - nothing is filled in.
+    Returns an empty frame when the store is busy, so the ledger still renders.
+    """
+    cfg = config()
+    qs = tu.local_day_quarters(date_str, cfg["local_tz"])
+    if len(qs) == 0:
+        return pd.DataFrame()
+    borders = FLOW_BORDERS.get(area, [])
+    if not borders:
+        return pd.DataFrame()
+    names = [f"{p}:{area}>{b}" for b, _ in borders for p in ("sched", "phys")]
+    try:
+        st = Store(cfg.db_path, read_only=True)
+        try:
+            raw = st.df(
+                "SELECT series, time_utc, value FROM entsoe_series "
+                "WHERE time_utc >= ? AND time_utc <= ? AND series IN ("
+                + ",".join("?" * len(names)) + ")",
+                [qs.min(), qs.max()] + names)
+        finally:
+            st.close()
+    except Exception:
+        return pd.DataFrame()
+    if raw is None or raw.empty:
+        return pd.DataFrame()
+    wide = raw.pivot_table(index="time_utc", columns="series", values="value", aggfunc="last")
+    wide = wide.reindex(pd.DatetimeIndex(qs))
+    out = pd.DataFrame(index=wide.index)
+    for b, label in borders:
+        sc, ph = f"sched:{area}>{b}", f"phys:{area}>{b}"
+        if sc in wide.columns:
+            out[f"sched_{label}"] = wide[sc].values
+            if ph in wide.columns:
+                out[f"dev_{label}"] = wide[ph].values - wide[sc].values
+    if out.empty:
+        return pd.DataFrame()
+    out["time_dk_str"] = (out.index.tz_localize("UTC").tz_convert(cfg["local_tz"])
+                          .strftime("%Y-%m-%d %H:%M"))
+    return out.reset_index(drop=True)

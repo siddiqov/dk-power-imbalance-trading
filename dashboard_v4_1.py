@@ -169,6 +169,59 @@ use_evening_guard = st.sidebar.checkbox("🛡️ Intraday Evening Ramping Guard 
 high_conviction_vol = st.sidebar.slider("High-Conviction Trade Size (MW)", 10, 50, 25)
 standard_vol = st.sidebar.slider("Standard Trade Size (MW)", 5, 20, 10)
 
+# --- Interconnector rule: options to test -------------------------------------
+# Selection only. Nothing here changes a decision: an option is applied to trading
+# only after it wins a replay A/B test and is written into config_v41.yaml.
+IC_CHOICE_PATH = os.path.join("results", "v4_1_intraday", "ic_rule_choice.json")
+
+
+def _load_ic_choice():
+    try:
+        with open(IC_CHOICE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"selected": [], "saved_at": None}
+
+
+_ic_choice = _load_ic_choice()
+_ic_sel = set(_ic_choice.get("selected", []))
+
+with st.sidebar.expander("\U0001f50c Interconnector rule - options to test", expanded=False):
+    st.caption("Selection only: no option changes live decisions. The one you pick is tested "
+               "in the walk-forward replay first, and applied only if it wins.")
+    ic_a = st.checkbox("A - Block the trade when flows contradict", value=("A" in _ic_sel),
+                       help="After the model decides, cancel a BUY when net imports are above a "
+                            "set level (and mirror it for SELL). Human-set threshold.")
+    ic_b = st.checkbox("B - Raise the margin when flows contradict", value=("B" in _ic_sel),
+                       help="Do not cancel: require a bigger expected spread when the flow signal "
+                            "points the other way. Human-set sensitivity.")
+    ic_c = st.checkbox("C - Let the model learn the flows (retrain)", value=("C" in _ic_sel),
+                       help="Add flow ramp / headroom x outage features and recalibrate the "
+                            "probabilities, then retrain. No hand-set numbers.")
+    st.dataframe(pd.DataFrame({
+        "Option": ["A - block", "B - raise margin", "C - model learns"],
+        "Effect on trades": ["Fewer trades only", "Fewer or smaller trades", "Can go either way"],
+        "Who sets the number": ["You", "You", "The data"],
+        "Needs retraining": ["No", "No", "Yes"],
+        "Real data only": ["Yes", "Yes", "Yes"],
+    }), hide_index=True, use_container_width=True)
+    if st.button("Save selection"):
+        try:
+            os.makedirs(os.path.dirname(IC_CHOICE_PATH), exist_ok=True)
+            sel = [k for k, v in (("A", ic_a), ("B", ic_b), ("C", ic_c)) if v]
+            with open(IC_CHOICE_PATH, "w", encoding="utf-8") as f:
+                json.dump({"selected": sel,
+                           "saved_at": pd.Timestamp.now(tz="Europe/Copenhagen").strftime("%Y-%m-%d %H:%M %Z"),
+                           "note": "Selection only - not applied to decisions until a replay A/B test."},
+                          f, indent=2)
+            st.success(f"Saved: {', '.join(sel) if sel else 'none'}")
+        except Exception as exc:
+            st.error(f"Could not save: {exc}")
+    if _ic_choice.get("saved_at"):
+        st.caption(f"Last saved: {', '.join(_ic_choice.get('selected') or ['none'])} "
+                   f"({_ic_choice['saved_at']})")
+
+
 # Load V4.0 and V4.1 Models & Logs
 @st.cache_resource(ttl=300)
 def load_models_and_logs(area):
@@ -511,6 +564,17 @@ def get_v4_1_trading_day_data(area, date_str):
         v41_vols = [0.0] * len(df_matrix)
         v41_pnls = [np.nan] * len(df_matrix)
 
+    # Per-quarter cross-border exchange (ENTSO-E day-ahead schedules + realised deviation).
+    # Replaces the single live snapshot that used to be broadcast across all 96 quarters.
+    try:
+        fl = v41id.day_flows(area, date_str)
+    except Exception:
+        fl = pd.DataFrame()
+    if not fl.empty and key is not None:
+        mf = fl.set_index('time_dk_str')
+        for c in [c for c in mf.columns if c.startswith(('sched_', 'dev_'))]:
+            df_matrix['ic_' + c] = key.map(mf[c]).astype(float)
+
     df_matrix['V4_1_Pred_Imb_EUR'] = df_matrix['spot_price_eur'] + df_matrix['V4_1_Predicted_Spread_EUR']
     df_matrix['V4_1_Decision'] = v41_decisions
     df_matrix['V4_1_Volume_MW'] = v41_vols
@@ -681,6 +745,19 @@ with tab_unified_ledger:
         st.warning("No live trading data available for selected date.")
     else:
         # Pre-generate Master-Detail Accordion HTML
+        ic_labels = [lbl for _b, lbl in v41id.FLOW_BORDERS.get(selected_area, [])
+                     if f'ic_sched_{lbl}' in df_day.columns]
+        ic_ths = "".join(
+            f'<th draggable="true" title="Scheduled exchange {selected_area} to {lbl} (MW, + = export). '
+            f'Hover a cell for the realised deviation." style="background-color:#334155;">'
+            f'<div class="col-header-wrap"><span class="col-title">{selected_area}\u2192{lbl}</span>'
+            f'<button type="button" class="btn-col-copy" title="Copy Column" '
+            f'onclick="copySingleColumn(this, event)">\U0001f4cb</button></div></th>'
+            for lbl in ic_labels)
+        if not ic_labels:
+            ic_ths = ('<th class="no-drag" title="ENTSO-E schedules not available for this day">'
+                      '<div class="col-header-wrap"><span class="col-title">Flows</span></div></th>')
+
         rows_html = []
         for i, row in df_day.iterrows():
             row_idx = int(i)
@@ -698,6 +775,20 @@ with tab_unified_ledger:
             f_gb = row.get('flow_gb', 0.0)
             f_sb = row.get('flow_great_belt', 0.0)
             
+            # Interconnectors (authentic per-quarter schedules; blank when not published)
+            ic_tds = ""
+            for _lbl in ic_labels:
+                _v = row.get(f'ic_sched_{_lbl}', np.nan)
+                _d = row.get(f'ic_dev_{_lbl}', np.nan)
+                _txt = f"{_v:+,.0f}" if pd.notna(_v) else "--"
+                _ttl = (f"scheduled {_v:+,.0f} MW" if pd.notna(_v) else "not published")
+                if pd.notna(_d):
+                    _ttl += f", realised {_d:+,.0f} MW vs schedule"
+                _col = "#0F766E" if (pd.notna(_v) and _v > 0) else ("#B91C1C" if pd.notna(_v) else "#94A3B8")
+                ic_tds += f'<td title="{_ttl}" style="color:{_col};">{_txt}</td>'
+            if not ic_labels:
+                ic_tds = '<td style="color:#94A3B8;">--</td>'
+
             # V4.0
             v4_dec = str(row.get('V4_Decision', '⚪ HOLD'))
             v4_spread = row.get('V4_Predicted_Spread_EUR', 0.0)
@@ -757,7 +848,7 @@ with tab_unified_ledger:
                 <td style="font-weight:700; color:#0F172A;">{q_label}</td>
                 <td>€{spot_val:.2f}</td>
                 <td>€{de_spot_val:.2f}</td>
-                <td style="font-weight:600;">{f_de:+.0f} MW</td>
+                {ic_tds}
                 
                 <!-- V4.0 Column Group -->
                 <td style="font-weight:600; color:#0284C7;">€{v4_imb:.2f}</td>
@@ -774,7 +865,7 @@ with tab_unified_ledger:
                 <td>{status_badge}</td>
             </tr>
             <tr class="drawer-row" id="drawer-{row_idx}" style="display: none;">
-                <td colspan="14" class="drawer-cell">
+                <td colspan="{13 + max(1, len(ic_labels))}" class="drawer-cell">
                     <div class="drawer-banner">
                         <span>⚡ <b>AUDIT BREAKDOWN:</b> {q_label} &mdash; V4.1 Institutional High-Alpha Engine</span>
                         <span><b>Delivery:</b> {time_val} CEST &bull; <b>MARI / PICASSO / SMARD / XBID Grounded</b></span>
@@ -894,7 +985,8 @@ with tab_unified_ledger:
           }}
           table.master-table {{
             min-width: 100%;
-            width: max-content;
+            width: 100%;
+            table-layout: fixed;
             border-collapse: separate;
             border-spacing: 0;
             font-size: 11px;
@@ -903,7 +995,9 @@ with tab_unified_ledger:
           table.master-table th {{
             background-color: #1E293B;
             color: #F8FAFC;
-            padding: 7px 8px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding: 7px 4px;
             font-weight: 600;
             font-size: 10px;
             letter-spacing: 0.01em;
@@ -1022,11 +1116,13 @@ with tab_unified_ledger:
             background-color: #F1F5F9;
           }}
           table.master-table td {{
-            padding: 5px 3px;
+            padding: 5px 2px;
             white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
             color: #0F172A;
             font-weight: 500;
-            font-size: 10.5px;
+            font-size: 10px;
             text-align: center;
           }}
           .chevron-cell {{
@@ -1075,6 +1171,9 @@ with tab_unified_ledger:
             display: table-row !important;
           }}
           td.drawer-cell {{
+            white-space: normal;
+            overflow: visible;
+            text-overflow: clip;
             padding: 10px 12px !important;
             border-bottom: 2px solid #CBD5E1;
             background-color: #F8FAFC !important;
@@ -1195,7 +1294,7 @@ with tab_unified_ledger:
                   <th draggable="true" title="Trading Quarter & Delivery Time"><div class="col-header-wrap"><span class="col-title">Quarter</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   <th draggable="true" title="DK Day-Ahead Spot Price"><div class="col-header-wrap"><span class="col-title">DK Spot</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   <th draggable="true" title="German Day-Ahead Spot Price"><div class="col-header-wrap"><span class="col-title">DE Spot</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
-                  <th draggable="true" title="DE to DK Scheduled Exchange Flow"><div class="col-header-wrap"><span class="col-title">DE➔DK</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
+                  {ic_ths}
                   <th draggable="true" title="V4.0 Predicted Imbalance Price (€) [Spot + Spread]" style="background-color:#0284C7;"><div class="col-header-wrap"><span class="col-title">V4.0 Pred</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   <th draggable="true" title="V4.0 Champion Trading Decision" style="background-color:#0284C7;"><div class="col-header-wrap"><span class="col-title">V4.0 Pos</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   <th draggable="true" title="V4.0 Realized Trading PnL (€)" style="background-color:#0284C7;"><div class="col-header-wrap"><span class="col-title">V4.0 PnL</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
