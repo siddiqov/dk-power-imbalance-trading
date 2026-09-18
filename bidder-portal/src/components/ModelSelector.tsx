@@ -2,6 +2,12 @@ import { Cpu } from 'lucide-react';
 
 export const AVAILABLE_MODELS = [
   {
+    id: 'V4.1-HighAlpha',
+    shortName: 'V4.1 High-Alpha',
+    fullName: 'V4.1 High-Alpha Meta (Microstructure & Cross-Border Balancing)',
+    badge: 'Alpha',
+  },
+  {
     id: 'V3.2-FlowAware',
     shortName: 'V3.2 Flow-Aware',
     fullName: 'V3.2 Flow-Aware Meta (Multi-Horizon Flow & Physical Circuit Breaker)',

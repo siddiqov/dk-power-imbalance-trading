@@ -28,7 +28,7 @@ function getInitialParams(): {
     const zone = params.get('zone')?.toUpperCase();
     const start = params.get('start') || undefined;
     const end = params.get('end') || undefined;
-    const model = params.get('model') || 'V3.2-FlowAware';
+    const model = params.get('model') || 'V4.1-HighAlpha';
     const modeParam = params.get('mode')?.toUpperCase() === 'DAY_AHEAD_D1' ? 'DAY_AHEAD_D1' : 'INTRADAY_D0';
 
     // Only unlock the full UI when manually navigating to /all or /today
@@ -52,7 +52,7 @@ function getInitialParams(): {
       isAllScreen: false,
       initialMode: 'live',
       initialZone: 'DK1',
-      initialModel: 'V3.2-FlowAware',
+      initialModel: 'V4.1-HighAlpha',
       initialMarketMode: 'INTRADAY_D0',
     };
   }
@@ -99,7 +99,7 @@ function App() {
           ? url.searchParams.set('zone', 'DK2')
           : url.searchParams.delete('zone');
 
-        if (isAllScreen && model && model !== 'V3.2-FlowAware') {
+        if (isAllScreen && model && model !== 'V4.1-HighAlpha') {
           url.searchParams.set('model', model);
         } else {
           url.searchParams.delete('model');
@@ -151,7 +151,7 @@ function App() {
       effectiveMode,
       undefined,
       dateRange,
-      isAllScreen ? selectedModel : 'V3.2-FlowAware',
+      isAllScreen ? selectedModel : 'V4.1-HighAlpha',
       isAllScreen ? marketMode : 'INTRADAY_D0'
     );
 
@@ -169,7 +169,7 @@ function App() {
               : effectiveDate
           }
           isDayAhead={isAllScreen && marketMode === 'DAY_AHEAD_D1'}
-          selectedModel={isAllScreen ? selectedModel : 'V3.2-FlowAware'}
+          selectedModel={isAllScreen ? selectedModel : 'V4.1-HighAlpha'}
           isAllScreen={isAllScreen}
         />
 
@@ -177,7 +177,7 @@ function App() {
             BASE URL  /  →  CUSTOMER VIEW
             Clean: countdown timer + next 8 quarters only.
             No ViewToggle, no RangeFilterBar, no filters.
-            Strictly V3.2-FlowAware + INTRADAY_D0.
+            Strictly V4.1-HighAlpha + INTRADAY_D0.
             ════════════════════════════════════════════════════ */}
         {!isAllScreen && (
           <>

@@ -132,7 +132,7 @@ export function usePredictions(
   viewMode: PortalViewMode = 'live',
   targetDate?: string,
   dateTimeRange?: DateTimeRange,
-  selectedModel: string = 'V3.2-FlowAware',
+  selectedModel: string = 'V4.1-HighAlpha',
   selectedMarketMode: string = 'INTRADAY_D0'
 ) {
   const [predictions, setPredictions] = useState<QuarterPrediction[]>([]);
@@ -152,8 +152,8 @@ export function usePredictions(
         .select('*')
         .eq('price_area', priceArea);
 
-      // Model filtering: For root customer portal, strictly filter for 'V3.2-FlowAware'
-      const modelToQuery = (viewMode === 'live' || !selectedModel) ? 'V3.2-FlowAware' : selectedModel;
+      // Model filtering: For root customer portal, strictly filter for 'V4.1-HighAlpha'
+      const modelToQuery = (viewMode === 'live' || !selectedModel) ? 'V4.1-HighAlpha' : selectedModel;
       if (modelToQuery !== 'ALL') {
         query = query.eq('model_name', modelToQuery);
       }

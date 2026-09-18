@@ -68,6 +68,13 @@ models_v4_1/*.pkl
 !models_v3_2/
 !models_v3_2/*.pkl
 
+# Track trained V4.1 champion models for remote runner sync
+!models/models_v4_1/
+!models/models_v4_1/*.pkl
+!models_v4_1/
+!models_v4_1/*.pkl
+
+
 
 # Runtime SQLite Database WAL & lock files
 *.db-wal

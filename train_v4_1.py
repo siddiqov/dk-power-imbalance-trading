@@ -25,8 +25,10 @@ from catboost import CatBoostRegressor
 from sklearn.ensemble import RandomForestRegressor
 
 sys.path.append(os.path.abspath('.'))
-from src.feature_engineering_v4_1 import V41GridFeatureEngine
-from train_v3_2_flow_aware import fetch_real_v3_1_baseline_scores
+try:
+    from train_v3_2_flow_aware import fetch_real_v3_1_baseline_scores
+except Exception:
+    fetch_real_v3_1_baseline_scores = None
 
 class StackingSuperEnsembleV41:
     """
