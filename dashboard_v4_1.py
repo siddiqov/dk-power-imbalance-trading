@@ -41,6 +41,69 @@ from src.data_retrieval_v4 import fetch_energinet_true_forecast_error, fetch_ene
 from src.nordpool_umm_scraper import fetch_live_umms
 from src.dmi_client import get_dmi_zone_weather_telemetry
 
+# --- V4.1 patch: resilient authentic Day-Ahead spot retrieval -------------------
+# The V2 generator queries EDS with a 10 s timeout, a string PriceArea filter and no
+# retry; on failure it falls back to ImbalancePrice, which only covers settled
+# quarters, so the first future quarter raises "Authentic Day-Ahead Spot price
+# missing". This override retries EDS properly and, if EDS is still short, reads the
+# same authentic EDS rows already collected into the V4.1 point-in-time store.
+# No synthetic or interpolated values are ever produced. V3.2/V4.0 are unaffected:
+# only this dashboard's class attribute is replaced.
+def _v41_fetch_day_ahead_96_spot_prices(self, start_dt, end_dt):
+    import json as _json
+    import requests as _rq
+    import pandas as _pd
+
+    spot = {}
+    params = {
+        "filter": _json.dumps({"PriceArea": [self.price_area]}),
+        "start": start_dt.strftime("%Y-%m-%dT00:00"),
+        "end": (start_dt + timedelta(days=1)).strftime("%Y-%m-%dT00:00"),
+        "sort": "TimeDK ASC",
+        "limit": 400,
+    }
+    for attempt in range(3):
+        try:
+            res = _rq.get("https://api.energidataservice.dk/dataset/DayAheadPrices",
+                          params=params, timeout=60).json()
+            for r in res.get("records", []):
+                val = r.get("DayAheadPriceEUR")
+                if r.get("PriceArea") == self.price_area and _pd.notnull(val):
+                    key = _pd.to_datetime(r["TimeDK"]).strftime("%Y-%m-%d %H:%M")
+                    spot[key] = float(val)
+            if len(spot) >= 96:
+                return spot
+        except Exception as exc:
+            print(f"  [V4.1] DayAheadPrices attempt {attempt + 1}/3 failed: {exc}")
+
+    try:
+        import duckdb as _dd
+        store = os.path.join("Nurex_V4_2", "data", "nurex42.duckdb")
+        if os.path.exists(store):
+            t0 = _pd.Timestamp(start_dt).tz_localize("Europe/Copenhagen").tz_convert("UTC").tz_localize(None)
+            t1 = _pd.Timestamp(start_dt + timedelta(days=1)).tz_localize("Europe/Copenhagen").tz_convert("UTC").tz_localize(None)
+            con = _dd.connect(store, read_only=True)
+            try:
+                rows = con.execute(
+                    "SELECT time_utc, price_eur FROM dayahead "
+                    "WHERE area = ? AND time_utc >= ? AND time_utc < ? AND source LIKE 'EDS:%'",
+                    [self.price_area, t0, t1]).fetchall()
+            finally:
+                con.close()
+            for ts, price in rows:
+                if price is None:
+                    continue
+                key = _pd.Timestamp(ts).tz_localize("UTC").tz_convert("Europe/Copenhagen").strftime("%Y-%m-%d %H:%M")
+                spot.setdefault(key, float(price))
+            print(f"  [V4.1] Day-Ahead spot: {len(rows)} authentic EDS rows read from the V4.1 store.")
+    except Exception as exc:
+        print(f"  [V4.1] V4.1 store lookup failed: {exc}")
+
+    return spot
+
+
+TournamentTableGenerator._fetch_day_ahead_96_spot_prices = _v41_fetch_day_ahead_96_spot_prices
+
 COST_EUR_MWH = v41id.cost_per_mwh()  # fee + imbalance fee + BRP + slippage (config_v41.yaml)
 
 st.set_page_config(
