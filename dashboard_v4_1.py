@@ -567,7 +567,7 @@ def get_v4_1_trading_day_data(area, date_str):
     # Per-quarter cross-border exchange (ENTSO-E day-ahead schedules + realised deviation).
     # Replaces the single live snapshot that used to be broadcast across all 96 quarters.
     try:
-        fl = v41id.day_flows(area, date_str)
+        fl = v41id.day_flows(area, date_str) if hasattr(v41id, 'day_flows') else pd.DataFrame()
     except Exception:
         fl = pd.DataFrame()
     if not fl.empty and key is not None:
@@ -745,7 +745,10 @@ with tab_unified_ledger:
         st.warning("No live trading data available for selected date.")
     else:
         # Pre-generate Master-Detail Accordion HTML
-        ic_labels = [lbl for _b, lbl in v41id.FLOW_BORDERS.get(selected_area, [])
+        # getattr: a Streamlit rerun keeps the module imported at startup, so after an
+        # upgrade of v4_1_intraday the new names may not exist until the app is restarted.
+        _fb = getattr(v41id, 'FLOW_BORDERS', {})
+        ic_labels = [lbl for _b, lbl in _fb.get(selected_area, [])
                      if f'ic_sched_{lbl}' in df_day.columns]
         ic_ths = "".join(
             f'<th draggable="true" title="Scheduled exchange {selected_area} to {lbl} (MW, + = export). '
