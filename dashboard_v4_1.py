@@ -11,8 +11,8 @@ load_dotenv()
 # 2. European Balancing Platforms: MARI (mFRR) & PICASSO (aFRR) Merit Order Energy Activation
 # 3. SMARD.de (Bundesnetzagentur): German Grid Imbalance & Residual Load Integration
 # 4. Nord Pool XBID: Level-2 Continuous Order Flow Microstructure & Volume Skewness Meter
-# 5. Multi-Generation Side-by-Side Unified Comparative Ledger (V3.2 vs V4.0 vs V4.1)
-# 6. Full Quantitative Tournament Backtest (V3.1 vs V3.2 vs V4.0 vs V4.1)
+# 5. Side-by-Side Unified Comparative Ledger (V4.0 vs V4.1)
+# 6. Quantitative Tournament Backtest (V4.0 vs V4.1)
 # ==============================================================================
 
 import os
@@ -47,7 +47,7 @@ from src.dmi_client import get_dmi_zone_weather_telemetry
 # quarters, so the first future quarter raises "Authentic Day-Ahead Spot price
 # missing". This override retries EDS properly and, if EDS is still short, reads the
 # same authentic EDS rows already collected into the V4.1 point-in-time store.
-# No synthetic or interpolated values are ever produced. V3.2/V4.0 are unaffected:
+# No synthetic or interpolated values are ever produced. The shared V2/V3 module is unaffected:
 # only this dashboard's class attribute is replaced.
 def _v41_fetch_day_ahead_96_spot_prices(self, start_dt, end_dt):
     import json as _json
@@ -150,9 +150,7 @@ strategy_mode = st.sidebar.selectbox(
     "Trading Strategy Engine",
     [
         "V4.1 Institutional High-Alpha (Balancing + SMARD + XBID)",
-        "V4.0 Full-Grid Champion (Grid Search Tuned)",
-        "V3.2 Flow-Aware Meta Model",
-        "V3.1 BiLSTM Baseline"
+        "V4.0 Full-Grid Champion (Grid Search Tuned)"
     ],
     index=0
 )
@@ -301,7 +299,7 @@ def get_dynamic_price_cap(area, current_date_str):
     except Exception:
         return 223.40
 
-# --- LOAD TRADING DAY DATA MATRIX (V3.1, V3.2, V4.0, and V4.1) ---
+# --- LOAD TRADING DAY DATA MATRIX (V4.0 and V4.1) ---
 @st.cache_data(ttl=180)
 def get_v4_1_trading_day_data(area, date_str):
     fe41 = V41FeatureEngine(price_area=area)
@@ -318,7 +316,7 @@ def get_v4_1_trading_day_data(area, date_str):
     if target_df.empty:
         return pd.DataFrame()
 
-    # V3.1 Baseline Signals
+    # Baseline ledger scaffold (V3.1 engine) - supplies the 96-quarter trade frame
     strat_v31 = V31CommercialStrategyEngine(price_area=area)
     res_v31 = strat_v31.evaluate_trading_ledger(target_df, model_name="Transfer-BiLSTM", market_mode="INTRADAY_D0")
     df_trades = pd.DataFrame(res_v31.get("trades", []))
@@ -415,95 +413,7 @@ def get_v4_1_trading_day_data(area, date_str):
     if 'V4_Spread_Volatility' not in df_matrix.columns:
         df_matrix['V4_Spread_Volatility'] = df_matrix['spot_price_eur'].rolling(12, min_periods=1).std().fillna(0)
 
-    # --- MODEL 1: V3.1 BiLSTM Baseline ---
-    v31_acts, v31_vols, v31_pnls = [], [], []
-    for _, row in df_matrix.iterrows():
-        act = str(row.get('action', 'HOLD')).upper()
-        if "BUY" in act: act = "BUY"
-        elif "SELL" in act: act = "SELL"
-        else: act = "HOLD"
-        vol = float(row.get('volume_mwh', 0.0)) if act != "HOLD" else 0.0
-        
-        if row['is_settled']:
-            spread = row['actual_spread_eur']
-            mwh_q = vol * 0.25  # quarterly product: MW / 4 = MWh
-            fees = mwh_q * COST_EUR_MWH
-            pnl = (spread * mwh_q - fees) if act == "BUY" else (-spread * mwh_q - fees) if act == "SELL" else 0.0
-        else:
-            pnl = np.nan
-            
-        v31_acts.append("🟢 BUY" if act == "BUY" else ("🔴 SELL" if act == "SELL" else "⚪ HOLD"))
-        v31_vols.append(vol)
-        v31_pnls.append(pnl)
-
-    df_matrix['V3_1_Decision'] = v31_acts
-    df_matrix['V3_1_Volume_MW'] = v31_vols
-    df_matrix['PnL_V3_1'] = v31_pnls
-    df_matrix['V3_1_Pred_Imb_EUR'] = df_matrix['spot_price_eur'] + df_matrix['V3_1_BiLSTM_Score']
-
-    # --- MODEL 2: V3.2 Flow-Aware Meta Model ---
-    v32_model_path = f"models_v3_2/v3_2_meta_model_flow_aware_{area}.pkl"
-    if not os.path.exists(v32_model_path):
-        v32_model_path = f"models_v3_2/v3_2_meta_model_{area}.pkl"
-        
-    v32_decisions, v32_vols, v32_pnls = [], [], []
-    if os.path.exists(v32_model_path):
-        try:
-            m_v32 = joblib.load(v32_model_path)
-            feat_v32 = pd.DataFrame({
-                'V3_1_BiLSTM_Score': df_matrix['V3_1_BiLSTM_Score'],
-                'V3_2_Wind_Error_Meteo': df_matrix.get('wind_forecast_error_mw', 0.0),
-                'V3_2_DK_DE_Spread_Volatility': df_matrix['spot_price_eur'].rolling(4, min_periods=1).std().fillna(5.0),
-                'hour_of_day': df_matrix['hour_of_day'],
-                'quarter_of_day': df_matrix['quarter_of_day'],
-                'scheduled_flow_mw': df_matrix.get('scheduled_flow_mw', df_matrix.get('flow_continent', 0.0))
-            })
-            preds_v32 = m_v32.predict(feat_v32.fillna(0))
-        except Exception:
-            preds_v32 = df_matrix['V3_1_BiLSTM_Score'].values
-    else:
-        preds_v32 = df_matrix['V3_1_BiLSTM_Score'].values
-
-    df_matrix['V3_2_Meta_Score'] = preds_v32
-    df_matrix['V3_2_Pred_Imb_EUR'] = df_matrix['spot_price_eur'] + preds_v32
-
-    for i, row in df_matrix.iterrows():
-        s32 = preds_v32[i]
-        v31_a = v31_acts[i]
-        spot = row['spot_price_eur']
-        cap = row['Dynamic_Cap_EUR']
-        v31_v = v31_vols[i]
-        
-        if s32 > 2.0:
-            act32, dec32, vol32 = "BUY", "🟢 BUY", (v31_v if v31_v > 0 else 10.0)
-        elif s32 < -2.0:
-            act32, dec32, vol32 = "SELL", "🔴 SELL", (v31_v if v31_v > 0 else 10.0)
-        else:
-            act32, dec32, vol32 = "HOLD", "⚪ HOLD", 0.0
-
-        if s32 < -2.0 and "BUY" in v31_a:
-            dec32, act32, vol32 = "🔥 CRASH PRED (SELL)", "SELL", 25.0
-
-        if spot > cap and act32 == "BUY":
-            dec32, act32, vol32 = "🛑 C.BREAKER (HOLD)", "HOLD", 0.0
-
-        if row['is_settled']:
-            spread = row['actual_spread_eur']
-            mwh_q = vol32 * 0.25  # quarterly product: MW / 4 = MWh
-            fees = mwh_q * COST_EUR_MWH
-            pnl32 = (spread * mwh_q - fees) if act32 == "BUY" else (-spread * mwh_q - fees) if act32 == "SELL" else 0.0
-        else:
-            pnl32 = np.nan
-
-        v32_decisions.append(dec32)
-        v32_vols.append(vol32)
-        v32_pnls.append(pnl32)
-
-    df_matrix['V3_2_Decision'] = v32_decisions
-    df_matrix['V3_2_Volume_MW'] = v32_vols
-    df_matrix['PnL_V3_2'] = v32_pnls
-
-    # --- MODEL 3: V4.0 Full-Grid Model ---
+    # --- MODEL 1: V4.0 Full-Grid Model ---
     if bundle_v4 and "model" in bundle_v4:
         m4 = bundle_v4["model"]
         cols4 = bundle_v4.get("feature_cols", [])
@@ -608,9 +518,6 @@ def get_v4_1_trading_day_data(area, date_str):
 
     # Comparative Alpha Metrics (Settled Intervals)
     df_matrix['Alpha_V41_vs_V40'] = df_matrix['PnL_V4_1'] - df_matrix['PnL_V4_0']
-    df_matrix['Alpha_V41_vs_V32'] = df_matrix['PnL_V4_1'] - df_matrix['PnL_V3_2']
-    df_matrix['Alpha_V41_vs_V31'] = df_matrix['PnL_V4_1'] - df_matrix['PnL_V3_1']
-    df_matrix['Alpha_V4_vs_V32'] = df_matrix['PnL_V4_0'] - df_matrix['PnL_V3_2']
 
     return df_matrix
 
@@ -623,23 +530,15 @@ st.markdown("### Real-Time MARI/PICASSO Balancing • SMARD German Grid • XBID
 settled_mask = df_day['is_settled'] if ('is_settled' in df_day.columns) else pd.Series([False]*len(df_day))
 v41_realized = float(np.nansum(df_day['PnL_V4_1'])) if not df_day.empty else 0.0
 v40_realized = df_day.loc[settled_mask, 'PnL_V4_0'].sum() if not df_day.empty else 0.0
-v32_realized = df_day.loc[settled_mask, 'PnL_V3_2'].sum() if not df_day.empty else 0.0
-v31_realized = df_day.loc[settled_mask, 'PnL_V3_1'].sum() if not df_day.empty else 0.0
-
 alpha_41_v40 = v41_realized - v40_realized
-alpha_41_v32 = v41_realized - v32_realized
 open_vol_41 = df_day.loc[~settled_mask, 'V4_1_Volume_MW'].sum() if not df_day.empty else 0.0
 
-m1, m2, m3, m4, m5 = st.columns(5)
+m1, m2, m3 = st.columns(3)
 with m1:
     st.metric("V4.1 Realized PnL (Settled)", f"€ {v41_realized:,.2f}", f"{alpha_41_v40:+,.2f} vs V4.0")
 with m2:
-    st.metric("V4.0 Realized PnL (Settled)", f"€ {v40_realized:,.2f}", f"{v40_realized - v32_realized:+,.2f} vs V3.2")
+    st.metric("V4.0 Realized PnL (Settled)", f"€ {v40_realized:,.2f}", "Full-Grid Champion")
 with m3:
-    st.metric("V3.2 Realized PnL (Settled)", f"€ {v32_realized:,.2f}", f"{v32_realized - v31_realized:+,.2f} vs V3.1")
-with m4:
-    st.metric("V3.1 Realized PnL (Settled)", f"€ {v31_realized:,.2f}", "BiLSTM Baseline")
-with m5:
     st.metric("Pending Exposure (V4.1)", f"{open_vol_41:.0f} MW", f"{len(df_day) - settled_mask.sum()} Quarters Pending")
 
 # --- MAIN NAVIGATION TABS ---
@@ -772,9 +671,9 @@ with tab_balancing:
 # TAB 3: 96-QUARTER MULTI-MODEL UNIFIED COMPARATIVE LEDGER
 # ----------------------------------------------------------------------
 with tab_unified_ledger:
-    st.subheader("96-Quarter Intraday Trading Ledger: V3.2 vs V4.0 vs V4.1 Side-by-Side")
+    st.subheader("96-Quarter Intraday Trading Ledger: V4.0 vs V4.1 Side-by-Side")
     st.markdown("""
-    **Authentic Multi-Generation Audit:** Side-by-side comparison across **V3.2 (Flow-Aware)**, **V4.0 (Full-Grid Champion)**, and **V4.1 (Institutional High-Alpha)**.
+    **Authentic Multi-Generation Audit:** Side-by-side comparison across **V4.0 (Full-Grid Champion)** and **V4.1 (Institutional High-Alpha)**.
     Click on any row to open the full interactive breakdown drawer.
     """)
 
@@ -799,13 +698,6 @@ with tab_unified_ledger:
             f_gb = row.get('flow_gb', 0.0)
             f_sb = row.get('flow_great_belt', 0.0)
             
-            # V3.2
-            v32_dec = str(row.get('V3_2_Decision', '⚪ HOLD'))
-            v32_spread = row.get('V3_2_Meta_Score', 0.0)
-            v32_imb = spot_val + v32_spread
-            v32_vol = row.get('V3_2_Volume_MW', 0.0)
-            v32_pnl = row.get('PnL_V3_2', np.nan)
-            
             # V4.0
             v4_dec = str(row.get('V4_Decision', '⚪ HOLD'))
             v4_spread = row.get('V4_Predicted_Spread_EUR', 0.0)
@@ -827,13 +719,9 @@ with tab_unified_ledger:
             settled_val = row.get('actual_settled_val', np.nan)
             
             # Badges
-            dec32_class = "badge-buy" if "BUY" in v32_dec else ("badge-sell" if "SELL" in v32_dec else "badge-hold")
             dec4_class = "badge-buy" if "BUY" in v4_dec else ("badge-sell" if "SELL" in v4_dec else "badge-hold")
             dec41_class = "badge-buy" if "BUY" in v41_dec else ("badge-sell" if "SELL" in v41_dec else "badge-hold")
             status_badge = '<span class="badge badge-settled">🟢 Settled</span>' if is_settled else '<span class="badge badge-pending">🟡 Pending</span>'
-            
-            pnl32_text = f"€{v32_pnl:+,.2f}" if pd.notna(v32_pnl) else "--"
-            pnl32_class = "pnl-pos" if (pd.notna(v32_pnl) and v32_pnl > 0) else ("pnl-neg" if (pd.notna(v32_pnl) and v32_pnl < 0) else "pnl-zero")
             
             pnl4_text = f"€{v4_pnl:+,.2f}" if pd.notna(v4_pnl) else "--"
             pnl4_class = "pnl-pos" if (pd.notna(v4_pnl) and v4_pnl > 0) else ("pnl-neg" if (pd.notna(v4_pnl) and v4_pnl < 0) else "pnl-zero")
@@ -871,11 +759,6 @@ with tab_unified_ledger:
                 <td>€{de_spot_val:.2f}</td>
                 <td style="font-weight:600;">{f_de:+.0f} MW</td>
                 
-                <!-- V3.2 Column Group -->
-                <td style="font-weight:600; color:#1E293B;">€{v32_imb:.2f}</td>
-                <td><span class="badge {dec32_class}">{v32_dec}</span></td>
-                <td class="{pnl32_class}">{pnl32_text}</td>
-                
                 <!-- V4.0 Column Group -->
                 <td style="font-weight:600; color:#0284C7;">€{v4_imb:.2f}</td>
                 <td><span class="badge {dec4_class}">{v4_dec}</span></td>
@@ -891,7 +774,7 @@ with tab_unified_ledger:
                 <td>{status_badge}</td>
             </tr>
             <tr class="drawer-row" id="drawer-{row_idx}" style="display: none;">
-                <td colspan="17" class="drawer-cell">
+                <td colspan="14" class="drawer-cell">
                     <div class="drawer-banner">
                         <span>⚡ <b>AUDIT BREAKDOWN:</b> {q_label} &mdash; V4.1 Institutional High-Alpha Engine</span>
                         <span><b>Delivery:</b> {time_val} CEST &bull; <b>MARI / PICASSO / SMARD / XBID Grounded</b></span>
@@ -913,21 +796,20 @@ with tab_unified_ledger:
                                 </tbody>
                             </table>
                         </div>
-                        <!-- Card 2: 🧠 3-Generation Comparative Signals -->
+                        <!-- Card 2: 🧠 Comparative Signals -->
                         <div class="drawer-card">
-                            <h5>🧠 3-Generation Comparative Model Audit</h5>
+                            <h5>🧠 Comparative Model Audit (V4.0 vs V4.1)</h5>
                             <table class="sub-table">
                                 <thead>
                                     <tr><th>Model</th><th style="text-align:right;">Pred Imb</th><th style="text-align:center;">Decision</th><th style="text-align:right;">PnL (€)</th></tr>
                                 </thead>
                                 <tbody>
-                                    <tr><td><b>V3.2 Flow-Aware</b></td><td style="text-align:right;">€{v32_imb:.2f}</td><td style="text-align:center;">{v32_dec}</td><td style="text-align:right;">{pnl32_text}</td></tr>
                                     <tr><td><b>V4.0 Full-Grid</b></td><td style="text-align:right;">€{v4_imb:.2f}</td><td style="text-align:center;">{v4_dec}</td><td style="text-align:right;">{pnl4_text}</td></tr>
                                     <tr class="highlight-champ"><td><b>V4.1 High-Alpha</b></td><td style="text-align:right;">€{v41_imb:.2f}</td><td style="text-align:center;">{v41_dec}</td><td style="text-align:right;">{pnl41_text}</td></tr>
                                 </tbody>
                             </table>
                             <div class="audit-notice">
-                                <b>Alpha Outperformance:</b> vs V4.0: <b>{('€' + f'{v41_pnl - v4_pnl:+,.2f}') if pd.notna(v41_pnl) and pd.notna(v4_pnl) else '--'}</b> | vs V3.2: <b>{('€' + f'{v41_pnl - v32_pnl:+,.2f}') if pd.notna(v41_pnl) and pd.notna(v32_pnl) else '--'}</b>
+                                <b>Alpha Outperformance:</b> vs V4.0: <b>{('€' + f'{v41_pnl - v4_pnl:+,.2f}') if pd.notna(v41_pnl) and pd.notna(v4_pnl) else '--'}</b>
                             </div>
                         </div>
                         <!-- Card 3: 💰 Commercial Cash Flow & PnL Ledger -->
@@ -1314,9 +1196,6 @@ with tab_unified_ledger:
                   <th draggable="true" title="DK Day-Ahead Spot Price"><div class="col-header-wrap"><span class="col-title">DK Spot</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   <th draggable="true" title="German Day-Ahead Spot Price"><div class="col-header-wrap"><span class="col-title">DE Spot</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   <th draggable="true" title="DE to DK Scheduled Exchange Flow"><div class="col-header-wrap"><span class="col-title">DE➔DK</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
-                  <th draggable="true" title="V3.2 Predicted Imbalance Price (€) [Spot + Spread]" style="background-color:#334155;"><div class="col-header-wrap"><span class="col-title">V3.2 Pred</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
-                  <th draggable="true" title="V3.2 Meta Model Trading Decision" style="background-color:#334155;"><div class="col-header-wrap"><span class="col-title">V3.2 Pos</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
-                  <th draggable="true" title="V3.2 Realized Trading PnL (€)" style="background-color:#334155;"><div class="col-header-wrap"><span class="col-title">V3.2 PnL</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   <th draggable="true" title="V4.0 Predicted Imbalance Price (€) [Spot + Spread]" style="background-color:#0284C7;"><div class="col-header-wrap"><span class="col-title">V4.0 Pred</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   <th draggable="true" title="V4.0 Champion Trading Decision" style="background-color:#0284C7;"><div class="col-header-wrap"><span class="col-title">V4.0 Pos</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   <th draggable="true" title="V4.0 Realized Trading PnL (€)" style="background-color:#0284C7;"><div class="col-header-wrap"><span class="col-title">V4.0 PnL</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
@@ -2094,33 +1973,28 @@ with tab_gridsearch:
 # ----------------------------------------------------------------------
 with tab_tournament:
     st.subheader("Multi-Generation Head-to-Head Quantitative Tournament")
-    st.markdown("Comparing **V3.1 (BiLSTM)** vs **V3.2 (Flow-Aware)** vs **V4.0 (Full-Grid)** vs **V4.1 (High-Alpha European Balancing)**")
+    st.markdown("Comparing **V4.0 (Full-Grid)** vs **V4.1 (High-Alpha European Balancing)**")
 
     if not df_day.empty:
         settled_sub = df_day[settled_mask] if settled_mask.any() else df_day
-        v31_tot = settled_sub['PnL_V3_1'].dropna().sum()
-        v32_tot = settled_sub['PnL_V3_2'].dropna().sum()
         v40_tot = settled_sub['PnL_V4_0'].dropna().sum()
         v41_tot = settled_sub['PnL_V4_1'].dropna().sum()
 
-        v31_hit = (np.sign(settled_sub['V3_1_BiLSTM_Score']) == np.sign(settled_sub['actual_spread_eur'])).mean() * 100 if len(settled_sub) > 0 else 50.0
         v40_hit = (np.sign(settled_sub['V4_Predicted_Spread_EUR']) == np.sign(settled_sub['actual_spread_eur'])).mean() * 100 if len(settled_sub) > 0 else 50.0
         v41_hit = (np.sign(settled_sub['V4_1_Predicted_Spread_EUR']) == np.sign(settled_sub['actual_spread_eur'])).mean() * 100 if len(settled_sub) > 0 else 50.0
 
         comp_df = pd.DataFrame({
-            "Generation": ["V3.1 BiLSTM Baseline", "V3.2 Flow-Aware Meta", "V4.0 Full-Grid Champion", "V4.1 High-Alpha Champion"],
-            "Realized PnL (Settled)": [f"€ {v31_tot:,.2f}", f"€ {v32_tot:,.2f}", f"€ {v40_tot:,.2f}", f"€ {v41_tot:,.2f}"],
-            "Directional Hit Rate": [f"{v31_hit:.1f}%", "68.5%", f"{v40_hit:.1f}%", f"{v41_hit:.1f}%"],
-            "Key Information Layer": ["Price & Volume BiLSTM", "German Flow + Dynamic Cap", "8-Cable Interconnector Grid", "MARI / PICASSO + SMARD + XBID Microstructure"],
-            "Crash Protection": ["None", "800 MW German Flow", "8-Cable Headroom + Surplus Guard", "MARI Downward Merit Order + XBID Skew Shield"]
+            "Generation": ["V4.0 Full-Grid Champion", "V4.1 High-Alpha Champion"],
+            "Realized PnL (Settled)": [f"€ {v40_tot:,.2f}", f"€ {v41_tot:,.2f}"],
+            "Directional Hit Rate": [f"{v40_hit:.1f}%", f"{v41_hit:.1f}%"],
+            "Key Information Layer": ["8-Cable Interconnector Grid", "MARI / PICASSO + SMARD + XBID Microstructure"],
+            "Crash Protection": ["8-Cable Headroom + Surplus Guard", "MARI Downward Merit Order + XBID Skew Shield"]
         })
         st.dataframe(comp_df, use_container_width=True, hide_index=True)
         
         # Cumulative PnL Curves
         if len(settled_sub) > 1:
             cum_pnl = settled_sub[['time_dk']].copy()
-            cum_pnl['V3.1 BiLSTM'] = settled_sub['PnL_V3_1'].fillna(0).cumsum()
-            cum_pnl['V3.2 Flow-Aware'] = settled_sub['PnL_V3_2'].fillna(0).cumsum()
             cum_pnl['V4.0 Full-Grid'] = settled_sub['PnL_V4_0'].fillna(0).cumsum()
             cum_pnl['V4.1 High-Alpha'] = settled_sub['PnL_V4_1'].fillna(0).cumsum()
             cum_pnl_melt = cum_pnl.melt('time_dk', var_name='Model Generation', value_name='Cumulative Realized PnL (€)')
@@ -2129,8 +2003,8 @@ with tab_tournament:
                 x='time_dk:N',
                 y='Cumulative Realized PnL (€):Q',
                 color=alt.Color('Model Generation:N', scale=alt.Scale(
-                    domain=['V3.1 BiLSTM', 'V3.2 Flow-Aware', 'V4.0 Full-Grid', 'V4.1 High-Alpha'],
-                    range=['#94A3B8', '#F59E0B', '#0284C7', '#00C851']
+                    domain=['V4.0 Full-Grid', 'V4.1 High-Alpha'],
+                    range=['#0284C7', '#00C851']
                 ))
             ).properties(title="Cumulative Realized Trading PnL on Settled Intervals (€)", height=350)
             st.altair_chart(c_pnl, use_container_width=True)
