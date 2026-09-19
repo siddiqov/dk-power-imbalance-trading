@@ -915,14 +915,30 @@ with tab_unified_ledger:
         _fb = getattr(v41id, 'FLOW_BORDERS', {})
         ic_labels = [lbl for _b, lbl in _fb.get(selected_area, [])
                      if f'ic_sched_{lbl}' in df_day.columns]
-        ic_ths = "".join(
-            f'<th draggable="true" title="Scheduled exchange {selected_area} to {lbl} (MW, + = export). '
-            f'Hover a cell for the realised deviation." style="background-color:#334155;">'
+        # Hidden detail headers for individual borders
+        ic_detail_ths = "".join(
+            f'<th class="flow-detail-col" draggable="true" title="Scheduled exchange {selected_area} to {lbl} (MW, + = export). '
+            f'Hover a cell for the realised deviation." style="background-color:#334155; display:none;">'
             f'<div class="col-header-wrap"><span class="col-title">{selected_area}\u2192{lbl}</span>'
             f'<button type="button" class="btn-col-copy" title="Copy Column" '
             f'onclick="copySingleColumn(this, event)">\U0001f4cb</button></div></th>'
             for lbl in ic_labels)
-        if not ic_labels:
+        # Net Flow summary header (always visible) with +/- toggle button
+        if ic_labels:
+            ic_ths = (
+                '<th draggable="true" title="Net scheduled flow sum across all borders (MW). '
+                'Click + to expand individual border columns." style="background-color:#334155;">'
+                '<div class="col-header-wrap"><span class="col-title">Net Flow</span>'
+                '<button type="button" class="btn-flow-toggle" id="btnFlowToggle" '
+                'title="Expand individual border columns" '
+                'onclick="toggleFlowCols(event)">'
+                '<svg class="flow-icon-plus" width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="8" y1="2" x2="8" y2="14"></line><line x1="2" y1="8" x2="14" y2="8"></line></svg>'
+                '<svg class="flow-icon-minus" width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="2" y1="8" x2="14" y2="8"></line></svg>'
+                '</button></div></th>'
+                + ic_detail_ths)
+            if (df_day['_flow_status'].iloc[0] if '_flow_status' in df_day.columns and len(df_day) else '') == 'stale':
+                st.caption('\u2139\ufe0f Cross-border flows served from the last good read - the V4.2 store was busy.')
+        else:
             _fs = (str(df_day['_flow_status'].iloc[0]) if '_flow_status' in df_day.columns and len(df_day)
                    else FLOW_STATUS.get((selected_area, date_str_selected), 'unknown'))
             if not hasattr(v41id, '_flows_status'):
@@ -940,8 +956,6 @@ with tab_unified_ledger:
             ic_ths = ('<th class="no-drag" title="' + _why + '">'
                       '<div class="col-header-wrap"><span class="col-title">Flows</span></div></th>')
             st.caption(f'\u26a0\ufe0f Cross-border columns unavailable: {_why}.')
-        elif (df_day['_flow_status'].iloc[0] if '_flow_status' in df_day.columns and len(df_day) else '') == 'stale':
-            st.caption('\u2139\ufe0f Cross-border flows served from the last good read - the V4.2 store was busy.')
 
         rows_html = []
         for i, row in df_day.iterrows():
@@ -962,7 +976,10 @@ with tab_unified_ledger:
             f_sb = exp_pos(row.get('flow_great_belt', 0.0))
             
             # Interconnectors (authentic per-quarter schedules; blank when not published)
-            ic_tds = ""
+            # Build hidden detail cells AND compute net flow sum
+            ic_detail_tds = ""
+            ic_net_sum = 0.0
+            ic_has_any = False
             for _lbl in ic_labels:
                 _v = row.get(f'ic_sched_{_lbl}', np.nan)
                 _d = row.get(f'ic_dev_{_lbl}', np.nan)
@@ -971,8 +988,19 @@ with tab_unified_ledger:
                 if pd.notna(_d):
                     _ttl += f", realised {_d:+,.0f} MW vs schedule"
                 _col = "#0F766E" if (pd.notna(_v) and _v > 0) else ("#B91C1C" if pd.notna(_v) else "#94A3B8")
-                ic_tds += f'<td title="{_ttl}" style="color:{_col};">{_txt}</td>'
-            if not ic_labels:
+                ic_detail_tds += f'<td class="flow-detail-col" title="{_ttl}" style="color:{_col}; display:none;">{_txt}</td>'
+                if pd.notna(_v):
+                    ic_net_sum += float(_v)
+                    ic_has_any = True
+            # Net Flow summary cell (always visible)
+            if ic_labels:
+                _net_col = "#0F766E" if ic_net_sum > 0 else ("#B91C1C" if ic_net_sum < 0 else "#64748B")
+                _net_txt = f"{ic_net_sum:+,.0f}" if ic_has_any else "--"
+                ic_tds = (f'<td title="Net scheduled flow across all borders: {ic_net_sum:+,.0f} MW. '
+                          f'Click + to expand individual borders." '
+                          f'style="color:{_net_col}; font-weight:700;">{_net_txt}</td>'
+                          + ic_detail_tds)
+            else:
                 ic_tds = '<td style="color:#94A3B8;">--</td>'
 
             # V4.0
@@ -1059,7 +1087,7 @@ with tab_unified_ledger:
                 <td>{status_badge}</td>
             </tr>
             <tr class="drawer-row" id="drawer-{row_idx}" style="display: none;">
-                <td colspan="{(13 if show_v40 else 10) + max(1, len(ic_labels))}" class="drawer-cell">
+                <td colspan="{(13 if show_v40 else 10) + 1}" class="drawer-cell">
                     <div class="drawer-banner">
                         <span>⚡ <b>AUDIT BREAKDOWN:</b> {q_label} &mdash; V4.1 Institutional High-Alpha Engine</span>
                         <span><b>Delivery:</b> {time_val} CEST &bull; <b>MARI / PICASSO / SMARD / XBID Grounded</b></span>
@@ -1468,6 +1496,56 @@ with tab_unified_ledger:
             border-radius: 4px;
             border: 1px solid #E2E8F0;
           }}
+          /* Collapsible flow detail columns */
+          .flow-detail-col {{
+            display: none;
+          }}
+          .flow-detail-col.expanded {{
+            display: table-cell;
+          }}
+          .btn-flow-toggle {{
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 17px;
+            height: 17px;
+            margin-left: 4px;
+            padding: 0;
+            border: 1px solid #475569;
+            border-radius: 4px;
+            background-color: #0F172A;
+            color: #38BDF8;
+            cursor: pointer;
+            transition: all 0.15s ease-in-out;
+            vertical-align: middle;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+          }}
+          .btn-flow-toggle:hover {{
+            background-color: #0284C7;
+            border-color: #38BDF8;
+            color: #FFFFFF;
+            box-shadow: 0 0 6px rgba(56, 189, 248, 0.4);
+            transform: scale(1.05);
+          }}
+          .btn-flow-toggle.expanded {{
+            background-color: #0F766E;
+            border-color: #2DD4BF;
+            color: #FFFFFF;
+            box-shadow: 0 0 6px rgba(45, 212, 191, 0.35);
+          }}
+          .btn-flow-toggle svg {{
+            display: block;
+            pointer-events: none;
+          }}
+          .btn-flow-toggle .flow-icon-minus {{
+            display: none;
+          }}
+          .btn-flow-toggle.expanded .flow-icon-plus {{
+            display: none;
+          }}
+          .btn-flow-toggle.expanded .flow-icon-minus {{
+            display: block;
+          }}
         </style>
         </head>
         <body>
@@ -1635,6 +1713,47 @@ with tab_unified_ledger:
                 }});
               }});
             }})();
+
+            // Toggle individual border flow columns visibility
+            function toggleFlowCols(e) {{
+              if (e) {{ e.stopPropagation(); e.preventDefault(); }}
+              var allFlowCols = document.querySelectorAll('.flow-detail-col');
+              var btn = document.getElementById('btnFlowToggle');
+              if (!allFlowCols.length) return;
+              var isExpanded = allFlowCols[0].classList.contains('expanded');
+              allFlowCols.forEach(function(el) {{
+                if (isExpanded) {{
+                  el.classList.remove('expanded');
+                  el.style.display = 'none';
+                }} else {{
+                  el.classList.add('expanded');
+                  el.style.display = 'table-cell';
+                }}
+              }});
+              if (btn) {{
+                if (isExpanded) {{
+                  btn.classList.remove('expanded');
+                  btn.title = 'Expand individual border columns';
+                }} else {{
+                  btn.classList.add('expanded');
+                  btn.title = 'Collapse individual border columns';
+                }}
+              }}
+              updateDrawerColspans();
+            }}
+
+            // Dynamically update drawer row colspans based on visible columns
+            function updateDrawerColspans() {{
+              var headerRow = document.querySelector('#masterTable thead tr');
+              if (!headerRow) return;
+              var visibleCols = 0;
+              for (var i = 0; i < headerRow.children.length; i++) {{
+                if (headerRow.children[i].style.display !== 'none') visibleCols++;
+              }}
+              document.querySelectorAll('tr.drawer-row td.drawer-cell').forEach(function(td) {{
+                td.setAttribute('colspan', visibleCols);
+              }});
+            }}
 
             function toggleRow(idx) {{
               var drawer = document.getElementById('drawer-' + idx);
