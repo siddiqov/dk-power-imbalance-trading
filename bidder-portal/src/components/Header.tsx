@@ -19,7 +19,7 @@ export function Header({
   viewMode = 'live',
   dateStr,
   isDayAhead = false,
-  selectedModel = 'V3.2-FlowAware',
+  selectedModel = 'V4.1-HighAlpha',
   isAllScreen = false,
 }: HeaderProps) {
   return (
@@ -40,7 +40,11 @@ export function Header({
             </h1>
           </div>
           <p className="text-slate-400 font-medium text-xs sm:text-sm mt-1">
-            {selectedModel === 'V3.2-FlowAware' ? 'V3.2 Flow-Aware Meta' : selectedModel} Model —{' '}
+            {selectedModel === 'V4.1-HighAlpha'
+              ? 'V4.1 High-Alpha Meta'
+              : selectedModel === 'V3.2-FlowAware'
+              ? 'V3.2 Flow-Aware Meta'
+              : selectedModel} Model —{' '}
             {viewMode === 'range'
               ? `Custom Range (${dateStr})`
               : 'Next 8 Tradeable Quarters'}

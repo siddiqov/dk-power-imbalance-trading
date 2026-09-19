@@ -21,6 +21,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger(__name__)
 
 ALL_MODELS = [
+    "V4.1-HighAlpha",
     "V3.2-FlowAware",
     "Transformer-TFT",
     "Stacking-MetaEnsemble",

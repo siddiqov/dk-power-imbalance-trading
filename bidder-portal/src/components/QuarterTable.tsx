@@ -40,7 +40,7 @@ const BASE_COLUMNS: ColumnDef[] = [
   {
     key: 'pred_imbalance',
     label: 'Pred Imb (€)',
-    tooltip: 'V3.2 Flow-Aware Meta model forecast for the final Energinet imbalance settlement price (€/MWh).',
+    tooltip: 'V4.1 High-Alpha Meta model forecast for the final Energinet imbalance settlement price (€/MWh).',
     align: 'right',
   },
   {

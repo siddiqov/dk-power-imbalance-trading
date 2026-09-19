@@ -1,0 +1,145 @@
+{
+  "area": "DK2",
+  "completed_at": "2026-09-16T10:27:59.752325",
+  "dataset_rows": 2150,
+  "feature_count": 59,
+  "champion": {
+    "config_id": 1,
+    "family": "StackingSuperEnsemble",
+    "params": {
+      "meta": "RidgeCV_Positive_Blender",
+      "base": [
+        "LightGBM",
+        "CatBoost",
+        "RandomForest"
+      ]
+    },
+    "cv_mae": 6.2935,
+    "cv_rmse": 42.6724,
+    "cv_directional_accuracy_pct": 67.65
+  },
+  "all_configs": [
+    {
+      "config_id": 1,
+      "family": "StackingSuperEnsemble",
+      "params": {
+        "meta": "RidgeCV_Positive_Blender",
+        "base": [
+          "LightGBM",
+          "CatBoost",
+          "RandomForest"
+        ]
+      },
+      "cv_mae": 6.2935,
+      "cv_rmse": 42.6724,
+      "cv_directional_accuracy_pct": 67.65
+    },
+    {
+      "config_id": 2,
+      "family": "RandomForest_Tuned",
+      "params": {
+        "n_estimators": 160,
+        "max_depth": 9,
+        "min_samples_split": 4,
+        "random_state": 42,
+        "n_jobs": -1
+      },
+      "cv_mae": 6.3281,
+      "cv_rmse": 42.9467,
+      "cv_directional_accuracy_pct": 68.04
+    },
+    {
+      "config_id": 3,
+      "family": "LightGBM_Tuned",
+      "params": {
+        "n_estimators": 220,
+        "max_depth": 7,
+        "learning_rate": 0.04,
+        "subsample": 0.85,
+        "reg_lambda": 2.5,
+        "random_state": 42,
+        "n_jobs": -1,
+        "verbose": -1
+      },
+      "cv_mae": 8.5373,
+      "cv_rmse": 51.447,
+      "cv_directional_accuracy_pct": 67.65
+    },
+    {
+      "config_id": 4,
+      "family": "CatBoost_Tuned",
+      "params": {
+        "iterations": 220,
+        "depth": 6,
+        "learning_rate": 0.04,
+        "l2_leaf_reg": 3.5,
+        "random_seed": 42,
+        "verbose": 0
+      },
+      "cv_mae": 10.0985,
+      "cv_rmse": 53.7525,
+      "cv_directional_accuracy_pct": 68.21
+    }
+  ],
+  "feature_importance_ranking": {
+    "DK1_Foundation_Prior": 45.45,
+    "V3_1_BiLSTM_Score": 28.84,
+    "total_load": 5.69,
+    "load_surprise_mw": 5.15,
+    "xbid_micro_price_eur": 3.83,
+    "xbid_vwap_eur": 3.5,
+    "balancing_spread_delta_eur": 3.42,
+    "spread_lag1": 1.57,
+    "spread_rolling_mean4": 0.91,
+    "net_load_balance_mw": 0.6,
+    "spread_rolling_std4": 0.28,
+    "spread_lag2": 0.23,
+    "net_system_surplus_mw": 0.13,
+    "flow_continent": 0.09,
+    "german_spillover_pressure_ratio": 0.06,
+    "congestion_ratio_continent": 0.04,
+    "congestion_ratio_nordic": 0.03,
+    "renewable_penetration": 0.03,
+    "quarter_of_day": 0.02,
+    "headroom_continent_mw": 0.02,
+    "afrr_net_activation_mw": 0.01,
+    "system_surplus_velocity": 0.01,
+    "wind_forecast_error_mw": 0.01,
+    "wind_forecast_revision_mw": 0.01,
+    "afrr_trend_1h": 0.01,
+    "headroom_nordic_mw": 0.01,
+    "net_exchange": 0.01,
+    "afrr_gross_volume_mw": 0.01,
+    "day_of_week": 0.01,
+    "headroom_great_belt_mw": 0.01,
+    "cos_hour": 0.01,
+    "sin_hour": 0.01,
+    "flow_nordic": 0.0,
+    "flow_great_belt": 0.0,
+    "hour_of_day": 0.0,
+    "total_wind": 0.0,
+    "solar": 0.0,
+    "xbid_order_flow_skew": 0.0,
+    "order_flow_skew_ema4": 0.0,
+    "is_peak_hour": 0.0,
+    "order_flow_momentum": 0.0,
+    "dk_de_price_spread": 0.0,
+    "flow_gb": 0.0,
+    "mfrr_net_acceleration": 0.0,
+    "mfrr_down_velocity": 0.0,
+    "mfrr_up_velocity": 0.0,
+    "smard_res_delta_1h": 0.0,
+    "dk_de_spread_velocity": 0.0,
+    "german_load_mw": 0.0,
+    "german_generation_mw": 0.0,
+    "german_system_balance_mw": 0.0,
+    "total_balancing_pressure_mw": 0.0,
+    "afrr_marginal_price_eur": 0.0,
+    "mfrr_net_activation_mw": 0.0,
+    "mfrr_activated_up_mw": 0.0,
+    "mfrr_activated_down_mw": 0.0,
+    "mfrr_balancing_spread": 0.0,
+    "smard_res_delta_15m": 0.0,
+    "is_severely_congested": 0.0
+  }
+}

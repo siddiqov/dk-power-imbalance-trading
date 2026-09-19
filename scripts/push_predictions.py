@@ -101,8 +101,11 @@ def push_predictions(
                 # Step 2: Loop through requested models and market modes
                 for mode in market_modes:
                     for model_name in models:
-                        logger.info(f"  Evaluating [{mode}] model={model_name}...")
-                        if model_name == "V3.2-FlowAware":
+                        if model_name == "V4.1-HighAlpha":
+                            from src.v4_1_inference_engine import V41InferenceEngine
+                            v41_engine = V41InferenceEngine(price_area=area)
+                            trades = v41_engine.evaluate_96q_schedule(df, current_date)
+                        elif model_name == "V3.2-FlowAware":
                             from src.v3_2_inference_engine import V32InferenceEngine
                             v32_engine = V32InferenceEngine(price_area=area)
                             trades = v32_engine.evaluate_96q_schedule(df, current_date)
