@@ -847,6 +847,10 @@ with tab_balancing:
             st.metric("🇩🇰 MARI mFRR Net Activation", f"{bal_snap['mfrr_net_mw']:+,.0f} MW", f"Up: {bal_snap['mfrr_up_mw']:.0f} | Down: {bal_snap['mfrr_down_mw']:.0f} MW")
         with bk4:
             st.metric("🇪🇺 aFRR Marginal Price", f"€ {bal_snap['afrr_marginal_price_eur']:.2f}/MWh", f"Total: {bal_snap['total_balancing_pressure_mw']:.0f} MW")
+        if 'fallback' in str(smard_live.get('status', '')).lower() or 'offline' in str(smard_live.get('status', '')).lower():
+            st.warning("SMARD.de generation/demand figures above are a placeholder, not live: "
+                       "SMARD stopped publishing the German consumption series this reads (its own feed "
+                       "has not updated since January 2024). MARI/PICASSO figures are unaffected and live.")
     except Exception:
         pass
 
