@@ -234,11 +234,12 @@ selected_date = st.sidebar.date_input("Trading Date", value=default_date)
 date_str_selected = selected_date.strftime("%Y-%m-%d")
 
 # 3. Risk & Execution Parameters
-st.sidebar.markdown("### 🛡️ Risk & Execution Controls")
-use_circuit_breaker = st.sidebar.checkbox("95th Pct Dynamic Circuit Breaker", value=True)
-crash_protection_enabled = st.sidebar.checkbox("Physical Crash Protection Trigger", value=True)
-# Evening ramping guard removed 2026-09-19: it only ever adjusted the legacy V4.0
-# comparison column's simulated size/cap, never V4.1's real trading decisions.
+# Circuit breaker, crash protection, and evening ramping guard checkboxes removed 2026-09-19:
+# all three only ever adjusted the legacy V4.0 comparison column's simulated decisions, never
+# V4.1's real trading decisions. Circuit breaker and crash protection now always apply (their
+# previous default), matching what the legacy column always showed.
+use_circuit_breaker = True
+crash_protection_enabled = True
 
 # V4.1 decides a quarter only when expected edge clears a margin AND the direction probability
 # clears a minimum. Those two numbers were chosen on the validation window during training.
@@ -255,12 +256,12 @@ risk_limits_on = st.sidebar.checkbox(
     help="Stops trading for the rest of the day once the daily loss limit is hit, and halves or halts size on drawdown - the same overlay the replay uses. Off shows raw signal decisions, which will NOT match backtest results.")
 
 # Trade size scales with how much of the account's collateral a batch of quarters may risk
-# (batch_risk_fraction in config.yaml, default 0.1). This checkbox raises that to 0.2 for new,
-# not-yet-decided quarters only - locked/settled quarters keep the size they were actually
-# decided and traded at.
+# (batch_risk_fraction in config.yaml). Default is now the bigger 0.2 budget for new,
+# not-yet-decided quarters; uncheck to go back to the original 0.1 - locked/settled quarters
+# keep the size they were actually decided and traded at either way.
 bigger_size_on = st.sidebar.checkbox(
-    "Bigger trade sizes (risk budget 0.1 → 0.2)", value=False,
-    help="Doubles the share of collateral each batch of quarters may risk, roughly doubling trade size on new decisions. Bigger trades also mean bigger possible losses.")
+    "Bigger trade sizes (risk budget 0.1 → 0.2)", value=True,
+    help="On by default: doubles the share of collateral each batch of quarters may risk, roughly doubling trade size on new decisions. Bigger trades also mean bigger possible losses. Uncheck to use the smaller 0.1 budget instead.")
 if bigger_size_on:
     st.sidebar.caption("⚠️ Bigger trades also mean bigger possible losses.")
 
