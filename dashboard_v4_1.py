@@ -62,6 +62,36 @@ from src.data_retrieval_v4 import fetch_energinet_true_forecast_error, fetch_ene
 from src.nordpool_umm_scraper import fetch_live_umms
 from src.dmi_client import get_dmi_zone_weather_telemetry
 
+# --- LIVE-FEED CACHING ----------------------------------------------------------
+# These external calls used to re-fetch on every full rerun (every click, every tab -
+# Streamlit runs the whole script each time, even the tabs you are not looking at),
+# which is most of why "Refresh now" felt slow. A short cache lets a refresh reuse
+# data that is only seconds old instead of waiting on several external HTTP calls again.
+@st.cache_data(ttl=45, show_spinner=False)
+def _live_balancing_state(area):
+    return get_latest_balancing_state(area)
+
+@st.cache_data(ttl=45, show_spinner=False)
+def _live_smard_telemetry():
+    """Adapter: maps SMARD's real field names to what the Balancing tab displays."""
+    t = get_german_system_balance_telemetry()
+    return {
+        "generation_mw": t.get("german_generation_mw", 0.0),
+        "consumption_mw": t.get("german_load_mw", 0.0),
+        "residual_load_mw": t.get("german_system_balance_mw", 0.0),
+        "system_state": t.get("balancing_regime", "UNKNOWN"),
+        "source": t.get("source", "SMARD.de"),
+        "status": t.get("status", ""),
+    }
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _live_dmi_telemetry(area):
+    return get_dmi_zone_weather_telemetry(area)
+
+@st.cache_data(ttl=45, show_spinner=False)
+def _live_energinet_frequency(limit=5):
+    return fetch_energinet_system_frequency(limit=limit)
+
 # --- V4.1 patch: resilient authentic Day-Ahead spot retrieval -------------------
 # The V2 generator queries EDS with a 10 s timeout, a string PriceArea filter and no
 # retry; on failure it falls back to ImbalancePrice, which only covers settled
@@ -403,9 +433,11 @@ with st.sidebar.expander("ℹ️ Data Source Architecture Details", expanded=Fal
     * **Data:** Scheduled cross-border commercial exchanges and day-ahead market couplings.
     
     ---
-    ### 6. Open-Meteo Weather Forecast API
-    * **Endpoint:** `previous-runs-api.open-meteo.com/v1/forecast`
-    * **Data:** Quarter-hour DK1/DK2 wind, solar, and weather forecasts used by the V4.1 model.
+    ### 6. Weather: DMI (live display) + Open-Meteo (V4.1 model input)
+    * **DMI endpoint:** `opendataapi.dmi.dk/v2/metObs` - the Balancing tab's live wind/temp readout
+      reads the latest observation from the nearest Danish station in real time.
+    * **Open-Meteo endpoint:** `previous-runs-api.open-meteo.com/v1/forecast` - quarter-hour
+      DK1/DK2 wind, solar, and weather forecasts that actually feed the V4.1 model.
     
     ---
     ### 7. Nord Pool REMIT UMM & DuckDB Paper-Trading Journal
@@ -537,7 +569,7 @@ def get_v4_1_trading_day_data(area, date_str, threshold_key='validated', risk_li
 
     # Ingest Live Grid Telemetry
     try:
-        grid_df = fetch_energinet_system_frequency(limit=5)
+        grid_df = _live_energinet_frequency(5)
         if not grid_df.empty:
             latest = grid_df.iloc[0]
             if area == 'DK1':
@@ -803,8 +835,8 @@ with tab_balancing:
 
     # Live Balancing & SMARD KPIs
     try:
-        smard_live = get_smard_live_imbalance()
-        bal_snap = get_latest_balancing_state(selected_area)
+        smard_live = _live_smard_telemetry()
+        bal_snap = _live_balancing_state(selected_area)
         
         bk1, bk2, bk3, bk4 = st.columns(4)
         with bk1:
@@ -822,7 +854,7 @@ with tab_balancing:
 
     # DMI Weather Telemetry
     try:
-        dmi_telemetry = get_dmi_zone_weather_telemetry(selected_area)
+        dmi_telemetry = _live_dmi_telemetry(selected_area)
         dw1, dw2, dw3 = st.columns([1.5, 1, 1])
         with dw1:
             st.info(f"🇩🇰 **Official Danish Met Feed:** {dmi_telemetry['source']} (`{selected_area}` Ground & Offshore Network)")

@@ -20,10 +20,15 @@ DMI_BASE_URL = "https://opendataapi.dmi.dk/v2/metObs"
 DK1_STATIONS = ['06056', '06030', '06080', '06041', '06051', '06058'] # Blaavand, Thyboroen, Esbjerg, Skagen, etc.
 DK2_STATIONS = ['06180', '06184', '06190', '06170', '06188', '06193'] # Drogden, Copenhagen, Bornholm, Roenne, etc.
 
-def fetch_dmi_observations(parameter_id="wind_speed", limit=100, station_id=None):
+def fetch_dmi_observations(parameter_id="wind_speed", limit=100, station_id=None, period=None):
     """
-    Fetches official real-time meteorological observations directly from DMI Open Data API.
-    
+    Fetches official meteorological observations directly from DMI Open Data API.
+
+    Without `period="latest"` and a `station_id`, DMI returns an unfiltered slice of its
+    whole archive - any station, any date (observed data going back decades) - so a plain
+    limited query is not actually "live". Pass `period="latest"` with a specific `station_id`
+    to get that station's most recent reading.
+
     Supported Parameters:
       - 'wind_speed' : Wind speed in m/s
       - 'wind_dir'   : Wind direction in degrees
@@ -37,6 +42,8 @@ def fetch_dmi_observations(parameter_id="wind_speed", limit=100, station_id=None
     }
     if station_id:
         params["stationId"] = station_id
+    if period:
+        params["period"] = period
 
     try:
         response = requests.get(url, params=params, timeout=10)
@@ -67,36 +74,41 @@ def fetch_dmi_observations(parameter_id="wind_speed", limit=100, station_id=None
         logger.error(f"Error fetching DMI observations for {parameter_id}: {e}")
         return pd.DataFrame()
 
+def _latest_regional_reading(parameter_id, target_stations, max_stations_tried=4):
+    """Most recent value (`period=latest`) from the first responsive station in the list.
+
+    An unfiltered query returns DMI's whole archive (any station, any date back to the
+    1950s) - `period=latest` + a specific `station_id` is what actually makes this current.
+    """
+    for station_id in target_stations[:max_stations_tried]:
+        df = fetch_dmi_observations(parameter_id=parameter_id, limit=1, station_id=station_id,
+                                     period="latest")
+        if not df.empty:
+            return float(df.iloc[0]["value"]), station_id, df.iloc[0].get("observed_utc")
+    return None, None, None
+
+
 def get_dmi_zone_weather_telemetry(area="DK1"):
     """
-    Returns authentic aggregated DMI meteorological conditions (Wind Speed, Direction, Temp)
-    tailored for the specified Danish bidding zone (DK1 or DK2).
+    Returns the most recent DMI observation (Wind Speed, Temp) from a representative
+    station for the specified Danish bidding zone (DK1 or DK2).
     """
     try:
-        df_wind = fetch_dmi_observations(parameter_id="wind_speed", limit=50)
-        df_temp = fetch_dmi_observations(parameter_id="temp_dry", limit=50)
-        
         target_stations = DK1_STATIONS if area == "DK1" else DK2_STATIONS
-        
-        # Filter by regional stations if available, otherwise take national average
-        if not df_wind.empty:
-            regional_wind = df_wind[df_wind['station_id'].isin(target_stations)]
-            avg_wind = regional_wind['value'].mean() if not regional_wind.empty else df_wind['value'].mean()
-        else:
-            avg_wind = 7.5 # Sensible Danish coastal default (m/s)
-
-        if not df_temp.empty:
-            regional_temp = df_temp[df_temp['station_id'].isin(target_stations)]
-            avg_temp = regional_temp['value'].mean() if not regional_temp.empty else df_temp['value'].mean()
-        else:
-            avg_temp = 12.0
+        wind, wind_station, wind_obs = _latest_regional_reading("wind_speed", target_stations)
+        temp, temp_station, temp_obs = _latest_regional_reading("temp_dry", target_stations)
+        avg_wind = wind if wind is not None else 7.5    # Sensible Danish coastal default (m/s)
+        avg_temp = temp if temp is not None else 12.0
 
         return {
             "source": "Danish Meteorological Institute (DMI)",
             "area": area,
             "avg_wind_speed_ms": round(float(avg_wind), 2),
             "avg_temp_c": round(float(avg_temp), 1),
-            "status": "Authentic DMI Live Feed Active"
+            "station_id": wind_station or temp_station,
+            "observed_utc": str(wind_obs or temp_obs) if (wind_obs or temp_obs) else None,
+            "status": "Authentic DMI Live Feed Active" if (wind is not None or temp is not None)
+                      else "Offline Fallback (no station responded)"
         }
     except Exception as e:
         logger.error(f"Error computing DMI zone weather: {e}")
