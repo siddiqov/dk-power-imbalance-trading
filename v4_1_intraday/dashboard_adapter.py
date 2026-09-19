@@ -7,6 +7,7 @@ The dashboard only displays; every V4.1 number comes from here:
 """
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 
@@ -27,6 +28,23 @@ def config():
     if "cfg" not in _CACHE:
         _CACHE["cfg"] = S.load()
     return _CACHE["cfg"]
+
+
+def _cfg_with_risk_override(risk_overrides: dict | None = None):
+    """config(), or a copy with `risk` fields overridden for a what-if sizing view.
+
+    Used for the "bigger trade sizes" checkbox: a bigger `batch_risk_fraction` sizes new
+    decisions larger, without touching the shared cached config (other tabs, and the
+    scheduled paper-trading cycle, which runs as its own process, are unaffected) and
+    without touching already-locked/settled quarters, which keep the size they were
+    actually decided at.
+    """
+    cfg = config()
+    if not risk_overrides:
+        return cfg
+    raw = copy.deepcopy(cfg.raw)
+    raw["risk"].update(risk_overrides)
+    return type(cfg)(raw)
 
 
 def cost_per_mwh() -> float:
@@ -118,14 +136,17 @@ def decision_params(area: str, level: str = "validated") -> dict | None:
     return out
 
 
-def day_decisions(area: str, date_str: str, now=None, params: dict | None = None) -> pd.DataFrame:
+def day_decisions(area: str, date_str: str, now=None, params: dict | None = None,
+                  risk_overrides: dict | None = None) -> pd.DataFrame:
     """One row per local delivery quarter of `date_str`, keyed by local 'YYYY-MM-DD HH:MM'.
 
-    `params` overrides the model's validated thresholds (a what-if view). The paper-trading
-    journal is then left alone: locked decisions were taken at the real thresholds, so pasting
-    them over a what-if run would mix the two.
+    `params` overrides the model's validated thresholds (a what-if view). `risk_overrides`
+    overrides `risk` config fields (e.g. a bigger `batch_risk_fraction` for bigger trade
+    sizes) for this call only. The paper-trading journal is then left alone: locked decisions
+    were taken at the real thresholds and real sizing, so pasting them over a what-if run
+    would mix the two.
     """
-    cfg = config()
+    cfg = _cfg_with_risk_override(risk_overrides)
     b = load_bundle(area)
     if b is None:
         return pd.DataFrame()
@@ -168,6 +189,102 @@ def day_decisions(area: str, date_str: str, now=None, params: dict | None = None
         jp = k.map(j["pnl_eur"])
         out.loc[jp[jp.notna()].index, "pnl_eur"] = jp[jp.notna()]
         out["mwh"] = out["mwh"].astype(float)
+    return out
+
+
+def _predictions(area: str, date_str: str, now=None, max_age_s: int = 900, cfg=None):
+    """Point-in-time forecasts for one local day, cached briefly.
+
+    Forecasts do not depend on the threshold level, so every level and the risk overlay reuse
+    one pass. Cached only when `now` is not pinned AND `cfg` is the default config - a
+    what-if `cfg` (bigger trade sizes) always computes fresh so it can never be served
+    stale sizes from a previous, differently-configured call.
+    """
+    override = cfg is not None
+    cfg = cfg or config()
+    key = ("pred", area, date_str)
+    if now is None and not override:
+        hit = _CACHE.get(key)
+        if hit is not None and (pd.Timestamp.now() - hit[0]).total_seconds() <= max_age_s:
+            return hit[1].copy()
+    b = load_bundle(area)
+    if b is None:
+        return pd.DataFrame()
+    qs = tu.local_day_quarters(date_str, cfg["local_tz"])
+    out = P.predict_quarters(None, cfg, b, qs, now=now, fb=_builder())
+    out["time_dk_str"] = (out["quarter_utc"].dt.tz_localize("UTC").dt.tz_convert(cfg["local_tz"])
+                          .dt.strftime("%Y-%m-%d %H:%M"))
+    if now is None and not override:
+        _CACHE[key] = (pd.Timestamp.now(), out.copy())
+    return out
+
+
+def _score(d: pd.DataFrame, area: str, level: str, cfg=None):
+    """Apply one threshold level's decisions to a copy of the forecasts."""
+    from nurex42 import decision as dec
+    cfg = cfg or config()
+    b = load_bundle(area)
+    d = d.copy()
+    params = decision_params(area, level)
+    if params is not None:                      # 'validated' keeps the model's own decisions
+        dd = dec.decide(d, d["quarter_utc"], b.model.stress, cfg, params)
+        for col in ("action", "mwh", "edge", "reason"):
+            d[col] = dd[col].values
+    d["level"] = level
+    return d
+
+
+def _pnl(d: pd.DataFrame, cost: float) -> pd.DataFrame:
+    s = np.where(d["action"] == "BUY", 1.0, np.where(d["action"] == "SELL", -1.0, 0.0))
+    settled = d["spread_actual"].notna()
+    d["pnl_eur"] = np.where(settled, s * d["mwh"] * d["spread_actual"]
+                            - np.where(s != 0, d["mwh"] * cost, 0.0), np.nan)
+    d["settled"] = settled
+    return d
+
+
+def day_decisions_risked(area: str, date_str: str, levels=("validated",), now=None,
+                        risk_overrides: dict | None = None) -> dict:
+    """Decisions for one local day with the SAME risk overlay the walk-forward replay applies.
+
+    Until this existed, `apply_risk_overlays` ran only inside the replay: the backtest stopped
+    trading after a bad day while the live view kept going, so the two were not the same system.
+
+    The overlay is path dependent - it needs the equity curve in decision order - so the run
+    starts `drawdown_window_days` before the target day and returns only the target day's rows.
+    Each level gets its own equity path, because a level that loses faster hits the stop sooner.
+
+    A quarter whose imbalance price is due but missing from the store contributes 0 PnL to that
+    equity path (its costs still count). Run backfill_imbalance to keep those gaps rare.
+    """
+    cfg = _cfg_with_risk_override(risk_overrides)
+    if load_bundle(area) is None:
+        return {}
+    win = int(float(cfg["risk"].get("drawdown_window_days", 7)))
+    lag = pd.Timedelta(minutes=float(cfg["availability"]["imbalance_lag_minutes"]))
+    target = pd.Timestamp(date_str).normalize()
+    days = [(target - pd.Timedelta(days=k)).strftime("%Y-%m-%d") for k in range(win, -1, -1)]
+
+    base = [_predictions(area, d, now=now, cfg=cfg) for d in days]
+    base = [b for b in base if not b.empty]
+    if not base:
+        return {}
+    base = pd.concat(base, ignore_index=True)
+
+    cost = cfg.cost_per_mwh
+    out = {}
+    for lvl in levels:
+        d = _score(base, area, lvl, cfg=cfg)
+        d["as_of_trade"] = d["as_of_utc"]
+        d["label_known_at"] = d["quarter_utc"] + pd.Timedelta(minutes=15) + lag
+        # A missing label must not poison the equity path with NaN; it contributes no PnL.
+        d["spread"] = d["spread_actual"].astype(float).fillna(0.0)
+        r = P.apply_risk_overlays(d, cfg)
+        r = r[r["time_dk_str"].str.startswith(date_str)].copy()
+        r = _pnl(r, cost)
+        r["source"] = "risk-managed"
+        r["level"] = lvl
+        out[lvl] = r.reset_index(drop=True)
     return out
 
 

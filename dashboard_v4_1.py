@@ -164,6 +164,27 @@ st.markdown("""
 st.sidebar.title("⚡ Nurex V4.1 High-Alpha Meta-Controller")
 st.sidebar.caption("High-Alpha Intraday & Balancing Engine | Port 5005")
 
+# --- AUTO-REFRESH: current trade status every 15 min, matching the scheduled trading
+# cycle - or refresh immediately any time with the button below.
+REFRESH_SECONDS = 900  # 15 minutes
+if "_last_full_refresh" not in st.session_state:
+    st.session_state["_last_full_refresh"] = time.time()
+
+if st.sidebar.button("\U0001f504 Refresh now", help="Reload current trade status immediately"):
+    st.session_state["_last_full_refresh"] = time.time()
+
+@st.fragment(run_every=REFRESH_SECONDS)
+def _auto_refresh_heartbeat():
+    elapsed = time.time() - st.session_state["_last_full_refresh"]
+    st.caption(f"\U0001f504 Auto-refresh every 15 min "
+               f"(last: {datetime.now().strftime('%H:%M:%S')})")
+    if elapsed >= REFRESH_SECONDS - 1:
+        st.session_state["_last_full_refresh"] = time.time()
+        st.rerun()
+
+with st.sidebar:
+    _auto_refresh_heartbeat()
+
 # 1. Market Bidding Zone & Strategy
 selected_area = st.sidebar.radio("Bidding Zone", ["DK1", "DK2"], index=0)
 
@@ -194,8 +215,24 @@ use_evening_guard = st.sidebar.checkbox("🛡️ Intraday Evening Ramping Guard 
 threshold_level = st.sidebar.selectbox(
     "V4.1 Signal Thresholds",
     ["Validated (from training)", "Balanced (what-if)", "Aggressive (what-if)"],
-    index=0,
+    index=2,  # default: Aggressive (what-if)
     help="Validated uses the margin / probability pair tuned on held-out data. The what-if levels halve or quarter the margin and lower the probability bar, so more quarters qualify - more trades, more exposure, and no validation behind them.")
+# The walk-forward replay has always applied a daily loss stop and drawdown scaling; until now
+# the live view did not, so backtest and live were not the same system. With this on, they are.
+risk_limits_on = st.sidebar.checkbox(
+    "Apply risk limits (daily loss stop + drawdown)", value=True,
+    help="Stops trading for the rest of the day once the daily loss limit is hit, and halves or halts size on drawdown - the same overlay the replay uses. Off shows raw signal decisions, which will NOT match backtest results.")
+
+# Trade size scales with how much of the account's collateral a batch of quarters may risk
+# (batch_risk_fraction in config.yaml, default 0.1). This checkbox raises that to 0.2 for new,
+# not-yet-decided quarters only - locked/settled quarters keep the size they were actually
+# decided and traded at.
+bigger_size_on = st.sidebar.checkbox(
+    "Bigger trade sizes (risk budget 0.1 → 0.2)", value=False,
+    help="Doubles the share of collateral each batch of quarters may risk, roughly doubling trade size on new decisions. Bigger trades also mean bigger possible losses.")
+if bigger_size_on:
+    st.sidebar.caption("⚠️ Bigger trades also mean bigger possible losses.")
+
 THRESHOLD_KEY = {"Validated (from training)": "validated", "Balanced (what-if)": "balanced",
                  "Aggressive (what-if)": "aggressive"}[threshold_level]
 high_conviction_vol = st.sidebar.slider("High-Conviction Trade Size (MW)", 10, 50, 25)
@@ -366,15 +403,20 @@ with st.sidebar.expander("ℹ️ Data Source Architecture Details", expanded=Fal
     * **Data:** Scheduled cross-border commercial exchanges and day-ahead market couplings.
     
     ---
-    ### 6. DMI Open Data API (Danmarks Meteorologiske Institut)
-    * **Endpoint:** `opendataapi.dmi.dk/v2/metObs`
-    * **Data:** Official real-time coastal and offshore weather observations.
+    ### 6. Open-Meteo Weather Forecast API
+    * **Endpoint:** `previous-runs-api.open-meteo.com/v1/forecast`
+    * **Data:** Quarter-hour DK1/DK2 wind, solar, and weather forecasts used by the V4.1 model.
     
     ---
-    ### 7. Nord Pool REMIT UMM & Supabase Ledger
-    * **Data:** Urgent Market Messages (outages) and 15-minute cron trade reconciliation.
+    ### 7. Nord Pool REMIT UMM & DuckDB Paper-Trading Journal
+    * **Data:** Urgent Market Messages (outages) and a 15-minute automatic cycle that locks, settles, and reconciles V4.1 trades to a local DuckDB store.
+    
+    ---
+    ### 8. Fingrid Open Data (Nordic Grid Frequency)
+    * **Endpoint:** `data.fingrid.fi/api/datasets/177/data`
+    * **Data:** 3-minute Nordic system frequency - a direct signal for DK2 (Nordic synchronous area). DK1 (Continental European area) is not covered by this feed and relies on aFRR activation instead.
     """)
-    st.caption("🔒 100% verified authentic government and TSO data feeds with zero synthetic interpolation.")
+    st.caption("🔒 Verified live government/TSO and market data feeds - see the coverage table above for what is actually stored right now.")
 
 # Safe parser helper
 def parse_val(v):
@@ -406,7 +448,7 @@ def get_dynamic_price_cap(area, current_date_str):
 
 # --- LOAD TRADING DAY DATA MATRIX (V4.0 and V4.1) ---
 @st.cache_data(ttl=180)
-def get_v4_1_trading_day_data(area, date_str, threshold_key='validated'):
+def get_v4_1_trading_day_data(area, date_str, threshold_key='validated', risk_limits=True, size_boost=False):
     fe41 = V41FeatureEngine(price_area=area)
     table_gen = TournamentTableGenerator(price_area=area)
     
@@ -584,9 +626,16 @@ def get_v4_1_trading_day_data(area, date_str, threshold_key='validated'):
     v41 = pd.DataFrame()
     if bundle_v41 is not None:
         try:
-            _params = (v41id.decision_params(area, threshold_key)
-                       if hasattr(v41id, 'decision_params') else None)
-            v41 = v41id.day_decisions(area, date_str, params=_params)
+            _risk_overrides = {"batch_risk_fraction": 0.2} if size_boost else None
+            if risk_limits and hasattr(v41id, 'day_decisions_risked'):
+                # same overlay as the replay: equity carried across the drawdown window
+                v41 = v41id.day_decisions_risked(
+                    area, date_str, levels=(threshold_key,), risk_overrides=_risk_overrides
+                    ).get(threshold_key, pd.DataFrame())
+            else:
+                _params = (v41id.decision_params(area, threshold_key)
+                           if hasattr(v41id, 'decision_params') else None)
+                v41 = v41id.day_decisions(area, date_str, params=_params, risk_overrides=_risk_overrides)
         except Exception as e:
             _log_startup_error(f'day_decisions({area}, {date_str})', e)
             st.warning(f"V4.1 intraday engine unavailable: {type(e).__name__}: {e}")
@@ -607,8 +656,13 @@ def get_v4_1_trading_day_data(area, date_str, threshold_key='validated'):
         acts = key.map(m['action']).fillna('HOLD')
         pn = key.map(m['pnl_eur'])
         srcs = key.map(m['source']).fillna('recomputed') if 'source' in m.columns else pd.Series('recomputed', index=key.index)
-        for a_, mw_, fin_, p_, src_ in zip(acts, df_matrix['V4_1_MWh'], df_matrix['V4_1_Final'], pn, srcs):
+        rsn = df_matrix['V4_1_Reason'] if 'V4_1_Reason' in df_matrix.columns else pd.Series([''] * len(df_matrix))
+        for a_, mw_, fin_, p_, src_, why_ in zip(acts, df_matrix['V4_1_MWh'], df_matrix['V4_1_Final'], pn, srcs, rsn):
             tag = " 🔒" if src_ == "LOCKED" else (" (missed gate)" if src_ == "MISSED" else ("" if fin_ else " (provisional)"))
+            if str(why_) == 'daily loss stop':
+                tag = " (daily loss stop)"
+            elif str(why_) == 'drawdown guard':
+                tag += " (drawdown guard)"
             v41_decisions.append(("🟢 BUY" if a_ == "BUY" else "🔴 SELL" if a_ == "SELL" else "⚪ HOLD") + tag)
             v41_vols.append(float(mw_) * 4.0)          # MWh per quarter -> MW
             v41_pnls.append(float(p_) if pd.notna(p_) else np.nan)
@@ -645,7 +699,12 @@ def get_v4_1_trading_day_data(area, date_str, threshold_key='validated'):
 
     return df_matrix
 
-df_day = get_v4_1_trading_day_data(selected_area, date_str_selected, THRESHOLD_KEY)
+df_day = get_v4_1_trading_day_data(selected_area, date_str_selected, THRESHOLD_KEY, risk_limits_on, bigger_size_on)
+if not risk_limits_on:
+    st.warning(
+        'Risk limits are OFF: the daily loss stop and drawdown scaling are not applied, so these '
+        'decisions will not match backtest or replay results. Turn them on in the sidebar for the '
+        'numbers the engine would actually have traded.')
 if THRESHOLD_KEY != 'validated':
     st.warning(
         f'V4.1 is running on **{threshold_level}** thresholds: a what-if view of the same forecasts '
@@ -2213,12 +2272,15 @@ with tab_tournament:
             st.info("No out-of-sample days yet - the model was trained up to today. Retrain earlier, or switch the window to include in-sample days (and read them with caution).")
         else:
             @st.cache_data(ttl=900, show_spinner=False)
-            def _tournament(area, day_strs):
+            def _tournament(area, day_strs, risk_on=True):
                 """Per-level totals for each day. One model pass per day, scored three ways."""
                 rows = []
                 for ds in day_strs:
                     try:
-                        res = v41id.day_decisions_multi(area, ds)
+                        res = (v41id.day_decisions_risked(
+                                   area, ds, levels=('validated', 'balanced', 'aggressive'))
+                               if risk_on and hasattr(v41id, 'day_decisions_risked')
+                               else v41id.day_decisions_multi(area, ds))
                     except Exception as exc:
                         _log_startup_error(f'day_decisions_multi({area}, {ds})', exc)
                         continue
@@ -2237,7 +2299,7 @@ with tab_tournament:
 
             day_strs = [d.strftime('%Y-%m-%d') for d in days]
             with st.spinner(f'Scoring {len(day_strs)} day(s) under 3 threshold levels...'):
-                tdf = _tournament(selected_area, day_strs)
+                tdf = _tournament(selected_area, day_strs, risk_limits_on)
 
             if tdf.empty:
                 st.warning("No settled results in this window yet.")
