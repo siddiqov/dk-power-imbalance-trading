@@ -85,12 +85,6 @@ trading_history.db
 trading_history.db-shm
 trading_history.db-wal
 
-# Environment Variables & Secrets
-.env
-.env.*
-!.env.example
-
-# Bidder Portal (React)
 # Python Cache & Bytecode
 __pycache__/
 *.py[cod]
@@ -165,6 +159,8 @@ models_v4_1/*.pkl
 # Runtime SQLite Database WAL & lock files
 *.db-wal
 *.db-shm
+*.duckdb
+*.duckdb.*
 forecast_ledger.db
 forecast_ledger.db-shm
 forecast_ledger.db-wal
@@ -188,14 +184,10 @@ bidder-portal/node_modules/
 bidder-portal/dist/
 bidder-portal/.env
 logs/
+_recovered_*/
+Nurex_V4_2/.venv/
 Nurex_V4_2/data/nordpool_id/
+Nurex_V4_2/models/*.pkl
 
-# Excluded folders, parquets and scratch files
+# Nurex V4.1 paper-trading journal
 data/v41_journal.sqlite
-data/*.parquet
-legacy_v4_1_t60/
-Nurex_V4_2/
-_to_delete/
-scratch_*.py
-peek_*.py
-fix_*.py

@@ -1,0 +1,9 @@
+area,delivery_start_local,delivery_start_utc,action,mwh,exp_spread,p_up,p_down,q10,q90,reason
+DK2,2026-09-17 02:00,2026-09-17T00:00Z,HOLD,0.000,,,,,,missed deadline
+DK2,2026-09-17 02:15,2026-09-17T00:15Z,HOLD,0.000,,,,,,missed deadline
+DK2,2026-09-17 02:30,2026-09-17T00:30Z,HOLD,0.000,,,,,,missed deadline
+DK2,2026-09-17 02:45,2026-09-17T00:45Z,HOLD,0.000,,,,,,missed deadline
+DK2,2026-09-17 03:00,2026-09-17T01:00Z,HOLD,0.000,,,,,,missed deadline
+DK2,2026-09-17 03:15,2026-09-17T01:15Z,HOLD,0.000,,,,,,missed deadline
+DK2,2026-09-17 03:30,2026-09-17T01:30Z,HOLD,0.000,,,,,,missed deadline
+DK2,2026-09-17 03:45,2026-09-17T01:45Z,HOLD,0.000,,,,,,missed deadline

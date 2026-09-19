@@ -2175,39 +2175,127 @@ with tab_gridsearch:
 # TAB 6: MULTI-GENERATION QUANTITATIVE TOURNAMENT BACKTEST
 # ----------------------------------------------------------------------
 with tab_tournament:
-    st.subheader("Multi-Generation Head-to-Head Quantitative Tournament")
-    st.markdown("Comparing **V4.0 (Full-Grid)** vs **V4.1 (High-Alpha European Balancing)**")
+    st.subheader("V4.1 Signal Threshold Tournament")
+    st.markdown(
+        "The **same V4.1 forecasts** scored under each threshold level. Only the bar a quarter must "
+        "clear to be traded changes: **Validated** is the margin / probability pair tuned on held-out "
+        "data during training, **Balanced** halves the margin, **Aggressive** quarters it. "
+        "The model runs once per day and is scored three ways, so this is a like-for-like comparison."
+    )
 
-    if not df_day.empty:
-        settled_sub = df_day[settled_mask] if settled_mask.any() else df_day
-        v40_tot = settled_sub['PnL_V4_0'].dropna().sum()
-        v41_tot = settled_sub['PnL_V4_1'].dropna().sum()
+    _tu = v41id.trained_until(selected_area) if hasattr(v41id, 'trained_until') else None
+    _today = pd.Timestamp(date_str_selected)
 
-        v40_hit = (np.sign(settled_sub['V4_Predicted_Spread_EUR']) == np.sign(settled_sub['actual_spread_eur'])).mean() * 100 if len(settled_sub) > 0 else 50.0
-        v41_hit = (np.sign(settled_sub['V4_1_Predicted_Spread_EUR']) == np.sign(settled_sub['actual_spread_eur'])).mean() * 100 if len(settled_sub) > 0 else 50.0
+    tcol1, tcol2 = st.columns([1.4, 1])
+    with tcol1:
+        scope = st.radio(
+            "Evaluation window",
+            ["Out-of-sample only (after training)", "Last N days (includes in-sample)"],
+            index=0, horizontal=False,
+            help="The model was trained on data up to its training cut-off. Days before that cut-off were seen during training, so results there flatter whichever level trades most and are not evidence of anything.")
+    with tcol2:
+        n_days = st.number_input("Days to evaluate", min_value=1, max_value=60, value=7, step=1)
 
-        comp_df = pd.DataFrame({
-            "Generation": ["V4.0 Full-Grid Champion", "V4.1 High-Alpha Champion"],
-            "Realized PnL (Settled)": [f"€ {v40_tot:,.2f}", f"€ {v41_tot:,.2f}"],
-            "Directional Hit Rate": [f"{v40_hit:.1f}%", f"{v41_hit:.1f}%"],
-            "Key Information Layer": ["8-Cable Interconnector Grid", "MARI / PICASSO + SMARD + XBID Microstructure"],
-            "Crash Protection": ["8-Cable Headroom + Surplus Guard", "MARI Downward Merit Order + XBID Skew Shield"]
-        })
-        st.dataframe(comp_df, use_container_width=True, hide_index=True)
-        
-        # Cumulative PnL Curves
-        if len(settled_sub) > 1:
-            cum_pnl = settled_sub[['time_dk']].copy()
-            cum_pnl['V4.0 Full-Grid'] = settled_sub['PnL_V4_0'].fillna(0).cumsum()
-            cum_pnl['V4.1 High-Alpha'] = settled_sub['PnL_V4_1'].fillna(0).cumsum()
-            cum_pnl_melt = cum_pnl.melt('time_dk', var_name='Model Generation', value_name='Cumulative Realized PnL (€)')
-            
-            c_pnl = alt.Chart(cum_pnl_melt).mark_line().encode(
-                x='time_dk:N',
-                y='Cumulative Realized PnL (€):Q',
-                color=alt.Color('Model Generation:N', scale=alt.Scale(
-                    domain=['V4.0 Full-Grid', 'V4.1 High-Alpha'],
-                    range=['#0284C7', '#00C851']
-                ))
-            ).properties(title="Cumulative Realized Trading PnL on Settled Intervals (€)", height=350)
-            st.altair_chart(c_pnl, use_container_width=True)
+    if _tu is None:
+        st.warning("V4.1 model not loaded - no tournament to run.")
+    else:
+        _cut = pd.Timestamp(_tu).normalize()
+        st.caption(f"Model trained on data up to **{pd.Timestamp(_tu):%Y-%m-%d %H:%M} UTC**. "
+                   f"Days after that are out of sample.")
+
+        if scope.startswith('Out-of-sample'):
+            days = [d for d in pd.date_range(_cut + pd.Timedelta(days=1), _today, freq='D')]
+            days = days[-int(n_days):]
+        else:
+            days = list(pd.date_range(_today - pd.Timedelta(days=int(n_days) - 1), _today, freq='D'))
+
+        if not days:
+            st.info("No out-of-sample days yet - the model was trained up to today. Retrain earlier, or switch the window to include in-sample days (and read them with caution).")
+        else:
+            @st.cache_data(ttl=900, show_spinner=False)
+            def _tournament(area, day_strs):
+                """Per-level totals for each day. One model pass per day, scored three ways."""
+                rows = []
+                for ds in day_strs:
+                    try:
+                        res = v41id.day_decisions_multi(area, ds)
+                    except Exception as exc:
+                        _log_startup_error(f'day_decisions_multi({area}, {ds})', exc)
+                        continue
+                    for lvl, d in res.items():
+                        st_rows = d[d['settled']]
+                        traded = st_rows[st_rows['action'] != 'HOLD']
+                        rows.append({
+                            'Day': ds, 'Level': lvl,
+                            'Trades': int(len(traded)),
+                            'MWh': float(traded['mwh'].sum()),
+                            'Net PnL': float(np.nansum(st_rows['pnl_eur'])),
+                            'Wins': int((traded['pnl_eur'] > 0).sum()),
+                            'Settled quarters': int(len(st_rows)),
+                        })
+                return pd.DataFrame(rows)
+
+            day_strs = [d.strftime('%Y-%m-%d') for d in days]
+            with st.spinner(f'Scoring {len(day_strs)} day(s) under 3 threshold levels...'):
+                tdf = _tournament(selected_area, day_strs)
+
+            if tdf.empty:
+                st.warning("No settled results in this window yet.")
+            else:
+                label = {'validated': 'Validated (tuned on held-out data)',
+                         'balanced': 'Balanced (what-if, margin halved)',
+                         'aggressive': 'Aggressive (what-if, margin quartered)'}
+                summary = []
+                for lvl in ('validated', 'balanced', 'aggressive'):
+                    sub = tdf[tdf['Level'] == lvl]
+                    if sub.empty:
+                        continue
+                    trades = int(sub['Trades'].sum()); mwh = float(sub['MWh'].sum())
+                    net = float(sub['Net PnL'].sum()); wins = int(sub['Wins'].sum())
+                    daily = sub.groupby('Day')['Net PnL'].sum()
+                    summary.append({
+                        'Threshold level': label[lvl],
+                        'Trades': trades,
+                        'MWh traded': round(mwh, 1),
+                        'Net PnL (EUR)': round(net, 2),
+                        'EUR per MWh': round(net / mwh, 2) if mwh > 0 else None,
+                        'Win rate': f'{wins / trades * 100:.1f}%' if trades else '--',
+                        'Profitable days': f'{int((daily > 0).sum())} / {len(daily)}',
+                        'Worst day (EUR)': round(float(daily.min()), 2) if len(daily) else None,
+                    })
+                sum_df = pd.DataFrame(summary)
+                st.dataframe(sum_df, use_container_width=True, hide_index=True)
+
+                # Cumulative net PnL by level
+                cum = tdf.pivot_table(index='Day', columns='Level', values='Net PnL', aggfunc='sum').fillna(0.0).sort_index()
+                cum = cum.cumsum().reset_index().melt('Day', var_name='Level', value_name='Cumulative Net PnL (EUR)')
+                cum['Level'] = cum['Level'].map(label).fillna(cum['Level'])
+                chart = alt.Chart(cum).mark_line(point=True).encode(
+                    x=alt.X('Day:N', title='Delivery day'),
+                    y=alt.Y('Cumulative Net PnL (EUR):Q'),
+                    color=alt.Color('Level:N', scale=alt.Scale(
+                        domain=[label['validated'], label['balanced'], label['aggressive']],
+                        range=['#0F766E', '#0284C7', '#B45309'])),
+                    tooltip=['Day', 'Level', 'Cumulative Net PnL (EUR)']
+                ).properties(height=340, title='Cumulative net PnL after costs, by threshold level')
+                st.altair_chart(chart, use_container_width=True)
+
+                with st.expander('Per-day detail'):
+                    det = tdf.copy()
+                    det['Level'] = det['Level'].map(label).fillna(det['Level'])
+                    st.dataframe(det.sort_values(['Day', 'Level']), use_container_width=True, hide_index=True)
+
+                in_sample = [d for d in day_strs if pd.Timestamp(d) <= _cut]
+                if in_sample:
+                    st.warning(
+                        f"{len(in_sample)} of these {len(day_strs)} days fall inside the training "
+                        "window. The model saw them while learning, so every level looks better than "
+                        "it would live, and the loosest level benefits most. Treat this as a sanity "
+                        "check, not as evidence."
+                    )
+                st.caption(
+                    "Balanced and Aggressive were **not** validated on held-out data - only the "
+                    "Validated pair passed the stability test during training. Every level here is "
+                    "recomputed on the same basis, so locked paper-trading decisions are not mixed in. "
+                    "PnL is net of costs at the configured rate and counts settled quarters only."
+                )

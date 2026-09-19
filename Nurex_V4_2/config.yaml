@@ -1,0 +1,108 @@
+# Nurex V4.2 base configuration
+# RECONSTRUCTED 2026-09-19 from the config stored inside
+# models_v4_1_intraday/v4_1_intraday_DK1.pkl (trained 2026-09-17), after the
+# original config.yaml was deleted. Values are the ones the model was trained
+# with. Collector-only keys (ent/freq/id/umm/wx) were not in the bundle and are
+# absent here - restore the original file if you recover it.
+areas:
+- DK1
+- DK2
+history_start: '2025-03-04'
+db_path: data/nurex42.duckdb
+local_tz: Europe/Copenhagen
+batch:
+  quarters_per_batch: 8
+  lead_minutes: 135
+  final_run_minutes_before_deadline: 15
+provisional:
+  run_time_local: '13:15'
+availability:
+  imbalance_lag_minutes: 30
+  psrn_lag_minutes: 5
+  forecast_5h_minutes_before: 300
+  forecast_1h_minutes_before: 60
+  dayahead_publish_local: '13:00'
+  forecast_da_publish_local: '12:00'
+  mfrr_market_lag_minutes: 20160
+  entsoe_dayahead_publish_local: '13:00'
+  fast_state_lag_minutes: 15
+  entsoe_actual_lag_minutes: 90
+  entsoe_wsfc_publish_local: '18:00'
+  weather_known_before_minutes: 1440
+  frequency_lag_minutes: 5
+costs:
+  nordpool_dayahead_eur_mwh: 0.2
+  imbalance_fee_eur_mwh: 1.15
+  brp_service_eur_mwh: 0.5
+  slippage_eur_mwh: 0.5
+  stress_multiplier: 2.0
+risk:
+  collateral_dkk: 30000
+  dkk_per_eur: 7.46
+  batch_risk_fraction: 0.1
+  daily_loss_stop_fraction: 0.2
+  drawdown_half_fraction: 0.25
+  drawdown_stop_fraction: 0.5
+  max_mwh_per_quarter: 10.0
+  min_mwh_per_quarter: 0.1
+  mwh_step: 0.1
+  stress_quantile: 0.995
+  drawdown_window_days: 7
+model:
+  direction_deadband_eur: 0.5
+  quantiles:
+  - 0.1
+  - 0.5
+  - 0.9
+  min_train_days: 120
+  validation_days: 60
+  lgbm:
+    n_estimators: 300
+    learning_rate: 0.03
+    num_leaves: 31
+    min_child_samples: 100
+    subsample: 0.8
+    subsample_freq: 1
+    colsample_bytree: 0.7
+    reg_lambda: 2.0
+    verbose: -1
+    n_jobs: 2
+decision:
+  margin_grid:
+  - 0.0
+  - 2.0
+  - 5.0
+  - 10.0
+  - 20.0
+  - 40.0
+  prob_grid:
+  - 0.45
+  - 0.5
+  - 0.55
+  - 0.6
+  - 0.65
+  - 0.7
+  hysteresis_eur: 3.0
+replay:
+  retrain_every_days: 30
+dashboard:
+  port: 5006
+intraday:
+  gate_lead_minutes: 60
+  train_extra_leads_minutes:
+  - 90
+  retrain_every_days: 30
+  min_train_days: 120
+  validation_days: 60
+  lock_ahead_minutes: 20
+intraday_api:
+  sso_url: https://sso.nordpoolgroup.com/connect/token
+  market_data_host: intraday-pmd-api-ws-nordpool.nordpoolgroup.com
+  price_divisor: 100.0
+  qty_divisor: 1000.0
+  area_ids: {}
+intraday_data_dir: Nurex_V4_2/data/nordpool_id
+sign_calibration_days: 45
+models_dir: models_v4_1_intraday
+journal_path: data/v41_journal.sqlite
+reports_dir: results/v4_1_intraday

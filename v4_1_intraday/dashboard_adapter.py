@@ -171,6 +171,55 @@ def day_decisions(area: str, date_str: str, now=None, params: dict | None = None
     return out
 
 
+def day_decisions_multi(area: str, date_str: str, levels=("validated", "balanced", "aggressive"),
+                       now=None) -> dict:
+    """The same forecasts for one local day, scored under several threshold levels.
+
+    The model runs once: every level shares identical predictions and differs only in the bar a
+    quarter must clear to be traded, so this is one prediction pass plus N cheap decision passes.
+
+    Returns {level: DataFrame}. The journal is never applied - locked decisions were taken at the
+    validated thresholds, so applying them to one level only would make the comparison unfair.
+    Every level here is therefore 'recomputed', which is the like-for-like basis a tournament needs.
+    """
+    from nurex42 import decision as dec
+
+    cfg = config()
+    b = load_bundle(area)
+    if b is None:
+        return {}
+    qs = tu.local_day_quarters(date_str, cfg["local_tz"])
+    base = P.predict_quarters(None, cfg, b, qs, now=now, fb=_builder())
+    base["time_dk_str"] = (base["quarter_utc"].dt.tz_localize("UTC").dt.tz_convert(cfg["local_tz"])
+                           .dt.strftime("%Y-%m-%d %H:%M"))
+    c = cfg.cost_per_mwh
+
+    out = {}
+    for lvl in levels:
+        d = base.copy()
+        params = decision_params(area, lvl)
+        if params is not None:                      # 'validated' keeps the model's own decisions
+            dd = dec.decide(d, d["quarter_utc"], b.model.stress, cfg, params)
+            for col in ("action", "mwh", "edge", "reason"):
+                d[col] = dd[col].values
+        s = np.where(d["action"] == "BUY", 1.0, np.where(d["action"] == "SELL", -1.0, 0.0))
+        settled = d["spread_actual"].notna()
+        d["pnl_eur"] = np.where(settled,
+                                s * d["mwh"] * d["spread_actual"] - np.where(s != 0, d["mwh"] * c, 0.0),
+                                np.nan)
+        d["settled"] = settled
+        d["level"] = lvl
+        d["source"] = "recomputed"
+        out[lvl] = d
+    return out
+
+
+def trained_until(area: str):
+    """When the model's training data ends - days after this are out of sample."""
+    b = load_bundle(area)
+    return None if b is None else pd.Timestamp(b.trained_until)
+
+
 def sources_status() -> pd.DataFrame:
     """Coverage of every data source (for the sidebar)."""
     import io
