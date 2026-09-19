@@ -1,296 +1,324 @@
-# ==============================================================================
-# train_v4_1.py
-# Nurex V4.1 High-Alpha Systematic Stacking Super-Ensemble & Transfer Trainer
-# Incorporating:
-# 1. Multi-Horizon Velocity (d/dt) & Acceleration (d^2/dt^2) Momentum Features
-# 2. Stacking Super-Ensemble (LightGBM + CatBoost + RandomForest + Huber Blender)
-# 3. Cross-Zone Transfer Learning for DK2 (DK1 Foundational Prior Adapter)
-# 4. 100% Authentic Data Pipeline (Energinet, SMARD.de, ENTSO-E, Nord Pool XBID)
-# ==============================================================================
+"""Nurex V4.1 Intraday — command line (replaces the old T-60 trainer).
 
-import os
-import sys
+The model decides each 15-min quarter at intraday gate closure (delivery - 60 min)
+using only information published before that moment. Data comes from the V4.2
+point-in-time store (Nurex_V4_2/data/nurex42.duckdb).
+
+  python train_v4_1.py update                 download new data (runs Nurex_V4_2/run.py update)
+  python train_v4_1.py leaktest               corrupt-the-future leakage test (must print PASS)
+  python train_v4_1.py replay [--area DK1]    walk-forward simulation + report in results/v4_1_intraday/
+  python train_v4_1.py train  [--area DK1]    train the live models -> models_v4_1_intraday/
+  python train_v4_1.py predict --area DK1 [--day 2026-09-17]   decisions for one local delivery day
+  python train_v4_1.py all                    update + collect + leaktest + replay + train
+
+  New data sources (credentials in Nurex_V4_2/.env):
+  python train_v4_1.py collect [--source entsoe,umm,weather,frequency] [--start 2025-03-04]
+                                              backfill / update ENTSO-E, UMM outages, weather, frequency
+  python train_v4_1.py sources                coverage of every data source
+  python train_v4_1.py probe-nordpool         test Nord Pool Intraday login + 60 s of live data
+  python train_v4_1.py record-intraday        record Nord Pool intraday market data (run 24/7)
+
+  Paper trading (locked decisions, judged honestly):
+  python train_v4_1.py cycle                  update + collect + lock upcoming gates + settle (every 15 min)
+  python train_v4_1.py lock                   only lock upcoming gates + settle (no downloads)
+  python train_v4_1.py journal [--days 30]    locked-decision performance per zone
+
+Simulation / research only - no orders are sent.
+"""
+from __future__ import annotations
+
+import argparse
 import json
-import time
-import joblib
-import numpy as np
-import pandas as pd
+import logging
+import subprocess
+import sys
 from datetime import datetime
+from pathlib import Path
 
-from sklearn.model_selection import TimeSeriesSplit
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.linear_model import HuberRegressor, RidgeCV
-from lightgbm import LGBMRegressor
-from catboost import CatBoostRegressor
-from sklearn.ensemble import RandomForestRegressor
+import pandas as pd
 
-sys.path.append(os.path.abspath('.'))
-try:
-    from train_v3_2_flow_aware import fetch_real_v3_1_baseline_scores
-except Exception:
-    fetch_real_v3_1_baseline_scores = None
+from v4_1_intraday import settings as S
+from v4_1_intraday import leakage, pipeline_id as P, report_id as R
+from v4_1_intraday.features_id import IntradayFeatureBuilder
+from nurex42 import timeutil as tu
+from nurex42.storage import Store
 
-class StackingSuperEnsembleV41:
-    """
-    Institutional Stacking Meta-Learner combining LightGBM, CatBoost,
-    and Random Forest via a robust Huber / RidgeCV meta-blender.
-    """
-    def __init__(self, lgbm_params=None, cat_params=None, rf_params=None):
-        self.lgbm_params = lgbm_params or {
-            "n_estimators": 220, "max_depth": 7, "learning_rate": 0.04,
-            "subsample": 0.85, "reg_lambda": 2.5, "random_state": 42,
-            "n_jobs": -1, "verbose": -1
-        }
-        self.cat_params = cat_params or {
-            "iterations": 220, "depth": 6, "learning_rate": 0.04,
-            "l2_leaf_reg": 3.5, "random_seed": 42, "verbose": 0
-        }
-        self.rf_params = rf_params or {
-            "n_estimators": 160, "max_depth": 9, "min_samples_split": 4,
-            "random_state": 42, "n_jobs": -1
-        }
-        
-        self.m_lgbm = LGBMRegressor(**self.lgbm_params)
-        self.m_cat = CatBoostRegressor(**self.cat_params)
-        self.m_rf = RandomForestRegressor(**self.rf_params)
-        self.blender = HuberRegressor(epsilon=1.35, max_iter=500)
-        self.is_fitted = False
+log = logging.getLogger("nurex41id")
 
-    def fit(self, X, y):
-        # 1. Fit base models
-        self.m_lgbm.fit(X, y)
-        self.m_cat.fit(X, y)
-        self.m_rf.fit(X, y)
 
-        # 2. Get training meta-features
-        p_lgbm = self.m_lgbm.predict(X)
-        p_cat = self.m_cat.predict(X)
-        p_rf = self.m_rf.predict(X)
+def _store(cfg):
+    if not cfg.db_path.exists():
+        sys.exit(f"Database not found: {cfg.db_path}\nRun: cd Nurex_V4_2 && python run.py backfill")
+    return Store(cfg.db_path, read_only=True)
 
-        meta_X = np.column_stack([p_lgbm, p_cat, p_rf])
-        self.blender.fit(meta_X, y)
-        self.is_fitted = True
-        return self
 
-    def predict(self, X):
-        if not self.is_fitted:
-            raise ValueError("StackingSuperEnsembleV41 is not fitted yet.")
-        p_lgbm = self.m_lgbm.predict(X)
-        p_cat = self.m_cat.predict(X)
-        p_rf = self.m_rf.predict(X)
-        meta_X = np.column_stack([p_lgbm, p_cat, p_rf])
-        return self.blender.predict(meta_X)
+def cmd_update(args, cfg):
+    r = subprocess.run([sys.executable, "run.py", "update"], cwd=str(S.V42_ROOT))
+    if r.returncode != 0:
+        sys.exit("data update failed")
 
-def get_clean_training_matrix(area="DK1", dk1_foundation_model=None):
-    """
-    Builds the authentic feature matrix for the designated bidding zone,
-    including velocity features and cross-zone transfer representations for DK2.
-    """
-    fe = V41GridFeatureEngine(price_area=area)
-    df_raw = fe.load_raw_dataset()
-    df_matrix = fe.build_feature_matrix(df_raw)
 
-    # Attach V3.1 BiLSTM Baseline Momentum
+def cmd_leaktest(args, cfg):
+    st = _store(cfg)
+    probs = leakage.run(st, cfg, n_samples=args.samples)
+    st.close()
+    if probs:
+        print("FAIL - features use information published after gate closure:")
+        for p in probs:
+            print("  ", p)
+        sys.exit(1)
+    print("PASS - no feature changed when post-decision data was corrupted")
+
+
+def cmd_replay(args, cfg):
+    st = _store(cfg)
+    fb = IntradayFeatureBuilder(st, cfg)
+    areas = [args.area] if args.area else cfg["areas"]
+    stamp = datetime.now().strftime("%Y%m%d_%H%M")
+    summary = {}
+    for a in areas:
+        out = P.walk_forward(st, cfg, a, fb=fb)
+        path = cfg.path("reports_dir") / f"replay_{a}_{stamp}.md"
+        rep = R.write(out, cfg, path)
+        summary[a] = {"trading": rep["trading"], "forecast": rep["forecast"], "direction": rep["direction"]}
+        tm = rep["trading"]
+        print(f"[{a}] trades={tm['trades']} MWh={tm['mwh_traded']:.0f} net={tm['net_eur']:,.0f} EUR "
+              f"({tm['net_eur_per_mwh']:.2f} EUR/MWh), at 2x costs {tm['net_eur_at_stress_costs']:,.0f} EUR, "
+              f"max DD {tm['max_drawdown_eur']:,.0f} EUR -> {path}")
+    (cfg.path("reports_dir") / f"replay_summary_{stamp}.json").write_text(
+        json.dumps(summary, indent=2, default=float), encoding="utf-8")
+    st.close()
+
+
+def cmd_train(args, cfg):
+    st = _store(cfg)
+    fb = IntradayFeatureBuilder(st, cfg)
+    for a in [args.area] if args.area else cfg["areas"]:
+        b = P.train_final(st, cfg, a, fb=fb)
+        path = P.model_path(cfg, a)
+        b.save(path)
+        imp = b.model.feature_importance().head(15).round(2)
+        print(f"[{a}] saved {path}  n_train={b.n_train}  trained_until={b.trained_until}")
+        print(f"[{a}] decision params: {b.decision_params}")
+        print(imp.to_string())
+        (path.with_suffix(".json")).write_text(json.dumps({
+            "area": a, "version": b.version, "n_train": b.n_train, "trained_until": str(b.trained_until),
+            "decision_params": b.decision_params, "cost_eur_mwh": cfg.cost_per_mwh,
+            "gate_lead_minutes": cfg["intraday"]["gate_lead_minutes"],
+            "feature_importance_top15": imp.to_dict()}, indent=2, default=str), encoding="utf-8")
+    st.close()
+
+
+def cmd_predict(args, cfg):
+    st = _store(cfg)
+    b = P.IntradayBundle.load(P.model_path(cfg, args.area))
+    day = args.day or tu.to_local(tu.utcnow(), cfg["local_tz"]).strftime("%Y-%m-%d")
+    qs = tu.local_day_quarters(day, cfg["local_tz"])
+    out = P.predict_quarters(st, cfg, b, qs)
+    out["time_local"] = out["quarter_utc"].dt.tz_localize("UTC").dt.tz_convert(cfg["local_tz"]).dt.strftime("%H:%M")
+    cols = ["time_local", "decision_final", "p_down", "p_flat", "p_up", "exp_spread", "q10", "q90",
+            "action", "mwh", "edge", "spread_actual"]
+    pd.set_option("display.width", 200)
+    print(out[cols].round(2).to_string(index=False))
+    path = cfg.path("reports_dir") / f"decisions_{args.area}_{day}.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    out.to_csv(path, index=False)
+    print("->", path)
+    st.close()
+
+
+SOURCES = ["entsoe", "umm", "weather", "frequency"]
+
+
+def _last(st, sql):
     try:
-        df_v31 = fetch_real_v3_1_baseline_scores(area)
-        df_v31['time_utc'] = pd.to_datetime(df_v31['time_utc'])
-        score_df = df_v31[['time_utc', 'V3_1_BiLSTM_Score']].drop_duplicates(subset=['time_utc'])
-        df_matrix['time_utc'] = pd.to_datetime(df_matrix['time_utc'])
-        df_matrix = pd.merge(df_matrix, score_df, on='time_utc', how='left')
-        df_matrix['V3_1_BiLSTM_Score'] = df_matrix['V3_1_BiLSTM_Score'].ffill().bfill().fillna(0.0)
+        v = st.df(sql)["t"].iloc[0]
+        return pd.Timestamp(v) if pd.notna(v) else None
     except Exception:
-        df_matrix['V3_1_BiLSTM_Score'] = 0.0
+        return None
 
-    # Layer 4 High-Alpha & Velocity Features
-    high_alpha_cols = [
-        'mfrr_activated_down_mw', 'mfrr_activated_up_mw', 'mfrr_net_activation_mw',
-        'afrr_marginal_price_eur', 'total_balancing_pressure_mw',
-        'german_system_balance_mw', 'german_generation_mw', 'german_load_mw',
-        'xbid_order_flow_skew', 'xbid_micro_price_eur', 'xbid_vwap_eur',
-        'smard_res_delta_15m', 'smard_res_delta_1h',
-        'mfrr_up_velocity', 'mfrr_down_velocity', 'mfrr_net_acceleration',
-        'order_flow_skew_ema4', 'order_flow_momentum',
-        'balancing_spread_delta_eur', 'german_spillover_pressure_ratio',
-        'dk_de_price_spread', 'dk_de_spread_velocity', 'system_surplus_velocity'
-    ]
 
-    base_feature_cols = fe.get_feature_column_names()
-    feature_cols = ['V3_1_BiLSTM_Score'] + base_feature_cols + high_alpha_cols
+def cmd_collect(args, cfg):
+    from v4_1_intraday.collectors import common, entsoe_ext, frequency, umm, weather
+    srcs = args.source.split(",") if args.source else SOURCES
+    st = Store(cfg.db_path)
+    common.ensure_tables(st)
+    now = pd.Timestamp.now(tz="UTC").tz_localize(None)
+    start0 = pd.Timestamp(args.start or cfg["history_start"])
+    ok = True
+    try:
+        for src in srcs:
+            try:
+                if src == "entsoe":
+                    last = None if args.start else _last(st, "SELECT max(time_utc) t FROM entsoe_series WHERE series LIKE 'load:%'")
+                    a = (last - pd.Timedelta(days=3)) if last is not None else start0
+                    n = entsoe_ext.collect(st, a, now.ceil("D") + pd.Timedelta(days=2))
+                elif src == "umm":
+                    last = None if args.start else _last(st, "SELECT max(publication_utc) t FROM umm_events")
+                    n = umm.collect(st, since=(last - pd.Timedelta(days=2)) if last is not None else start0)
+                elif src == "weather":
+                    last = None if args.start else _last(st, "SELECT max(time_utc) - INTERVAL 3 DAY t FROM weather_fc")
+                    n = weather.collect(st, last if last is not None else start0, now + pd.Timedelta(days=2))
+                elif src == "frequency":
+                    last = None if args.start else _last(st, "SELECT max(time_utc) t FROM frequency")
+                    n = frequency.collect(st, (last - pd.Timedelta(hours=6)) if last is not None else start0, now)
+                else:
+                    print(f"unknown source {src}")
+                    continue
+                print(f"[{src}] {n:,} rows stored")
+            except Exception as e:
+                ok = False
+                print(f"[{src}] FAILED: {e}")
+    finally:
+        st.close()
+    cmd_sources(args, cfg)
+    return ok
 
-    # Cross-Zone Transfer Prior for DK2
-    if area == "DK2" and dk1_foundation_model is not None:
+
+def cmd_sources(args, cfg):
+    from v4_1_intraday.collectors import nordpool_id
+    st = Store(cfg.db_path, read_only=True)
+    q = {
+        "EDS imbalance": "SELECT count(*) n, min(time_utc) AS first_t, max(time_utc) AS last_t FROM imbalance",
+        "EDS live system (PSRN)": "SELECT count(*) n, min(time_utc) AS first_t, max(time_utc) AS last_t FROM psrn",
+        "ENTSO-E actual load": "SELECT count(*) n, min(time_utc) AS first_t, max(time_utc) AS last_t FROM entsoe_series WHERE series LIKE 'load:%'",
+        "ENTSO-E load forecast": "SELECT count(*) n, min(time_utc) AS first_t, max(time_utc) AS last_t FROM entsoe_series WHERE series LIKE 'loadfc:%'",
+        "ENTSO-E schedules": "SELECT count(*) n, min(time_utc) AS first_t, max(time_utc) AS last_t FROM entsoe_series WHERE series LIKE 'sched:%'",
+        "ENTSO-E physical flows": "SELECT count(*) n, min(time_utc) AS first_t, max(time_utc) AS last_t FROM entsoe_series WHERE series LIKE 'phys:%'",
+        "ENTSO-E NTC": "SELECT count(*) n, min(time_utc) AS first_t, max(time_utc) AS last_t FROM entsoe_series WHERE series LIKE 'ntc:%'",
+        "ENTSO-E wind/solar fc": "SELECT count(*) n, min(time_utc) AS first_t, max(time_utc) AS last_t FROM entsoe_series WHERE series LIKE 'wsfc:%'",
+        "UMM outages (by publication)": "SELECT count(*) n, min(publication_utc) AS first_t, max(publication_utc) AS last_t FROM umm_events",
+        "Weather forecasts": "SELECT count(*) n, min(time_utc) AS first_t, max(time_utc) AS last_t FROM weather_fc",
+        "Frequency (Nordic)": "SELECT count(*) n, min(time_utc) AS first_t, max(time_utc) AS last_t FROM frequency",
+    }
+    rows = []
+    for name, sql in q.items():
         try:
-            # Predict using DK1 foundation model on shared physical features
-            dk1_cols = dk1_foundation_model.get("feature_cols", feature_cols)
-            X_temp = df_matrix.reindex(columns=dk1_cols).ffill().bfill().fillna(0.0)
-            df_matrix['DK1_Foundation_Prior'] = dk1_foundation_model["model"].predict(X_temp)
-            feature_cols = ['DK1_Foundation_Prior'] + feature_cols
-        except Exception as e:
-            print(f"[DK2] Notice: Foundation prior attached with base score: {e}")
-            df_matrix['DK1_Foundation_Prior'] = df_matrix['V3_1_BiLSTM_Score']
-            feature_cols = ['DK1_Foundation_Prior'] + feature_cols
+            r = st.df(sql).iloc[0].to_dict()
+            r = {"n": r["n"], "first": r["first_t"], "last": r["last_t"]}
+        except Exception:
+            r = {"n": 0, "first": None, "last": None}
+        rows.append({"source": name, **r})
+    st.close()
+    for _, r in nordpool_id.coverage().iterrows():
+        rows.append({"source": f"Nord Pool intraday {r['table']}", "n": r["rows"], "first": r["first"],
+                     "last": r["last"]})
+    out = pd.DataFrame(rows)
+    print(out.to_string(index=False))
+    return out
 
-    # Deduplicate feature columns
-    seen = set()
-    feature_cols = [x for x in feature_cols if not (x in seen or seen.add(x))]
 
-    for col in feature_cols:
-        if col not in df_matrix.columns:
-            df_matrix[col] = 0.0
+def cmd_probe_nordpool(args, cfg):
+    from v4_1_intraday.collectors import nordpool_id as npid
+    c = npid.cfg_api()
+    try:
+        tok, user = npid.get_token(c)
+    except Exception as e:
+        sys.exit(f"LOGIN FAILED: {e}")
+    print(f"login OK as {user}; token valid until {pd.Timestamp(npid.token_expiry(tok), unit='s')} UTC")
+    before = npid.coverage()
+    npid.record(stop_after=args.seconds)
+    after = npid.coverage()
+    print(after.to_string(index=False))
+    st = npid.load("stats")
+    if len(st):
+        s = st.dropna(subset=["vwap"]).tail(5)
+        print("sample statistics (raw API units):")
+        print(s[["contract_id", "area_id", "last_price", "vwap", "last_qty", "turnover", "da_price"]].to_string(index=False))
+        print(f"price check: vwap/{c['price_divisor']:.0f} should look like EUR/MWh; "
+              f"da_price/{c['price_divisor']:.0f} should equal the day-ahead price")
+    if int(after["rows"].sum()) <= int(before["rows"].sum()):
+        print("WARNING: no new market data received - check host/area ids in config_v41.yaml (intraday_api)")
 
-    target_col = 'target_spread_eur'
-    clean_df = df_matrix.dropna(subset=feature_cols + [target_col]).reset_index(drop=True)
 
-    X = clean_df[feature_cols]
-    y = clean_df[target_col]
-    return X, y, feature_cols
+def cmd_record(args, cfg):
+    from v4_1_intraday.collectors import nordpool_id as npid
+    print("Recording Nord Pool intraday market data - leave this window open (Ctrl+C to stop).")
+    npid.record(stop_after=None, subscribe_localview=not args.no_book)
 
-def run_v4_1_training_for_area(area="DK1", dk1_foundation_model=None):
-    print(f"\n=======================================================", flush=True)
-    print(f"  STARTING INSTITUTIONAL V4.1 OPTIMIZED TRAINING: {area}", flush=True)
-    print(f"=======================================================", flush=True)
-    start_time = time.time()
 
-    X, y, feature_cols = get_clean_training_matrix(area, dk1_foundation_model)
-    print(f"[{area}] Clean Dataset: {len(X)} rows | {len(feature_cols)} features.", flush=True)
+def cmd_lock(args, cfg):
+    from v4_1_intraday import journal as J
+    st = _store(cfg)
+    try:
+        res = J.lock(st, cfg)
+        n = J.settle(st, cfg)
+    finally:
+        st.close()
+    print(f"locked: {res} | settled now: {n}")
 
-    # 5-Fold Walk-Forward Cross-Validation
-    tscv = TimeSeriesSplit(n_splits=5)
 
-    candidate_configs = [
-        {
-            "config_id": 1,
-            "family": "StackingSuperEnsemble",
-            "params": {"meta": "RidgeCV_Positive_Blender", "base": ["LightGBM", "CatBoost", "RandomForest"]}
-        },
-        {
-            "config_id": 2,
-            "family": "RandomForest_Tuned",
-            "params": {"n_estimators": 160, "max_depth": 9, "min_samples_split": 4, "random_state": 42, "n_jobs": -1}
-        },
-        {
-            "config_id": 3,
-            "family": "LightGBM_Tuned",
-            "params": {"n_estimators": 220, "max_depth": 7, "learning_rate": 0.04, "subsample": 0.85, "reg_lambda": 2.5, "random_state": 42, "n_jobs": -1, "verbose": -1}
-        },
-        {
-            "config_id": 4,
-            "family": "CatBoost_Tuned",
-            "params": {"iterations": 220, "depth": 6, "learning_rate": 0.04, "l2_leaf_reg": 3.5, "random_seed": 42, "verbose": 0}
-        }
-    ]
+def cmd_backfill(args, cfg):
+    """Re-read recently published EDS imbalance prices into the store (fills late prices)."""
+    from v4_1_intraday import backfill_imbalance as B
+    return B.main(["--hours", str(getattr(args, "hours", 48) or 48)])
 
-    results = []
-    best_score = float('inf')
-    champion_config = None
-    champion_model_obj = None
 
-    for cfg in candidate_configs:
-        cfg_id = cfg["config_id"]
-        family = cfg["family"]
-        params = cfg["params"]
-        fold_maes, fold_rmses, fold_hits = [], [], []
+def cmd_cycle(args, cfg):
+    """One paper-trading cycle. Data problems never stop the locking of the next gates."""
+    r = subprocess.run([sys.executable, "run.py", "update"], cwd=str(S.V42_ROOT))
+    if r.returncode != 0:
+        print("WARNING: EDS update failed - locking with the data already stored")
+    args.source = args.source if getattr(args, "source", None) else "entsoe,umm,weather,frequency"
+    args.start = None
+    try:
+        cmd_collect(args, cfg)
+    except Exception as e:
+        print(f"WARNING: collect failed: {e}")
+    # Settlement prices appear ~20 min after a quarter and the collector stores the row earlier
+    # with an empty price, so re-read the recent window before settling the journal.
+    try:
+        cmd_backfill(args, cfg)
+    except Exception as e:
+        print(f"WARNING: imbalance backfill failed: {e}")
+    cmd_lock(args, cfg)
 
-        for fold, (train_idx, test_idx) in enumerate(tscv.split(X)):
-            X_tr, y_tr = X.iloc[train_idx], y.iloc[train_idx]
-            X_te, y_te = X.iloc[test_idx], y.iloc[test_idx]
 
-            if family == "StackingSuperEnsemble":
-                m = StackingSuperEnsembleV41()
-            elif family == "LightGBM_Tuned":
-                m = LGBMRegressor(**params)
-            elif family == "CatBoost_Tuned":
-                m = CatBoostRegressor(**params)
-            else:
-                m = RandomForestRegressor(**params)
+def cmd_journal(args, cfg):
+    from v4_1_intraday import journal as J
+    s = J.summary(cfg, days=args.days)
+    if s.empty:
+        print("journal is empty - run `train_v4_1.py cycle` (scheduled every 15 min)")
+        return
+    print(s.to_string(index=False))
+    print(f"journal file: {J.path(cfg)}")
 
-            m.fit(X_tr, y_tr)
-            preds = m.predict(X_te)
 
-            mae = mean_absolute_error(y_te, preds)
-            rmse = np.sqrt(mean_squared_error(y_te, preds))
-            hit = (np.sign(preds) == np.sign(y_te.values)).mean() * 100.0
+def cmd_all(args, cfg):
+    cmd_update(args, cfg)
+    args.source, args.start = None, None
+    cmd_collect(args, cfg)
+    cmd_leaktest(args, cfg)
+    cmd_replay(args, cfg)
+    cmd_train(args, cfg)
 
-            fold_maes.append(mae)
-            fold_rmses.append(rmse)
-            fold_hits.append(hit)
 
-        mean_mae = np.mean(fold_maes)
-        mean_rmse = np.mean(fold_rmses)
-        mean_hit = np.mean(fold_hits)
+def main():
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--config", default=None)
+    sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("update")
+    sp = sub.add_parser("leaktest"); sp.add_argument("--samples", type=int, default=5)
+    sp = sub.add_parser("replay"); sp.add_argument("--area")
+    sp = sub.add_parser("train"); sp.add_argument("--area")
+    sp = sub.add_parser("predict"); sp.add_argument("--area", required=True); sp.add_argument("--day")
+    sp = sub.add_parser("all"); sp.add_argument("--area"); sp.add_argument("--samples", type=int, default=5)
+    sp = sub.add_parser("collect"); sp.add_argument("--source"); sp.add_argument("--start")
+    sub.add_parser("sources")
+    sp = sub.add_parser("probe-nordpool"); sp.add_argument("--seconds", type=int, default=60)
+    sp = sub.add_parser("record-intraday"); sp.add_argument("--no-book", action="store_true")
+    sp = sub.add_parser("cycle"); sp.add_argument("--source")
+    sub.add_parser("lock")
+    sp = sub.add_parser("backfill"); sp.add_argument("--hours", type=int, default=48)
+    sp = sub.add_parser("journal"); sp.add_argument("--days", type=int, default=None)
+    args = p.parse_args()
+    cfg = S.load(args.config)
+    {"update": cmd_update, "leaktest": cmd_leaktest, "replay": cmd_replay, "train": cmd_train,
+     "predict": cmd_predict, "all": cmd_all, "collect": cmd_collect, "sources": cmd_sources,
+     "probe-nordpool": cmd_probe_nordpool, "record-intraday": cmd_record,
+     "cycle": cmd_cycle, "lock": cmd_lock, "backfill": cmd_backfill, "journal": cmd_journal}[args.cmd](args, cfg)
 
-        entry = {
-            "config_id": cfg_id,
-            "family": family,
-            "params": params,
-            "cv_mae": round(mean_mae, 4),
-            "cv_rmse": round(mean_rmse, 4),
-            "cv_directional_accuracy_pct": round(mean_hit, 2)
-        }
-        results.append(entry)
-        print(f"[{area}] Config #{cfg_id} ({family}): MAE={mean_mae:.4f} EUR | RMSE={mean_rmse:.4f} EUR | Hit Rate={mean_hit:.2f}%", flush=True)
 
-        if mean_mae < best_score:
-            best_score = mean_mae
-            champion_config = entry
-
-    # Train Final Champion on Entire Authentic Dataset
-    print(f"\n[{area}] Training Final V4.1 Champion: {champion_config['family']}...", flush=True)
-    if champion_config['family'] == "StackingSuperEnsemble":
-        final_model = StackingSuperEnsembleV41()
-    elif champion_config['family'] == "LightGBM_Tuned":
-        final_model = LGBMRegressor(**champion_config['params'])
-    elif champion_config['family'] == "CatBoost_Tuned":
-        final_model = CatBoostRegressor(**champion_config['params'])
-    else:
-        final_model = RandomForestRegressor(**champion_config['params'])
-
-    final_model.fit(X, y)
-
-    # Feature Importance Extraction
-    fi_dict = {}
-    if hasattr(final_model, 'feature_importances_'):
-        imp = final_model.feature_importances_
-        imp_norm = (imp / imp.sum()) * 100.0
-        fi_dict = {feature_cols[i]: round(float(imp_norm[i]), 2) for i in np.argsort(-imp_norm)}
-    elif hasattr(final_model, 'm_rf') and hasattr(final_model.m_rf, 'feature_importances_'):
-        imp = final_model.m_rf.feature_importances_
-        imp_norm = (imp / imp.sum()) * 100.0
-        fi_dict = {feature_cols[i]: round(float(imp_norm[i]), 2) for i in np.argsort(-imp_norm)}
-
-    # Save Bundles
-    os.makedirs('models_v4_1', exist_ok=True)
-    bundle = {
-        "model": final_model,
-        "feature_cols": feature_cols,
-        "champion_info": champion_config,
-        "trained_at": datetime.now().isoformat()
-    }
-    
-    model_save_path = f"models_v4_1/v4_1_champion_model_{area}.pkl"
-    joblib.dump(bundle, model_save_path)
-    joblib.dump(feature_cols, f"models_v4_1/v4_1_features_{area}.pkl")
-
-    log_data = {
-        "area": area,
-        "completed_at": datetime.now().isoformat(),
-        "dataset_rows": len(X),
-        "feature_count": len(feature_cols),
-        "champion": champion_config,
-        "all_configs": results,
-        "feature_importance_ranking": fi_dict
-    }
-
-    log_save_path = f"models_v4_1/grid_search_results_{area}.json"
-    with open(log_save_path, 'w') as f:
-        json.dump(log_data, f, indent=2)
-
-    elapsed = time.time() - start_time
-    print(f"[{area}] [SUCCESS] V4.1 Champion Model saved to {model_save_path} in {elapsed:.1f}s!", flush=True)
-    return bundle
-
-if __name__ == '__main__':
-    # 1. Train DK1 High-Capacity Base Foundation Model
-    dk1_bundle = run_v4_1_training_for_area("DK1")
-    # 2. Train DK2 with DK1 Foundational Transfer Prior
-    run_v4_1_training_for_area("DK2", dk1_foundation_model=dk1_bundle)
+if __name__ == "__main__":
+    main()
