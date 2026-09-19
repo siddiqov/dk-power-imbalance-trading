@@ -1,3 +1,7 @@
+import os
+from dotenv import load_dotenv
+load_dotenv()
+import os
 import sys, os, joblib, time
 import pandas as pd
 import numpy as np
@@ -8,7 +12,7 @@ sys.path.append(os.path.abspath('.'))
 from src.data_ingestion_v2 import V2DataEngine
 from src.feature_engineering_v3 import V3DeskFeatureEngine
 
-ENTSOE_TOKEN = "01bb4846-6f4c-4e0f-8333-6c709b316594"
+ENTSOE_TOKEN = os.environ.get("ENTSOE_TOKEN", "")
 CHOSEN_V3_1_BASELINE = "Transfer-BiLSTM"
 
 def fetch_real_v3_1_baseline_scores(area="DK1"):

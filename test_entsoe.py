@@ -1,7 +1,8 @@
+import os
 from entsoe import EntsoePandasClient
 import pandas as pd
 
-client = EntsoePandasClient(api_key="01bb4846-6f4c-4e0f-8333-6c709b316594")
+client = EntsoePandasClient(api_key=os.environ.get("ENTSOE_TOKEN", ""))
 
 start = pd.Timestamp.now(tz='Europe/Copenhagen').floor('D')
 end = start + pd.Timedelta(days=1)

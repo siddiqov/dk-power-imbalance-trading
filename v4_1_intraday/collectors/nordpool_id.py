@@ -12,10 +12,10 @@ Protocol (Nord Pool public-intraday-api example):
     server sends "o" (open), "h" (heartbeat), a["<stomp frame>", ...]; client sends ["<stomp frame>"].
     Fallback: plain STOMP on /user/websocket or /user. STOMP 1.2, CONNECT header X-AUTH-TOKEN
   * Subscriptions: /user/<user>/v1/streaming/deliveryAreas
-                   /user/<user>/v1/conflated/contracts
-                   /user/<user>/v1/conflated/publicStatistics/<areaId>
+                   /user/<user>/v1/streaming/contracts
+                   /user/<user>/v1/streaming/publicStatistics/<areaId>
                    /user/<user>/v1/streaming/ticker
-                   /user/<user>/v1/conflated/localview/<areaId>
+                   /user/<user>/v1/streaming/localview/<areaId>
 Prices arrive in cents (EUR/MWh * 100); quantity scale is configurable (intraday_api.qty_divisor)
 and is checked by `train_v4_1.py probe-nordpool`.
 
@@ -55,6 +55,7 @@ DEFAULTS = {
     "price_divisor": 100.0,
     "qty_divisor": 1000.0,
     "book_depth_eur": 5.0,
+    "publishing_mode": "streaming",
 }
 
 
@@ -280,7 +281,7 @@ def write_rows(rows: dict, root: Path) -> int:
         df = pd.DataFrame(lst)
         for c in ("sent_at", "last_trade_time", "updated_at", "dlvry_start", "dlvry_end", "trade_time"):
             if c in df.columns:
-                df[c] = pd.to_datetime(df[c], utc=True, errors="coerce").dt.tz_localize(None)
+                df[c] = pd.to_datetime(df[c], utc=True, errors="coerce", format="ISO8601").dt.tz_localize(None)
         if "recv_utc" in df.columns:
             df["recv_utc"] = pd.to_datetime(df["recv_utc"], utc=True).dt.tz_localize(None)
         d = root / table / f"date={stamp:%Y-%m-%d}"
@@ -345,8 +346,9 @@ async def _session(c: dict, router: Router, root: Path, stop_after: float | None
             await tr.send(stomp_frame("SUBSCRIBE", {"destination": dest, "id": f"sub-{sub_id}"}))
 
         base = f"/user/{user}/v1"
+        mode = c.get("publishing_mode", "streaming")   # this account rejects "conflated"
         await sub(f"{base}/streaming/deliveryAreas")
-        await sub(f"{base}/conflated/contracts")
+        await sub(f"{base}/{mode}/contracts")
         await sub(f"{base}/streaming/ticker")
 
         async def heartbeat():
@@ -369,9 +371,9 @@ async def _session(c: dict, router: Router, root: Path, stop_after: float | None
                     if not ids:
                         log.error("DK delivery area ids unknown (no deliveryAreas message) - set intraday_api.area_ids")
                     for aid in ids:
-                        await sub(f"{base}/conflated/publicStatistics/{aid}")
+                        await sub(f"{base}/{mode}/publicStatistics/{aid}")
                         if subscribe_localview:
-                            await sub(f"{base}/conflated/localview/{aid}")
+                            await sub(f"{base}/{mode}/localview/{aid}")
                     area_subscribed = True
                     log.info("subscribed to statistics/order book for areas %s", ids)
                 msg = await tr.recv(5)

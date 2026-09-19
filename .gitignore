@@ -94,3 +94,8 @@ trading_history.db-wal
 bidder-portal/node_modules/
 bidder-portal/dist/
 bidder-portal/.env
+logs/
+Nurex_V4_2/data/nordpool_id/
+
+# Nurex V4.1 paper-trading journal
+data/v41_journal.sqlite

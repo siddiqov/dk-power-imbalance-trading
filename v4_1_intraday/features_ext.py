@@ -41,13 +41,15 @@ NEIGHBOUR_AREAS = {"DK1": ["DE_LU", "NO2", "SE3", "NL"], "DK2": ["DE_LU", "SE4"]
 
 
 def _unplanned(s: pd.Series) -> pd.Series:
-    t = s.astype(str).str.lower()
-    return t.str.contains("unplan") | (t == "2")
+    # Nord Pool UMM: unavailabilityType 1 = unplanned, 2 = planned (verified on live data 17 Sep 2026)
+    t = s.astype(str).str.lower().str.replace(".0", "", regex=False)
+    return t.str.contains("unplan") | (t == "1")
 
 
 def _dismissed(s: pd.Series) -> pd.Series:
-    t = s.astype(str).str.lower()
-    return t.str.contains("dismiss") | t.str.contains("cancel") | t.str.contains("withdraw")
+    # Nord Pool UMM: eventStatus 1 = active, 3 = dismissed / replaced
+    t = s.astype(str).str.lower().str.replace(".0", "", regex=False)
+    return t.str.contains("dismiss") | t.str.contains("cancel") | t.str.contains("withdraw") | (t == "3")
 
 
 class ExtMixin:
@@ -130,11 +132,21 @@ class ExtMixin:
         return out
 
     def _psrn_sign_for(self, sched: str, psrn_col: str):
+        """Sign convention of the PSRN flow column relative to the ENTSO-E schedule direction.
+
+        Calibrated ONLY on a fixed warm-up window at the very start of the store
+        (`sign_calibration_days`, default 45). Using the full history would let data published
+        after the decision time decide whether a feature exists at all - a look-ahead that also
+        made the feature set unstable (leaktest KeyError 'live_flowdev_*', 17 Sep 2026).
+        The convention is a static property of the feed, so an early window is enough."""
         key = (sched, psrn_col)
         if key not in self._psrn_sign:
             s = None
             if self.psrn is not None and psrn_col in self.psrn.columns and sched in self.ent2.columns:
                 d = pd.concat([self.psrn[psrn_col], self.ent2[sched]], axis=1).dropna()
+                if len(d):
+                    days = int(self.cfg.get("sign_calibration_days", 45) or 45)
+                    d = d.loc[: d.index.min() + pd.Timedelta(days=days)]
                 if len(d) > 500:
                     c = np.corrcoef(d.iloc[:, 0], d.iloc[:, 1])[0, 1]
                     s = float(np.sign(c)) if abs(c) > 0.3 else None
@@ -193,8 +205,8 @@ class ExtMixin:
                     d = gr(ph) - gr(sc)
                     cols[f"e_physdev_{nb}_last"] = d
                     devs.append(d)
-            if devs:
-                cols["e_physdev_sum_last"] = np.nansum(np.vstack(devs), axis=0)
+            cols["e_physdev_sum_last"] = (np.nansum(np.vstack(devs), axis=0) if devs
+                                          else np.full(len(q), np.nan))
             # live flow deviation (PSRN, 5 min lag) vs schedule
             if self.psrn is not None:
                 tp = (a - self.lag_psrn).dt.floor("15min") - Q
@@ -203,6 +215,8 @@ class ExtMixin:
                     sc = f"sched:{area}>{nb}"
                     s = self._psrn_sign_for(sc, pcol) if sc in E.columns else None
                     if s is None:
+                        # column still emitted (all-NaN) so the feature set never depends on data
+                        cols[f"live_flowdev_{nb}"] = np.full(len(q), np.nan)
                         continue
                     live = self._look_grid(self.psrn, tp, [pcol])[pcol].values
                     sch = E[sc].reindex(pd.DatetimeIndex(tp)).values
@@ -210,8 +224,8 @@ class ExtMixin:
                     d = np.where(ok, s * live - sch, np.nan)
                     cols[f"live_flowdev_{nb}"] = d
                     ldev.append(d)
-                if ldev:
-                    cols["live_flowdev_sum"] = np.nansum(np.vstack(ldev), axis=0)
+                cols["live_flowdev_sum"] = (np.nansum(np.vstack(ldev), axis=0) if ldev
+                                            else np.full(len(q), np.nan))
         # ---------------- UMM
         if self.umm is not None and len(self.umm):
             cols.update(self._umm_features(area, q, a))

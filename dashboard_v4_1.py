@@ -33,6 +33,27 @@ sys.path.append(os.path.abspath('.'))
 from src.tournament_tables_v2 import TournamentTableGenerator
 from src.commercial_strategy_v3_1 import V31CommercialStrategyEngine
 from v4_1_intraday import dashboard_adapter as v41id  # V4.1 intraday engine (point-in-time, gate closure)
+
+# Why the per-quarter cross-border columns are (or are not) available, keyed by (area, date).
+# 'ok' | 'stale' (store was busy, cached day reused) | 'busy' | 'unpublished' | 'error'
+FLOW_STATUS = {}
+
+# ---- Flow sign convention (uniform across every table in this dashboard) ----
+#   positive = EXPORT out of the selected zone, negative = IMPORT into it.
+# ENTSO-E series (the ledger's per-quarter columns) already follow it.
+# Energinet's live Exchange_* series are the exact mirror - verified against
+# ENTSO-E phys:DK1>X on 2026-09-18 (correlation -1.000) - so they are negated
+# for display only. The V4.0 model keeps the raw sign it was trained on.
+FLOW_CONVENTION_NOTE = ("Flow sign convention: **positive = export out of "
+                        "the zone**, negative = import into it (ENTSO-E convention).")
+
+
+def exp_pos(v):
+    """Energinet live flow (import-positive) -> export-positive, for display."""
+    try:
+        return -float(v)
+    except (TypeError, ValueError):
+        return 0.0
 from src.feature_engineering_v4_1 import V41FeatureEngine, CABLE_CAPACITIES
 from src.balancing_market_v4_1 import fetch_mfrr_energy_activations, fetch_afrr_energy_activations, get_latest_balancing_state
 from src.smard_client import get_german_system_balance_telemetry
@@ -166,6 +187,17 @@ st.sidebar.markdown("### 🛡️ Risk & Execution Controls")
 use_circuit_breaker = st.sidebar.checkbox("95th Pct Dynamic Circuit Breaker", value=True)
 crash_protection_enabled = st.sidebar.checkbox("Physical Crash Protection Trigger", value=True)
 use_evening_guard = st.sidebar.checkbox("🛡️ Intraday Evening Ramping Guard (21:30–23:45)", value=True, help="Mitigate late-evening liquidity collapse & TSO downward balancing dumps.")
+
+# V4.1 decides a quarter only when expected edge clears a margin AND the direction probability
+# clears a minimum. Those two numbers were chosen on the validation window during training.
+# The looser levels are a what-if view of the SAME forecasts at a lower bar - not validated.
+threshold_level = st.sidebar.selectbox(
+    "V4.1 Signal Thresholds",
+    ["Validated (from training)", "Balanced (what-if)", "Aggressive (what-if)"],
+    index=0,
+    help="Validated uses the margin / probability pair tuned on held-out data. The what-if levels halve or quarter the margin and lower the probability bar, so more quarters qualify - more trades, more exposure, and no validation behind them.")
+THRESHOLD_KEY = {"Validated (from training)": "validated", "Balanced (what-if)": "balanced",
+                 "Aggressive (what-if)": "aggressive"}[threshold_level]
 high_conviction_vol = st.sidebar.slider("High-Conviction Trade Size (MW)", 10, 50, 25)
 standard_vol = st.sidebar.slider("Standard Trade Size (MW)", 5, 20, 10)
 
@@ -222,6 +254,19 @@ with st.sidebar.expander("\U0001f50c Interconnector rule - options to test", exp
                    f"({_ic_choice['saved_at']})")
 
 
+def _log_startup_error(where, exc):
+    """Append a full traceback to logs/dashboard_v4_1_errors.log (the browser truncates them)."""
+    import traceback
+    try:
+        os.makedirs('logs', exist_ok=True)
+        with open(os.path.join('logs', 'dashboard_v4_1_errors.log'), 'a', encoding='utf-8') as fh:
+            fh.write('=' * 70 + chr(10))
+            fh.write(f'{datetime.now():%Y-%m-%d %H:%M:%S}  {where}{chr(10)}')
+            fh.write(''.join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+    except Exception:
+        pass
+
+
 # Load V4.0 and V4.1 Models & Logs
 @st.cache_resource(ttl=300)
 def load_models_and_logs(area):
@@ -238,8 +283,15 @@ def load_models_and_logs(area):
             bundle_v4 = {"model": raw, "feature_cols": cols}
 
     # Load V4.1 Intraday Model (trained by: python train_v4_1.py train)
-    bundle_v41 = v41id.load_bundle(area)
-    log_v41 = v41id.model_info(area)
+    # A failure here used to take the whole page down; the V4.0 side and the ledger still work
+    # without it, so log the traceback to logs/ and carry on with the V4.1 model absent.
+    try:
+        bundle_v41 = v41id.load_bundle(area)
+        log_v41 = v41id.model_info(area)
+    except Exception as _e:
+        bundle_v41, log_v41 = None, None
+        _log_startup_error(f'load_models_and_logs({area})', _e)
+        st.sidebar.error(f'V4.1 intraday model unavailable: {type(_e).__name__}: {_e}')
 
     return bundle_v4, bundle_v41, log_v41
 
@@ -354,7 +406,7 @@ def get_dynamic_price_cap(area, current_date_str):
 
 # --- LOAD TRADING DAY DATA MATRIX (V4.0 and V4.1) ---
 @st.cache_data(ttl=180)
-def get_v4_1_trading_day_data(area, date_str):
+def get_v4_1_trading_day_data(area, date_str, threshold_key='validated'):
     fe41 = V41FeatureEngine(price_area=area)
     table_gen = TournamentTableGenerator(price_area=area)
     
@@ -532,9 +584,12 @@ def get_v4_1_trading_day_data(area, date_str):
     v41 = pd.DataFrame()
     if bundle_v41 is not None:
         try:
-            v41 = v41id.day_decisions(area, date_str)
+            _params = (v41id.decision_params(area, threshold_key)
+                       if hasattr(v41id, 'decision_params') else None)
+            v41 = v41id.day_decisions(area, date_str, params=_params)
         except Exception as e:
-            st.warning(f"V4.1 intraday engine unavailable: {e}")
+            _log_startup_error(f'day_decisions({area}, {date_str})', e)
+            st.warning(f"V4.1 intraday engine unavailable: {type(e).__name__}: {e}")
     key = pd.to_datetime(df_matrix['time_dk']).dt.strftime('%Y-%m-%d %H:%M') if 'time_dk' in df_matrix.columns else None
     if not v41.empty and key is not None:
         m = v41.set_index('time_dk_str')
@@ -568,8 +623,13 @@ def get_v4_1_trading_day_data(area, date_str):
     # Replaces the single live snapshot that used to be broadcast across all 96 quarters.
     try:
         fl = v41id.day_flows(area, date_str) if hasattr(v41id, 'day_flows') else pd.DataFrame()
-    except Exception:
+        fl_status = fl.attrs.get('status', 'ok' if not fl.empty else 'unpublished')
+    except Exception as _e:
         fl = pd.DataFrame()
+        fl_status = 'error'
+        _log_startup_error(f'day_flows({area}, {date_str})', _e)
+    FLOW_STATUS[(area, date_str)] = fl_status
+    df_matrix['_flow_status'] = fl_status  # survives st.cache_data, unlike a module global
     if not fl.empty and key is not None:
         mf = fl.set_index('time_dk_str')
         for c in [c for c in mf.columns if c.startswith(('sched_', 'dev_'))]:
@@ -585,7 +645,13 @@ def get_v4_1_trading_day_data(area, date_str):
 
     return df_matrix
 
-df_day = get_v4_1_trading_day_data(selected_area, date_str_selected)
+df_day = get_v4_1_trading_day_data(selected_area, date_str_selected, THRESHOLD_KEY)
+if THRESHOLD_KEY != 'validated':
+    st.warning(
+        f'V4.1 is running on **{threshold_level}** thresholds: a what-if view of the same forecasts '
+        'at a lower bar for taking a trade. It trades more often and carries more exposure, and these '
+        'thresholds were not validated on held-out data. Paper-trading journal entries are left '
+        'untouched while this is on.')
 
 # --- TOP SUMMARY BANNER & METRICS ---
 st.title(f"⚡ Nurex V4.1 Institutional High-Alpha Command Center ({selected_area})")
@@ -626,16 +692,17 @@ with tab_cables:
     """)
 
     cables_data = [
-        {"Border": "DK1 <-> Germany (DE-LU)", "Zone": "DK1", "Cable Name": "Kassø-Audorf Lines", "Capacity (MW)": 2500, "Current Flow (MW)": df_day['flow_de'].iloc[-1] if not df_day.empty and 'flow_de' in df_day.columns else -120.0},
-        {"Border": "DK1 <-> Norway (NO2)", "Zone": "DK1", "Cable Name": "Skagerrak 1-4", "Capacity (MW)": 1640, "Current Flow (MW)": (df_day['flow_nordic'].iloc[-1] if not df_day.empty and 'flow_nordic' in df_day.columns else 350.0) * 0.7},
-        {"Border": "DK1 <-> Sweden (SE3)", "Zone": "DK1", "Cable Name": "Konti-Skan 1-2", "Capacity (MW)": 680, "Current Flow (MW)": (df_day['flow_nordic'].iloc[-1] if not df_day.empty and 'flow_nordic' in df_day.columns else 350.0) * 0.3},
-        {"Border": "DK1 <-> Great Britain (GB)", "Zone": "DK1", "Cable Name": "Viking Link", "Capacity (MW)": 1400, "Current Flow (MW)": df_day['flow_gb'].iloc[-1] if not df_day.empty and 'flow_gb' in df_day.columns else 450.0},
-        {"Border": "DK1 <-> Netherlands (NL)", "Zone": "DK1", "Cable Name": "COBRAcable", "Capacity (MW)": 700, "Current Flow (MW)": df_day['flow_nl'].iloc[-1] if not df_day.empty and 'flow_nl' in df_day.columns else -40.0},
-        {"Border": "DK1 <-> DK2", "Zone": "Both", "Cable Name": "Great Belt (Storebælt HVDC)", "Capacity (MW)": 580, "Current Flow (MW)": df_day['flow_great_belt'].iloc[-1] if not df_day.empty and 'flow_great_belt' in df_day.columns else -80.0},
-        {"Border": "DK2 <-> Sweden (SE4)", "Zone": "DK2", "Cable Name": "Øresund Cable", "Capacity (MW)": 1240, "Current Flow (MW)": df_day['flow_se'].iloc[-1] if not df_day.empty and 'flow_se' in df_day.columns else 280.0},
-        {"Border": "DK2 <-> Germany (DE-LU)", "Zone": "DK2", "Cable Name": "Kontek + Kriegers Flak", "Capacity (MW)": 985, "Current Flow (MW)": df_day['flow_de'].iloc[-1] if not df_day.empty and 'flow_de' in df_day.columns else 90.0}
+        {"Border": "DK1 → Germany (DE-LU)", "Zone": "DK1", "Cable Name": "Kassø-Audorf Lines", "Capacity (MW)": 2500, "Current Flow (MW)": exp_pos(df_day['flow_de'].iloc[-1]) if not df_day.empty and 'flow_de' in df_day.columns else -120.0},
+        {"Border": "DK1 → Norway (NO2)", "Zone": "DK1", "Cable Name": "Skagerrak 1-4", "Capacity (MW)": 1640, "Current Flow (MW)": exp_pos(df_day['flow_nordic'].iloc[-1]) * 0.7 if not df_day.empty and 'flow_nordic' in df_day.columns else 350.0},
+        {"Border": "DK1 → Sweden (SE3)", "Zone": "DK1", "Cable Name": "Konti-Skan 1-2", "Capacity (MW)": 680, "Current Flow (MW)": exp_pos(df_day['flow_nordic'].iloc[-1]) * 0.3 if not df_day.empty and 'flow_nordic' in df_day.columns else 350.0},
+        {"Border": "DK1 → Great Britain (GB)", "Zone": "DK1", "Cable Name": "Viking Link", "Capacity (MW)": 1400, "Current Flow (MW)": exp_pos(df_day['flow_gb'].iloc[-1]) if not df_day.empty and 'flow_gb' in df_day.columns else 450.0},
+        {"Border": "DK1 → Netherlands (NL)", "Zone": "DK1", "Cable Name": "COBRAcable", "Capacity (MW)": 700, "Current Flow (MW)": exp_pos(df_day['flow_nl'].iloc[-1]) if not df_day.empty and 'flow_nl' in df_day.columns else -40.0},
+        {"Border": "DK1 → DK2", "Zone": "Both", "Cable Name": "Great Belt (Storebælt HVDC)", "Capacity (MW)": 580, "Current Flow (MW)": exp_pos(df_day['flow_great_belt'].iloc[-1]) if not df_day.empty and 'flow_great_belt' in df_day.columns else -80.0},
+        {"Border": "DK2 → Sweden (SE4)", "Zone": "DK2", "Cable Name": "Øresund Cable", "Capacity (MW)": 1240, "Current Flow (MW)": exp_pos(df_day['flow_se'].iloc[-1]) if not df_day.empty and 'flow_se' in df_day.columns else 280.0},
+        {"Border": "DK2 → Germany (DE-LU)", "Zone": "DK2", "Cable Name": "Kontek + Kriegers Flak", "Capacity (MW)": 985, "Current Flow (MW)": exp_pos(df_day['flow_de'].iloc[-1]) if not df_day.empty and 'flow_de' in df_day.columns else 90.0}
     ]
 
+    st.caption(FLOW_CONVENTION_NOTE)
     cable_df = pd.DataFrame(cables_data)
     cable_df['Headroom (MW)'] = cable_df['Capacity (MW)'] - cable_df['Current Flow (MW)'].abs()
     cable_df['Utilization (%)'] = ((cable_df['Current Flow (MW)'].abs() / cable_df['Capacity (MW)']) * 100).round(1)
@@ -747,6 +814,11 @@ with tab_unified_ledger:
         # Pre-generate Master-Detail Accordion HTML
         # getattr: a Streamlit rerun keeps the module imported at startup, so after an
         # upgrade of v4_1_intraday the new names may not exist until the app is restarted.
+        st.caption(FLOW_CONVENTION_NOTE)
+        show_v40 = st.checkbox(
+            'Show V4.0 comparison columns', value=False, key='ledger_show_v40',
+            help='Off: V4.1 columns only. On: the V4.0 champion is shown beside it for comparison.')
+
         _fb = getattr(v41id, 'FLOW_BORDERS', {})
         ic_labels = [lbl for _b, lbl in _fb.get(selected_area, [])
                      if f'ic_sched_{lbl}' in df_day.columns]
@@ -758,8 +830,25 @@ with tab_unified_ledger:
             f'onclick="copySingleColumn(this, event)">\U0001f4cb</button></div></th>'
             for lbl in ic_labels)
         if not ic_labels:
-            ic_ths = ('<th class="no-drag" title="ENTSO-E schedules not available for this day">'
+            _fs = (str(df_day['_flow_status'].iloc[0]) if '_flow_status' in df_day.columns and len(df_day)
+                   else FLOW_STATUS.get((selected_area, date_str_selected), 'unknown'))
+            if not hasattr(v41id, '_flows_status'):
+                # Streamlit reruns the script but does NOT re-import modules already loaded at
+                # startup, so an updated v4_1_intraday only takes effect after a full restart.
+                _why = ('the v4_1_intraday adapter loaded in memory is out of date - restart the '
+                        'dashboard process (a browser reload is not enough)')
+            else:
+                _why = {
+                    'busy': 'V4.2 store locked by a running collector - reload in a moment',
+                    'error': 'flow lookup failed - see the dashboard log',
+                    'unpublished': 'ENTSO-E schedules not published for this day',
+                    'unknown': 'flow status not recorded for this day - reload the page',
+                }.get(_fs, 'ENTSO-E schedules not available for this day')
+            ic_ths = ('<th class="no-drag" title="' + _why + '">'
                       '<div class="col-header-wrap"><span class="col-title">Flows</span></div></th>')
+            st.caption(f'\u26a0\ufe0f Cross-border columns unavailable: {_why}.')
+        elif (df_day['_flow_status'].iloc[0] if '_flow_status' in df_day.columns and len(df_day) else '') == 'stale':
+            st.caption('\u2139\ufe0f Cross-border flows served from the last good read - the V4.2 store was busy.')
 
         rows_html = []
         for i, row in df_day.iterrows():
@@ -771,12 +860,13 @@ with tab_unified_ledger:
             spot_val = row.get('spot_price_eur', 0.0)
             cap_val = row.get('Dynamic_Cap_EUR', 223.40)
             de_spot_val = row.get('de_spot_eur', spot_val)
-            f_de = row.get('flow_de', row.get('scheduled_flow_mw', 0.0))
-            f_nl = row.get('flow_nl', 0.0)
-            f_no = row.get('flow_no', 0.0)
-            f_se = row.get('flow_se', 0.0)
-            f_gb = row.get('flow_gb', 0.0)
-            f_sb = row.get('flow_great_belt', 0.0)
+            # Energinet live snapshot, shown export-positive like every other table
+            f_de = exp_pos(row.get('flow_de', row.get('scheduled_flow_mw', 0.0)))
+            f_nl = exp_pos(row.get('flow_nl', 0.0))
+            f_no = exp_pos(row.get('flow_no', 0.0))
+            f_se = exp_pos(row.get('flow_se', 0.0))
+            f_gb = exp_pos(row.get('flow_gb', 0.0))
+            f_sb = exp_pos(row.get('flow_great_belt', 0.0))
             
             # Interconnectors (authentic per-quarter schedules; blank when not published)
             ic_tds = ""
@@ -839,6 +929,17 @@ with tab_unified_ledger:
             else:
                 da_outlay, settle_cf, gross, fees, net_cf = "€0.00", "€0.00", "€0.00", "€0.00", "€0.00 (Capital Protected)"
 
+            v40_audit_row = (f'<tr><td><b>V4.0 Full-Grid</b></td><td style="text-align:right;">\u20ac{v4_imb:.2f}</td>'
+                             f'<td style="text-align:center;">{v4_dec}</td>'
+                             f'<td style="text-align:right;">{pnl4_text}</td></tr>') if show_v40 else ''
+            alpha_notice = ('<div class="audit-notice"><b>Alpha Outperformance:</b> vs V4.0: <b>'
+                            + (f'\u20ac{v41_pnl - v4_pnl:+,.2f}' if pd.notna(v41_pnl) and pd.notna(v4_pnl) else '--')
+                            + '</b></div>') if show_v40 else ''
+
+            v40_tds = (f'<td style="font-weight:600; color:#0284C7;">\u20ac{v4_imb:.2f}</td>'
+                       f'<td><span class="badge {dec4_class}">{v4_dec}</span></td>'
+                       f'<td class="{pnl4_class}">{pnl4_text}</td>') if show_v40 else ''
+
             zebra_class = "even-row" if row_idx % 2 == 0 else "odd-row"
             mfrr_up = row.get('mfrr_up_mw', 0.0)
             mfrr_dn = row.get('mfrr_down_mw', 0.0)
@@ -853,10 +954,7 @@ with tab_unified_ledger:
                 <td>€{de_spot_val:.2f}</td>
                 {ic_tds}
                 
-                <!-- V4.0 Column Group -->
-                <td style="font-weight:600; color:#0284C7;">€{v4_imb:.2f}</td>
-                <td><span class="badge {dec4_class}">{v4_dec}</span></td>
-                <td class="{pnl4_class}">{pnl4_text}</td>
+                {v40_tds}
                 
                 <!-- V4.1 Champion Column Group -->
                 <td style="font-weight:700; color:#0D9488; background-color:#F0FDFA;">€{v41_imb:.2f}</td>
@@ -868,7 +966,7 @@ with tab_unified_ledger:
                 <td>{status_badge}</td>
             </tr>
             <tr class="drawer-row" id="drawer-{row_idx}" style="display: none;">
-                <td colspan="{13 + max(1, len(ic_labels))}" class="drawer-cell">
+                <td colspan="{(13 if show_v40 else 10) + max(1, len(ic_labels))}" class="drawer-cell">
                     <div class="drawer-banner">
                         <span>⚡ <b>AUDIT BREAKDOWN:</b> {q_label} &mdash; V4.1 Institutional High-Alpha Engine</span>
                         <span><b>Delivery:</b> {time_val} CEST &bull; <b>MARI / PICASSO / SMARD / XBID Grounded</b></span>
@@ -886,7 +984,7 @@ with tab_unified_ledger:
                                     <tr><td><b>MARI mFRR Down</b></td><td style="text-align:right;">{mfrr_dn:.0f} MW</td><td style="text-align:right;">Merit Order</td></tr>
                                     <tr><td><b>🇩🇪 SMARD Residual Load</b></td><td style="text-align:right;">{smard_res:+,.0f} MW</td><td style="text-align:right;">DE System</td></tr>
                                     <tr><td><b>XBID Order Flow Skew</b></td><td style="text-align:right;">{skew:+.2f}</td><td style="text-align:right;">{'Buy Skew' if skew > 0 else 'Sell Skew'}</td></tr>
-                                    <tr><td><b>DE ➔ DK Physical Flow</b></td><td style="text-align:right;">{f_de:+.0f} MW</td><td style="text-align:right;">Kassø Lines</td></tr>
+                                    <tr><td><b>{selected_area} ➔ DE Physical Flow</b></td><td style="text-align:right;">{f_de:+.0f} MW</td><td style="text-align:right;">Kassø Lines (live, + = export)</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -898,13 +996,11 @@ with tab_unified_ledger:
                                     <tr><th>Model</th><th style="text-align:right;">Pred Imb</th><th style="text-align:center;">Decision</th><th style="text-align:right;">PnL (€)</th></tr>
                                 </thead>
                                 <tbody>
-                                    <tr><td><b>V4.0 Full-Grid</b></td><td style="text-align:right;">€{v4_imb:.2f}</td><td style="text-align:center;">{v4_dec}</td><td style="text-align:right;">{pnl4_text}</td></tr>
+                                    {v40_audit_row}
                                     <tr class="highlight-champ"><td><b>V4.1 High-Alpha</b></td><td style="text-align:right;">€{v41_imb:.2f}</td><td style="text-align:center;">{v41_dec}</td><td style="text-align:right;">{pnl41_text}</td></tr>
                                 </tbody>
                             </table>
-                            <div class="audit-notice">
-                                <b>Alpha Outperformance:</b> vs V4.0: <b>{('€' + f'{v41_pnl - v4_pnl:+,.2f}') if pd.notna(v41_pnl) and pd.notna(v4_pnl) else '--'}</b>
-                            </div>
+                            {alpha_notice}
                         </div>
                         <!-- Card 3: 💰 Commercial Cash Flow & PnL Ledger -->
                         <div class="drawer-card">
@@ -919,6 +1015,10 @@ with tab_unified_ledger:
                 </td>
             </tr>
             """)
+
+        v40_ths = ('<th draggable="true" title="V4.0 Predicted Imbalance Price (EUR) [Spot + Spread]" style="background-color:#0284C7;"><div class="col-header-wrap"><span class="col-title">V4.0 Pred</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">\U0001f4cb</button></div></th>'
+                   '<th draggable="true" title="V4.0 Champion Trading Decision" style="background-color:#0284C7;"><div class="col-header-wrap"><span class="col-title">V4.0 Pos</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">\U0001f4cb</button></div></th>'
+                   '<th draggable="true" title="V4.0 Realized Trading PnL (EUR)" style="background-color:#0284C7;"><div class="col-header-wrap"><span class="col-title">V4.0 PnL</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">\U0001f4cb</button></div></th>') if show_v40 else ''
 
         table_body = "\n".join(rows_html)
 
@@ -1298,9 +1398,7 @@ with tab_unified_ledger:
                   <th draggable="true" title="DK Day-Ahead Spot Price"><div class="col-header-wrap"><span class="col-title">DK Spot</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   <th draggable="true" title="German Day-Ahead Spot Price"><div class="col-header-wrap"><span class="col-title">DE Spot</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   {ic_ths}
-                  <th draggable="true" title="V4.0 Predicted Imbalance Price (€) [Spot + Spread]" style="background-color:#0284C7;"><div class="col-header-wrap"><span class="col-title">V4.0 Pred</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
-                  <th draggable="true" title="V4.0 Champion Trading Decision" style="background-color:#0284C7;"><div class="col-header-wrap"><span class="col-title">V4.0 Pos</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
-                  <th draggable="true" title="V4.0 Realized Trading PnL (€)" style="background-color:#0284C7;"><div class="col-header-wrap"><span class="col-title">V4.0 PnL</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
+                  {v40_ths}
                   <th draggable="true" title="V4.1 Predicted Imbalance Price (€) [Spot + Spread]" style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">V4.1 Pred</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   <th draggable="true" title="V4.1 Institutional Trading Decision" style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">V4.1 Pos</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   <th draggable="true" title="V4.1 Position Size with Conviction Scaling" style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">V4.1 Vol</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
@@ -1672,6 +1770,7 @@ with tab_xbid:
             help="Highlight hours where Intraday VWAP decouples from Day-Ahead Spot by more than this threshold."
         )
 
+    st.caption(FLOW_CONVENTION_NOTE + "  Live Energinet snapshot, repeated across quarters.")
     # --- BUILD NORD POOL ORDER BOOK DATASET ---
     if df_day.empty:
         st.warning("No live trading data available for selected date.")
@@ -1704,12 +1803,13 @@ with tab_xbid:
                 dam_diff = round(vwap - dam_spot, 2)
                 
                 # Cross-Border Flows & Capacities
-                f_de = sub.get('flow_de', sub.get('scheduled_flow_mw', pd.Series(0.0))).mean()
-                f_nl = sub.get('flow_nl', pd.Series(0.0)).mean()
-                f_no = sub.get('flow_nordic', pd.Series(0.0)).mean() * 0.7
-                f_se = sub.get('flow_nordic', pd.Series(0.0)).mean() * 0.3
-                f_gb = sub.get('flow_gb', pd.Series(0.0)).mean()
-                f_sb = sub.get('flow_great_belt', pd.Series(0.0)).mean()
+                # export-positive for display (see FLOW_CONVENTION_NOTE)
+                f_de = exp_pos(sub.get('flow_de', sub.get('scheduled_flow_mw', pd.Series(0.0))).mean())
+                f_nl = exp_pos(sub.get('flow_nl', pd.Series(0.0)).mean())
+                f_no = exp_pos(sub.get('flow_nordic', pd.Series(0.0)).mean()) * 0.7
+                f_se = exp_pos(sub.get('flow_nordic', pd.Series(0.0)).mean()) * 0.3
+                f_gb = exp_pos(sub.get('flow_gb', pd.Series(0.0)).mean())
+                f_sb = exp_pos(sub.get('flow_great_belt', pd.Series(0.0)).mean())
                 
                 # Settled Outcomes
                 settled_mask_sub = sub['is_settled'] if 'is_settled' in sub.columns else pd.Series([False]*len(sub))
@@ -1740,12 +1840,12 @@ with tab_xbid:
                     "VWAP (€)": vwap,
                     "DAM Spread (€)": dam_diff,
                     "Imbalance Bias": bias,
-                    "DE->DK (MW)": f_de,
-                    "NO->DK (MW)": f_no,
-                    "SE->DK (MW)": f_se,
-                    "GB->DK (MW)": f_gb,
-                    "NL->DK (MW)": f_nl,
-                    "Storebælt (MW)": f_sb,
+                    f"{selected_area}\u2192DE (MW)": f_de,
+                    f"{selected_area}\u2192NO2 (MW)": f_no,
+                    f"{selected_area}\u2192SE (MW)": f_se,
+                    f"{selected_area}\u2192GB (MW)": f_gb,
+                    f"{selected_area}\u2192NL (MW)": f_nl,
+                    f"{selected_area}\u2192{'DK2' if selected_area == 'DK1' else 'DK1'} (MW)": f_sb,
                     "Settled Imb (€)": settled_price,
                     "V4.1 PnL (€)": pnl_hourly_41,
                     "V4.0 PnL (€)": pnl_hourly_40,
@@ -1773,13 +1873,14 @@ with tab_xbid:
                 vwap = row.get('xbid_vwap_eur', dam_spot)
                 dam_diff = round(vwap - dam_spot, 2)
                 
-                f_de = row.get('flow_de', row.get('scheduled_flow_mw', 0.0))
-                f_nl = row.get('flow_nl', 0.0)
-                f_nord = row.get('flow_nordic', 0.0)
+                # export-positive for display (see FLOW_CONVENTION_NOTE)
+                f_de = exp_pos(row.get('flow_de', row.get('scheduled_flow_mw', 0.0)))
+                f_nl = exp_pos(row.get('flow_nl', 0.0))
+                f_nord = exp_pos(row.get('flow_nordic', 0.0))
                 f_no = f_nord * 0.7
                 f_se = f_nord * 0.3
-                f_gb = row.get('flow_gb', 0.0)
-                f_sb = row.get('flow_great_belt', 0.0)
+                f_gb = exp_pos(row.get('flow_gb', 0.0))
+                f_sb = exp_pos(row.get('flow_great_belt', 0.0))
                 
                 is_settled = row.get('is_settled', False)
                 settled_price = row.get('actual_settled_val', np.nan) if is_settled else np.nan
@@ -1805,12 +1906,12 @@ with tab_xbid:
                     "VWAP (€)": vwap,
                     "DAM Spread (€)": dam_diff,
                     "Imbalance Bias": bias,
-                    "DE->DK (MW)": f_de,
-                    "NO->DK (MW)": f_no,
-                    "SE->DK (MW)": f_se,
-                    "GB->DK (MW)": f_gb,
-                    "NL->DK (MW)": f_nl,
-                    "Storebælt (MW)": f_sb,
+                    f"{selected_area}\u2192DE (MW)": f_de,
+                    f"{selected_area}\u2192NO2 (MW)": f_no,
+                    f"{selected_area}\u2192SE (MW)": f_se,
+                    f"{selected_area}\u2192GB (MW)": f_gb,
+                    f"{selected_area}\u2192NL (MW)": f_nl,
+                    f"{selected_area}\u2192{'DK2' if selected_area == 'DK1' else 'DK1'} (MW)": f_sb,
                     "Settled Imb (€)": settled_price,
                     "V4.1 PnL (€)": pnl_quarter_41,
                     "V4.0 PnL (€)": pnl_quarter_40,
@@ -1844,13 +1945,13 @@ with tab_xbid:
         # --- NORD POOL TERMINAL STYLED HTML TABLE ---
         cable_cols = []
         if "Germany" in np_cable_view:
-            cable_cols = ["DE->DK (MW)"]
+            cable_cols = [f"{selected_area}\u2192DE (MW)"]
         elif "Nordics" in np_cable_view:
-            cable_cols = ["NO->DK (MW)", "SE->DK (MW)"]
+            cable_cols = [f"{selected_area}\u2192NO2 (MW)", f"{selected_area}\u2192SE (MW)"]
         elif "Western" in np_cable_view:
-            cable_cols = ["GB->DK (MW)", "NL->DK (MW)"]
+            cable_cols = [f"{selected_area}\u2192GB (MW)", f"{selected_area}\u2192NL (MW)"]
         else:
-            cable_cols = ["DE->DK (MW)", "NO->DK (MW)", "SE->DK (MW)", "GB->DK (MW)", "NL->DK (MW)", "Storebælt (MW)"]
+            cable_cols = [f"{selected_area}\u2192DE (MW)", f"{selected_area}\u2192NO2 (MW)", f"{selected_area}\u2192SE (MW)", f"{selected_area}\u2192GB (MW)", f"{selected_area}\u2192NL (MW)", f"{selected_area}\u2192{'DK2' if selected_area == 'DK1' else 'DK1'} (MW)"]
 
         np_table_rows = []
         for idx, r in df_np.iterrows():

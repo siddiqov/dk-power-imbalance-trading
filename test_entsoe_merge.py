@@ -1,7 +1,8 @@
+import os
 import pandas as pd
 from entsoe import EntsoePandasClient
 
-ENTSOE_TOKEN = "01bb4846-6f4c-4e0f-8333-6c709b316594"
+ENTSOE_TOKEN = os.environ.get("ENTSOE_TOKEN", "")
 client = EntsoePandasClient(api_key=ENTSOE_TOKEN)
 
 date_str = '2026-09-14'

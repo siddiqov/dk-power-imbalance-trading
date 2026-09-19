@@ -15,7 +15,7 @@ from src.commercial_strategy_v3_1 import V31CommercialStrategyEngine
 st.set_page_config(page_title="Nurex V3.2 Dashboard", layout="wide")
 
 CHOSEN_V3_1_BASELINE = "Transfer-BiLSTM"
-ENTSOE_TOKEN = "01bb4846-6f4c-4e0f-8333-6c709b316594"
+ENTSOE_TOKEN = os.environ.get("ENTSOE_TOKEN", "")
 
 # --- SIDEBAR ---
 st.sidebar.title("🎛️ V3.2 Meta-Controller")

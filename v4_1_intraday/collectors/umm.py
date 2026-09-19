@@ -4,7 +4,13 @@ Every message version is stored with its publication time, so features can use e
 outage information that was public at the decision time (a later version or a cancellation
 only counts from its own publication time).
 
-The API pages with `limit` / `skip` and returns newest messages first. Parsing is defensive:
+Verified against the live API (17 Sep 2026):
+  * `includeOutdated=true` is required to get every version (default = latest version only)
+  * `publicationStartDate` filters by publication time; `limit` <= 2000 (5000 -> HTTP 413); `skip` pages;
+    newest first; since Mar 2025 about 65k message versions in total (all areas)
+  * unavailabilityType 1 = unplanned (failures), 2 = planned (maintenance)
+  * eventStatus 1 = active, 3 = dismissed/replaced
+  * transmission units carry inAreaEic/outAreaEic Parsing is defensive:
 field names follow the public API (productionUnits / generationUnits / consumptionUnits /
 transmissionUnits -> timePeriods with eventStart, eventStop, unavailableCapacity,
 availableCapacity).
@@ -21,12 +27,14 @@ from .common import ensure_tables, http_get, utc_naive
 log = logging.getLogger("nurex41id.umm")
 URL = "https://ummapi.nordpoolgroup.com/messages"
 EIC_SHORT = {
+    "10YDE-EON------1": "DE_LU", "10YDE-RWENET---I": "DE_LU", "10YDE-VE-------2": "DE_LU", "10YDE-ENBW-----N": "DE_LU",
     "10YDK-1--------W": "DK1", "10YDK-2--------M": "DK2", "10Y1001A1001A82H": "DE_LU",
     "10YNO-2--------T": "NO2", "10Y1001A1001A46L": "SE3", "10Y1001A1001A47J": "SE4",
     "10YNL----------L": "NL", "10YGB----------A": "GB",
 }
 NAME_SHORT = {"DK1": "DK1", "DK2": "DK2", "NO2": "NO2", "SE3": "SE3", "SE4": "SE4", "DE": "DE_LU",
-              "DE-LU": "DE_LU", "DE_LU": "DE_LU", "NL": "NL", "GB": "GB"}
+              "DE-LU": "DE_LU", "DE_LU": "DE_LU", "DE-TenneT": "DE_LU", "DE-50HzT": "DE_LU",
+              "DE-Amprion": "DE_LU", "DE-TransnetBW": "DE_LU", "NL": "NL", "GB": "GB"}
 UNIT_KINDS = {"productionUnits": "production", "generationUnits": "generation",
               "consumptionUnits": "consumption", "transmissionUnits": "transmission"}
 
@@ -86,7 +94,7 @@ def parse_messages(items: list[dict]) -> pd.DataFrame:
     return df.drop_duplicates(["message_id", "version", "asset_kind", "asset_name", "event_start"], keep="last")
 
 
-def collect(store, since=None, page: int = 500, max_pages: int = 2000, extra_params: dict | None = None,
+def collect(store, since=None, page: int = 2000, max_pages: int = 2000, extra_params: dict | None = None,
             getter=None) -> int:
     """Page backwards until messages are older than `since` (publication time) or pages run out."""
     ensure_tables(store)
@@ -94,7 +102,9 @@ def collect(store, since=None, page: int = 500, max_pages: int = 2000, extra_par
     get = getter or (lambda params: http_get(URL, params=params, headers={"Accept": "application/json"}).json())
     total, skip = 0, 0
     for _ in range(max_pages):
-        params = {"limit": page, "skip": skip, **(extra_params or {})}
+        params = {"limit": page, "skip": skip, "includeOutdated": "true", **(extra_params or {})}
+        if since is not None:
+            params["publicationStartDate"] = since.strftime("%Y-%m-%dT%H:%M:%SZ")
         data = get(params)
         items = data.get("items", data if isinstance(data, list) else [])
         if not items:

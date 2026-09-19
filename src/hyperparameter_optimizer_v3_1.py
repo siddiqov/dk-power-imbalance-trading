@@ -1,9 +1,3 @@
-# ==============================================================================
-# src/hyperparameter_optimizer_v3_1.py
-# Optuna Bayesian Hyperparameter Optimizer for V3.1 Commercial Models
-# Purged Walk-Forward TimeSeriesSplit (Zero Leakage)
-# ==============================================================================
-
 import os
 import json
 import numpy as np
@@ -14,13 +8,14 @@ from catboost import CatBoostRegressor
 from xgboost import XGBRegressor
 from sklearn.metrics import mean_absolute_error
 
+from src.deep_models_v3_1 import PyTorchBiLSTMRegressor
+
 # Suppress verbose Optuna logs
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
-
 class V31HyperparameterOptimizer:
     """
-    Executes cross-validated Bayesian optimization for LightGBM, CatBoost, and XGBoost
+    Executes cross-validated Bayesian optimization for LightGBM, CatBoost, XGBoost, and BiLSTM
     using Purged TimeSeriesSplit cross-validation on Danish power market data.
     """
 
@@ -31,10 +26,6 @@ class V31HyperparameterOptimizer:
         self.param_file = os.path.join(self.output_dir, f"best_hyperparameters_{price_area}.json")
 
     def purged_time_series_splits(self, n_samples, n_splits=4, purge_gap=192):
-        """
-        Yields (train_idx, val_idx) splits with a purge gap of 48 hours (192 quarters)
-        between train and test to prevent temporal lookahead leakage.
-        """
         test_size = n_samples // (n_splits + 1)
         for i in range(1, n_splits + 1):
             train_end = i * test_size
@@ -46,10 +37,33 @@ class V31HyperparameterOptimizer:
             test_idx = np.arange(test_start, test_end)
             yield train_idx, test_idx
 
-    def optimize_lightgbm(self, X, y, n_trials=15):
-        """Optimizes LightGBMRegressor using Optuna."""
-        print(f"[{self.price_area}] Running Optuna Study for Transfer-LightGBM ({n_trials} trials)...")
+    def optimize_bilstm(self, X, y, n_trials=5):
+        print(f"[{self.price_area}] Running Optuna Study for Transfer-BiLSTM ({n_trials} trials)...")
+        def objective(trial):
+            params = {
+                "hidden_dim": trial.suggest_categorical("hidden_dim", [32, 64, 128]),
+                "num_layers": trial.suggest_int("num_layers", 1, 3),
+                "lr": trial.suggest_float("lr", 1e-4, 1e-2, log=True),
+                "epochs": trial.suggest_int("epochs", 4, 15),
+                "batch_size": trial.suggest_categorical("batch_size", [64, 128, 256, 512])
+            }
+            scores = []
+            for tr_idx, val_idx in self.purged_time_series_splits(len(X), n_splits=3, purge_gap=96):
+                X_tr, y_tr = X[tr_idx], y[tr_idx]
+                X_val, y_val = X[val_idx], y[val_idx]
+                model = PyTorchBiLSTMRegressor(**params)
+                model.fit(X_tr, y_tr)
+                preds = model.predict(X_val)
+                scores.append(mean_absolute_error(y_val, preds))
+            return np.mean(scores)
+        
+        study = optuna.create_study(direction="minimize")
+        study.optimize(objective, n_trials=n_trials)
+        print(f"  -> BiLSTM Best Trial MAE: {study.best_value:.3f} EUR/MWh")
+        return study.best_params
 
+    def optimize_lightgbm(self, X, y, n_trials=15):
+        print(f"[{self.price_area}] Running Optuna Study for Transfer-LightGBM ({n_trials} trials)...")
         def objective(trial):
             params = {
                 "n_estimators": trial.suggest_int("n_estimators", 80, 160),
@@ -63,28 +77,22 @@ class V31HyperparameterOptimizer:
                 "random_state": 42,
                 "verbose": -1
             }
-
             scores = []
             for tr_idx, val_idx in self.purged_time_series_splits(len(X), n_splits=3, purge_gap=96):
                 X_tr, y_tr = X[tr_idx], y[tr_idx]
                 X_val, y_val = X[val_idx], y[val_idx]
-
                 model = lgb.LGBMRegressor(**params)
                 model.fit(X_tr, y_tr)
                 preds = model.predict(X_val)
                 scores.append(mean_absolute_error(y_val, preds))
-
             return np.mean(scores)
-
         study = optuna.create_study(direction="minimize")
         study.optimize(objective, n_trials=n_trials)
         print(f"  -> LightGBM Best Trial MAE: {study.best_value:.3f} EUR/MWh")
         return study.best_params
 
     def optimize_catboost(self, X, y, n_trials=10):
-        """Optimizes CatBoostRegressor using Optuna."""
         print(f"[{self.price_area}] Running Optuna Study for Pure15m-CatBoost ({n_trials} trials)...")
-
         def objective(trial):
             params = {
                 "iterations": trial.suggest_int("iterations", 120, 260),
@@ -94,36 +102,33 @@ class V31HyperparameterOptimizer:
                 "random_seed": 42,
                 "verbose": 0
             }
-
             scores = []
             for tr_idx, val_idx in self.purged_time_series_splits(len(X), n_splits=3, purge_gap=96):
                 X_tr, y_tr = X[tr_idx], y[tr_idx]
                 X_val, y_val = X[val_idx], y[val_idx]
-
                 model = CatBoostRegressor(**params)
                 model.fit(X_tr, y_tr)
                 preds = model.predict(X_val)
                 scores.append(mean_absolute_error(y_val, preds))
-
             return np.mean(scores)
-
         study = optuna.create_study(direction="minimize")
         study.optimize(objective, n_trials=n_trials)
         print(f"  -> CatBoost Best Trial MAE: {study.best_value:.3f} EUR/MWh")
         return study.best_params
 
-    def run_full_optimization(self, df_15m, feature_cols, n_trials_lgb=12, n_trials_cat=8):
-        """Runs full Bayesian optimization pipeline and caches parameters."""
+    def run_full_optimization(self, df_15m, feature_cols, n_trials_lgb=12, n_trials_cat=8, n_trials_lstm=5):
         X = df_15m[feature_cols].fillna(0.0).values
         y = df_15m["actual_spread_eur"].values
 
         best_lgb = self.optimize_lightgbm(X, y, n_trials=n_trials_lgb)
         best_cat = self.optimize_catboost(X, y, n_trials=n_trials_cat)
+        best_lstm = self.optimize_bilstm(X, y, n_trials=n_trials_lstm)
 
         params_bundle = {
             "price_area": self.price_area,
             "Transfer-LightGBM": best_lgb,
             "Pure15m-CatBoost": best_cat,
+            "Transfer-BiLSTM": best_lstm,
             "Hierarchical-LGBM": {
                 "n_estimators": best_lgb.get("n_estimators", 110),
                 "learning_rate": best_lgb.get("learning_rate", 0.04),
@@ -140,23 +145,18 @@ class V31HyperparameterOptimizer:
                 "n_jobs": 2
             }
         }
-
         with open(self.param_file, "w", encoding="utf-8") as f:
             json.dump(params_bundle, f, indent=2)
-
         print(f"[{self.price_area}] Saved best hyperparameters to {self.param_file}")
         return params_bundle
 
     def load_best_parameters(self):
-        """Loads cached parameters or returns calibrated default configuration."""
         if os.path.exists(self.param_file):
             try:
                 with open(self.param_file, "r", encoding="utf-8") as f:
                     return json.load(f)
             except Exception:
                 pass
-
-        # Fallback to calibrated Bayesian defaults
         return {
             "price_area": self.price_area,
             "Transfer-LightGBM": {
@@ -168,6 +168,9 @@ class V31HyperparameterOptimizer:
                 "iterations": 220, "learning_rate": 0.038, "depth": 6,
                 "l2_leaf_reg": 3.5, "random_seed": 42, "verbose": 0
             },
+            "Transfer-BiLSTM": {
+                "hidden_dim": 64, "num_layers": 2, "lr": 0.004, "epochs": 6, "batch_size": 256
+            },
             "Hierarchical-LGBM": {
                 "n_estimators": 100, "learning_rate": 0.04, "max_depth": 5,
                 "num_leaves": 25, "random_state": 42, "verbose": -1
@@ -177,3 +180,4 @@ class V31HyperparameterOptimizer:
                 "subsample": 0.85, "random_state": 42, "n_jobs": 2
             }
         }
+

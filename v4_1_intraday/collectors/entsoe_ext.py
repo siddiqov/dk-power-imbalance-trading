@@ -34,12 +34,52 @@ LOAD_ZONES = ["DK_1", "DK_2", "DE_LU"]
 WS_ZONES = ["DE_LU", "DK_1", "DK_2"]
 
 
+def _keys() -> list[str]:
+    from .. import settings as S
+    keys = []
+    for name in ("ENTSOE_API_KEY", "ENTSOE_TOKEN"):
+        v = secret(name)
+        if v and v not in keys:
+            keys.append(v)
+    # the root Basic_Approach/.env may hold a different token under the same name
+    try:
+        from dotenv import dotenv_values
+        for f in (S.BASE / ".env", S.V42_ROOT / ".env"):
+            for name in ("ENTSOE_API_KEY", "ENTSOE_TOKEN"):
+                v = (dotenv_values(f) or {}).get(name)
+                if v and v not in keys:
+                    keys.append(v)
+    except Exception:
+        pass
+    return keys
+
+
 def client():
-    key = secret("ENTSOE_API_KEY") or secret("ENTSOE_TOKEN")
-    if not key:
-        raise RuntimeError("ENTSOE_API_KEY is not set in Nurex_V4_2/.env")
+    """First ENTSO-E key that is accepted (tested with one day of DK1 load).
+    Fails fast with a clear message instead of retrying every window with a refused key."""
     from entsoe import EntsoePandasClient
-    return EntsoePandasClient(api_key=key)
+    keys = _keys()
+    if not keys:
+        raise RuntimeError("ENTSOE_API_KEY is not set in Nurex_V4_2/.env")
+    errors = []
+    end = pd.Timestamp.now(tz="UTC").floor("D") - pd.Timedelta(days=2)
+    for i, k in enumerate(keys, 1):
+        c = EntsoePandasClient(api_key=k)
+        try:
+            c.query_load("DK_1", start=end - pd.Timedelta(days=1), end=end)
+            log.info("ENTSO-E key #%d accepted", i)
+            return c
+        except Exception as e:
+            msg = str(e)
+            if "401" in msg or "Unauthorized" in msg:
+                errors.append(f"key #{i} (...{k[-4:]}): 401 Unauthorized")
+            else:                      # other errors (no data, network) -> key may be fine
+                log.warning("ENTSO-E key #%d test query failed (%s) - using it anyway", i, msg[:120])
+                return c
+    raise RuntimeError("ENTSO-E refused every key: " + "; ".join(errors) +
+                       ". Activate API access: log in at transparency.entsoe.eu, email transparency@entsoe.eu "
+                       "with subject 'Restful API access' and your account e-mail, then generate a token under "
+                       "My Account Settings -> Web API Security Token and put it in Nurex_V4_2/.env as ENTSOE_API_KEY.")
 
 
 def to_15min(s: pd.Series) -> pd.Series:
@@ -85,6 +125,8 @@ def fetch_window(c, start: pd.Timestamp, end: pd.Timestamp, parts=None) -> pd.Da
             if r is not None and len(r):
                 frames.append(r)
         except Exception as e:  # NoMatchingDataError etc.
+            if "401" in str(e) or "Unauthorized" in str(e):
+                raise RuntimeError(f"ENTSO-E key refused (401) during {label}") from e
             log.warning("ENTSO-E %s %s..%s: %s", label, start.date(), end.date(), str(e)[:160])
 
     for z in LOAD_ZONES:

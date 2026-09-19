@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 logger = logging.getLogger("V32InferenceEngine")
 
 CHOSEN_V3_1_BASELINE = "Transfer-BiLSTM"
-ENTSOE_TOKEN = os.getenv("ENTSOE_TOKEN", "01bb4846-6f4c-4e0f-8333-6c709b316594")
+ENTSOE_TOKEN = os.getenv("ENTSOE_TOKEN", os.environ.get("ENTSOE_TOKEN", ""))
 
 
 class V32InferenceEngine:

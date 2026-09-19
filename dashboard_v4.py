@@ -184,7 +184,7 @@ def parse_val(v):
     except:
         return None
 
-ENTSOE_TOKEN = "01bb4846-6f4c-4e0f-8333-6c709b316594"
+ENTSOE_TOKEN = os.environ.get("ENTSOE_TOKEN", "")
 
 @st.cache_data(ttl=3600)
 def get_dynamic_price_cap(area, current_date_str):

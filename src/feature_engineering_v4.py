@@ -248,6 +248,18 @@ class V4GridFeatureEngine:
             else:
                 df[col] = df[col].ffill().bfill().fillna(def_val)
 
+        # =============================================================
+        # COMMERCIAL AUDIT FIX: SHIFT TSO BALANCING DATA BY 1 QUARTER
+        # To prevent look-ahead bias, we cannot use same-quarter aFRR/mFRR
+        # because the TSO publishes these AFTER the quarter closes.
+        # =============================================================
+        tso_cols = ['afrr_up_mw', 'afrr_down_mw', 'mfrr_marginal_up_eur', 'mfrr_marginal_down_eur', 
+                    'afrr_vwa_up_eur', 'afrr_vwa_down_eur', 'satisfied_demand', 'dominating_direction']
+        for c in tso_cols:
+            if c in df.columns:
+                df[c] = df[c].shift(1).fillna(0)
+
+
         # -------------------------------------------------------------
         # LAYER 1: Physical Grid State
         # -------------------------------------------------------------

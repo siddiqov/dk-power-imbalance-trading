@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import time as _time
 import pandas as pd
 
 from . import settings as S
@@ -81,14 +82,61 @@ def _builder(max_age_s: int = 300):
     raise RuntimeError(f"V4.2 store busy: {last}")
 
 
-def day_decisions(area: str, date_str: str, now=None) -> pd.DataFrame:
-    """One row per local delivery quarter of `date_str`, keyed by local 'YYYY-MM-DD HH:MM'."""
+# What-if threshold levels for the dashboard. 'validated' uses the thresholds chosen on the
+# validation window during training; the others loosen them and are NOT validated - they exist
+# to show what the same forecasts would have done at a lower bar for taking a trade.
+THRESHOLD_LEVELS = {
+    "validated": None,
+    "balanced": (0.5, 0.03),    # (margin multiplier, pmin reduction)
+    "aggressive": (0.25, 0.06),
+}
+PMIN_FLOOR = 0.35
+
+
+def decision_params(area: str, level: str = "validated") -> dict | None:
+    """Trading thresholds for `level`, or None to use the model's own validated ones.
+
+    A side the training switched off stays off: turning it back on would trade on a signal that
+    showed no validated edge at all, which is a different thing from lowering a working bar.
+    """
+    factors = THRESHOLD_LEVELS.get(level)
+    if factors is None:
+        return None
+    b = load_bundle(area)
+    if b is None or not b.decision_params:
+        return None
+    base = b.decision_params
+    mult, drop = factors
+    out = {k: v for k, v in base.items() if k not in ("buy", "sell")}
+    for side in ("buy", "sell"):
+        s = base.get(side)
+        out[side] = None if not s else {
+            "margin": round(float(s["margin"]) * mult, 2),
+            "pmin": max(PMIN_FLOOR, round(float(s["pmin"]) - drop, 3)),
+        }
+    out["no_trade"] = not (out.get("buy") or out.get("sell"))
+    return out
+
+
+def day_decisions(area: str, date_str: str, now=None, params: dict | None = None) -> pd.DataFrame:
+    """One row per local delivery quarter of `date_str`, keyed by local 'YYYY-MM-DD HH:MM'.
+
+    `params` overrides the model's validated thresholds (a what-if view). The paper-trading
+    journal is then left alone: locked decisions were taken at the real thresholds, so pasting
+    them over a what-if run would mix the two.
+    """
     cfg = config()
     b = load_bundle(area)
     if b is None:
         return pd.DataFrame()
     qs = tu.local_day_quarters(date_str, cfg["local_tz"])
     out = P.predict_quarters(None, cfg, b, qs, now=now, fb=_builder())
+    if params is not None:
+        from nurex42 import decision as dec
+        d = dec.decide(out, out["quarter_utc"], b.model.stress, cfg, params)
+        for col in ("action", "mwh", "edge", "reason"):
+            out[col] = d[col].values
+
     out["time_dk_str"] = (out["quarter_utc"].dt.tz_localize("UTC").dt.tz_convert(cfg["local_tz"])
                           .dt.strftime("%Y-%m-%d %H:%M"))
     c = cfg.cost_per_mwh
@@ -97,7 +145,9 @@ def day_decisions(area: str, date_str: str, now=None) -> pd.DataFrame:
     out["pnl_eur"] = np.where(settled, s * out["mwh"] * out["spread_actual"] - np.where(s != 0, out["mwh"] * c, 0.0),
                               np.nan)
     out["settled"] = settled
-    out["source"] = "recomputed"
+    out["source"] = "recomputed" if params is None else "what-if"
+    if params is not None:
+        return out
     # locked paper-trading decisions override the recomputed ones
     try:
         from . import journal as J
@@ -148,41 +198,87 @@ def day_flows(area: str, date_str: str) -> pd.DataFrame:
     Columns per border: 'sched_<label>' (day-ahead scheduled exchange, MW, positive = export
     from `area`) and 'dev_<label>' (realised physical flow minus schedule, MW, where published).
     Authentic values only: a quarter with no published row stays NaN - nothing is filled in.
-    Returns an empty frame when the store is busy, so the ledger still renders.
+
+    The V4.2 store allows a single writer, so a collector run locks out readers. Like _builder(),
+    this retries and then falls back to the last good result for the same day rather than
+    dropping the flow columns out of the ledger. The reason is reported in df.attrs['status']:
+    'ok', 'stale' (cached, store was busy), 'busy' (no data and no cache) or 'unpublished'.
     """
     cfg = config()
     qs = tu.local_day_quarters(date_str, cfg["local_tz"])
     if len(qs) == 0:
-        return pd.DataFrame()
+        return _flows_status(pd.DataFrame(), "unpublished")
     borders = FLOW_BORDERS.get(area, [])
     if not borders:
-        return pd.DataFrame()
-    names = [f"{p}:{area}>{b}" for b, _ in borders for p in ("sched", "phys")]
-    try:
-        st = Store(cfg.db_path, read_only=True)
+        return _flows_status(pd.DataFrame(), "unpublished")
+
+    # Accept the legacy series spelling too: zone codes were written without the underscore
+    # (DK1>DK2) before the rename, so older days would otherwise show a blank column.
+    variants = {}
+    for b, label in borders:
+        variants[b] = [b] + [v for v in (b.replace("_", ""),) if v != b]
+    names = [f"{p}:{area}>{v}" for b, _ in borders for v in variants[b] for p in ("sched", "phys")]
+
+    raw, last = None, None
+    for attempt in range(3):
         try:
-            raw = st.df(
-                "SELECT series, time_utc, value FROM entsoe_series "
-                "WHERE time_utc >= ? AND time_utc <= ? AND series IN ("
-                + ",".join("?" * len(names)) + ")",
-                [qs.min(), qs.max()] + names)
-        finally:
-            st.close()
-    except Exception:
-        return pd.DataFrame()
-    if raw is None or raw.empty:
-        return pd.DataFrame()
+            st = Store(cfg.db_path, read_only=True)
+            try:
+                raw = st.df(
+                    "SELECT series, time_utc, value FROM entsoe_series "
+                    "WHERE time_utc >= ? AND time_utc <= ? AND series IN ("
+                    + ",".join("?" * len(names)) + ")",
+                    [qs.min(), qs.max()] + names)
+            finally:
+                st.close()
+            break
+        except Exception as e:  # database busy: one writer at a time
+            last = e
+            raw = None
+            if attempt < 2:
+                _time.sleep(2)
+
+    if raw is None:  # never got a read in
+        cached = _CACHE.get(("flows", area, date_str))
+        if cached is not None:
+            return _flows_status(cached.copy(), "stale", last)
+        return _flows_status(pd.DataFrame(), "busy", last)
+
+    if raw.empty:
+        return _flows_status(pd.DataFrame(), "unpublished")
+
     wide = raw.pivot_table(index="time_utc", columns="series", values="value", aggfunc="last")
     wide = wide.reindex(pd.DatetimeIndex(qs))
+
+    def _series(prefix, border):
+        """First variant of this border actually present, else None."""
+        for v in variants[border]:
+            col = f"{prefix}:{area}>{v}"
+            if col in wide.columns and wide[col].notna().any():
+                return wide[col]
+        return None
+
     out = pd.DataFrame(index=wide.index)
     for b, label in borders:
-        sc, ph = f"sched:{area}>{b}", f"phys:{area}>{b}"
-        if sc in wide.columns:
-            out[f"sched_{label}"] = wide[sc].values
-            if ph in wide.columns:
-                out[f"dev_{label}"] = wide[ph].values - wide[sc].values
+        sc = _series("sched", b)
+        if sc is None:
+            continue
+        out[f"sched_{label}"] = sc.values
+        ph = _series("phys", b)
+        if ph is not None:
+            out[f"dev_{label}"] = ph.values - sc.values
     if out.empty:
-        return pd.DataFrame()
+        return _flows_status(pd.DataFrame(), "unpublished")
+
     out["time_dk_str"] = (out.index.tz_localize("UTC").tz_convert(cfg["local_tz"])
                           .strftime("%Y-%m-%d %H:%M"))
-    return out.reset_index(drop=True)
+    out = out.reset_index(drop=True)
+    _CACHE[("flows", area, date_str)] = out.copy()
+    return _flows_status(out, "ok")
+
+
+def _flows_status(df: pd.DataFrame, status: str, err=None) -> pd.DataFrame:
+    """Tag a flow frame so the dashboard can say why columns are missing."""
+    df.attrs["status"] = status
+    df.attrs["error"] = None if err is None else str(err)
+    return df

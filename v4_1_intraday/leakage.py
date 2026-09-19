@@ -89,9 +89,19 @@ def run(store, cfg, n_samples: int = 8, seed: int = 7, areas=None) -> list[str]:
                 tgt = pd.DataFrame({"quarter_utc": [row["quarter_utc"]], "as_of_utc": [a]})
                 x0 = clean.build(area, tgt)
                 x1 = _CorruptedBuilder(store, cfg, a).build(area, tgt)
-                bad = [c for c in x0.columns
-                       if not (np.isnan(x0[c].iloc[0]) and np.isnan(x1[c].iloc[0]))
-                       and not np.isclose(x0[c].iloc[0], x1[c].iloc[0])]
+                # a feature set that depends on the data is itself a leak -> report, never raise
+                shape = sorted(set(x0.columns) ^ set(x1.columns))
+                if shape:
+                    problems.append(f"{area} q={row['quarter_utc']} as_of={a}: "
+                                    f"feature set differs: {shape}")
+                bad = []
+                for c in x0.columns.intersection(x1.columns):
+                    v0, v1 = x0[c].iloc[0], x1[c].iloc[0]
+                    n0, n1 = pd.isna(v0), pd.isna(v1)
+                    if n0 and n1:
+                        continue
+                    if n0 != n1 or not np.isclose(float(v0), float(v1), equal_nan=True):
+                        bad.append(c)
                 if bad:
                     problems.append(f"{area} q={row['quarter_utc']} as_of={a}: {bad}")
     return problems

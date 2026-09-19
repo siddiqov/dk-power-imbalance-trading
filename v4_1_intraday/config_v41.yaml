@@ -82,6 +82,10 @@ intraday_api:
   area_ids: {}                # e.g. {DK1: 1, DK2: 2} only if deliveryAreas is not received
 intraday_data_dir: Nurex_V4_2/data/nordpool_id
 
+# PSRN flow-sign convention is calibrated on the first N days of the store only
+# (never on the full history - that would be a look-ahead; see features_ext._psrn_sign_for)
+sign_calibration_days: 45
+
 models_dir: models_v4_1_intraday
 journal_path: data/v41_journal.sqlite
 reports_dir: results/v4_1_intraday

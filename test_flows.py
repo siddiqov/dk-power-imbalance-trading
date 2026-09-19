@@ -1,8 +1,9 @@
+import os
 import pandas as pd
 from entsoe import EntsoePandasClient
 import traceback
 
-ENTSOE_TOKEN = "01bb4846-6f4c-4e0f-8333-6c709b316594"
+ENTSOE_TOKEN = os.environ.get("ENTSOE_TOKEN", "")
 client = EntsoePandasClient(api_key=ENTSOE_TOKEN)
 
 start_ts = pd.Timestamp('2026-09-14', tz='Europe/Copenhagen')

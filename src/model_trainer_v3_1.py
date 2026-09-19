@@ -100,7 +100,8 @@ class V31QuantileModelSuite:
         models["Transfer-LightGBM"] = p1_fine
 
         print(f"  [P1.2] Transfer-BiLSTM (Native PyTorch 2-Layer Bidirectional Recurrent Network)...")
-        p1_bilstm = PyTorchBiLSTMRegressor(hidden_dim=64, num_layers=2, lr=0.004, epochs=6, batch_size=256)
+        bilstm_params = self.opt_engine.load_best_parameters().get("Transfer-BiLSTM", {"hidden_dim": 64, "num_layers": 2, "lr": 0.004, "epochs": 6, "batch_size": 256})
+        p1_bilstm = PyTorchBiLSTMRegressor(**bilstm_params)
         p1_bilstm.fit(X_15m, y_15m)
         models["Transfer-BiLSTM"] = p1_bilstm
         models["Deep-BiLSTM"] = p1_bilstm  # Backwards compatibility alias
@@ -271,7 +272,7 @@ class V31QuantileModelSuite:
         has_actual_settlement = ("reg_persistence_quarters" in df_feat.columns and df_feat["reg_persistence_quarters"].abs().sum() > 0)
         
         if market_mode != "DAY_AHEAD_D1" and not has_actual_settlement:
-            # Synthetic forward persistence for D+1 Intraday
+            # Autoregressive forward persistence for D+1 Intraday
             available_cols_base = [c for c in feat_cols if c in df_feat.columns]
             X_base = df_feat[available_cols_base].fillna(0.0).values
             
