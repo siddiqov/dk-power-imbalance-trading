@@ -237,7 +237,8 @@ date_str_selected = selected_date.strftime("%Y-%m-%d")
 st.sidebar.markdown("### 🛡️ Risk & Execution Controls")
 use_circuit_breaker = st.sidebar.checkbox("95th Pct Dynamic Circuit Breaker", value=True)
 crash_protection_enabled = st.sidebar.checkbox("Physical Crash Protection Trigger", value=True)
-use_evening_guard = st.sidebar.checkbox("🛡️ Intraday Evening Ramping Guard (21:30–23:45)", value=True, help="Mitigate late-evening liquidity collapse & TSO downward balancing dumps.")
+# Evening ramping guard removed 2026-09-19: it only ever adjusted the legacy V4.0
+# comparison column's simulated size/cap, never V4.1's real trading decisions.
 
 # V4.1 decides a quarter only when expected edge clears a margin AND the direction probability
 # clears a minimum. Those two numbers were chosen on the validation window during training.
@@ -612,15 +613,12 @@ def get_v4_1_trading_day_data(area, date_str, threshold_key='validated', risk_li
         spot = row['spot_price_eur']
         cap = row['Dynamic_Cap_EUR']
         surplus_mw = row.get('net_system_surplus_mw', 0.0)
-        h = row.get('hour_of_day', 12.0)
-        is_late_evening = (h >= 21.5)
-
         if v4_score > 2.0:
             base_decision, act = "🟢 BUY", "BUY"
-            vol = standard_vol if (use_evening_guard and is_late_evening) else (high_conviction_vol if (v4_score > 10.0 or v31_score > 8.0) else standard_vol)
+            vol = high_conviction_vol if (v4_score > 10.0 or v31_score > 8.0) else standard_vol
         elif v4_score < -2.0:
             base_decision, act = "🔴 SELL", "SELL"
-            vol = standard_vol if (use_evening_guard and is_late_evening) else (high_conviction_vol if (v4_score < -10.0 or v31_score < -8.0) else standard_vol)
+            vol = high_conviction_vol if (v4_score < -10.0 or v31_score < -8.0) else standard_vol
         else:
             base_decision, act, vol = "⚪ HOLD", "HOLD", 0.0
 
@@ -629,10 +627,9 @@ def get_v4_1_trading_day_data(area, date_str, threshold_key='validated', risk_li
 
         if crash_protection_enabled and v4_score < -2.5 and v31_score > 1.5:
             base_decision, act = "🔥 CRASH PRED (SELL)", "SELL"
-            vol = standard_vol if (use_evening_guard and is_late_evening) else high_conviction_vol
+            vol = high_conviction_vol
 
-        effective_cap = (cap * 0.90) if (use_evening_guard and is_late_evening) else cap
-        if use_circuit_breaker and spot > effective_cap and act == "BUY":
+        if use_circuit_breaker and spot > cap and act == "BUY":
             base_decision, act, vol = "🛑 C.BREAKER (HOLD)", "HOLD", 0.0
 
         if row['is_settled']:
