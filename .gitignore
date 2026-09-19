@@ -97,5 +97,13 @@ bidder-portal/.env
 logs/
 Nurex_V4_2/data/nordpool_id/
 
-# Nurex V4.1 paper-trading journal
+# Nurex V4.1 paper-trading journal & data
 data/v41_journal.sqlite
+data/*.parquet
+models_v4_1_intraday/
+legacy_v4_1_t60/
+Nurex_V4_2/
+_to_delete/
+scratch_*.py
+peek_*.py
+fix_*.py

@@ -1,0 +1,46 @@
+{
+  "DK1": {
+    "trading": {
+      "quarters": 39438.0,
+      "trades": 6605.0,
+      "trade_rate_pct": 16.74780668390892,
+      "buy": 793.0,
+      "sell": 5812.0,
+      "mwh_traded": 2745.1,
+      "net_eur": 62780.671953276906,
+      "gross_eur": 69231.6569532769,
+      "cost_eur": 6450.984999999999,
+      "net_eur_per_mwh": 22.870085590061166,
+      "win_rate_pct": 60.04542013626041,
+      "days": 413.0,
+      "positive_days_pct": 56.90072639225182,
+      "worst_day_eur": -1603.3010000000004,
+      "max_drawdown_eur": -5045.237986399661,
+      "max_drawdown_pct_collateral": -125.4582512618049,
+      "sharpe_daily_ann": 3.5482531104609585,
+      "net_eur_at_stress_costs": 56329.686953276905
+    }
+  },
+  "DK2": {
+    "trading": {
+      "quarters": 39192.0,
+      "trades": 9606.0,
+      "trade_rate_pct": 24.510104102878138,
+      "buy": 54.0,
+      "sell": 9552.0,
+      "mwh_traded": 3135.1000000000004,
+      "net_eur": 34299.88404916365,
+      "gross_eur": 41667.36904916365,
+      "cost_eur": 7367.484999999998,
+      "net_eur_per_mwh": 10.940602867265365,
+      "win_rate_pct": 54.50759941703103,
+      "days": 410.0,
+      "positive_days_pct": 56.58536585365853,
+      "worst_day_eur": -1515.726986618042,
+      "max_drawdown_eur": -2913.628031836499,
+      "max_drawdown_pct_collateral": -72.45221705833427,
+      "sharpe_daily_ann": 4.34190144160254,
+      "net_eur_at_stress_costs": 26932.39904916365
+    }
+  }
+}

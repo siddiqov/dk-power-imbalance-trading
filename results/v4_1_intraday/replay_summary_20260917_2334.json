@@ -1,0 +1,94 @@
+{
+  "DK1": {
+    "trading": {
+      "quarters": 39465,
+      "trades": 8763,
+      "trade_rate_pct": 22.204484986697075,
+      "buy": 502,
+      "sell": 8261,
+      "mwh_traded": 3005.8999999999996,
+      "net_eur": 64652.59906035267,
+      "gross_eur": 71716.46406035268,
+      "cost_eur": 7063.865,
+      "net_eur_per_mwh": 21.50856617331005,
+      "win_rate_pct": 60.298984366084674,
+      "days": 413,
+      "positive_days_pct": 66.10169491525424,
+      "worst_day_eur": -1892.1990000000003,
+      "max_drawdown_eur": -2386.8020000000106,
+      "max_drawdown_pct_collateral": -59.351809733333596,
+      "sharpe_daily_ann": 4.692704236568519,
+      "net_eur_at_stress_costs": 57588.73406035267
+    },
+    "forecast": {
+      "mae_model": 69.01823210116153,
+      "mae_zero": 59.10345595183137,
+      "mae_median_q50": 57.00236328563495,
+      "dir_acc_model_pct": 41.41897884201191,
+      "dir_acc_always_negative_pct": 53.333333333333336,
+      "share_positive_spread_pct": 25.4073229443811,
+      "brier_up_model": 0.1865498302280689,
+      "brier_up_climatology": 0.18952002352380354,
+      "pinball_q10": 10.35392226428897,
+      "coverage_q10_pct": 12.104396300519447,
+      "pinball_q50": 28.501181642817475,
+      "coverage_q50_pct": 48.07044216394274,
+      "pinball_q90": 24.961935537597657,
+      "coverage_q90_pct": 89.27657417965285
+    },
+    "direction": {
+      "brier_up": 0.18347794233077744,
+      "brier_skill_up_pct": 1.4878391562554771,
+      "auc_up": 0.6027216719332085,
+      "brier_down": 0.24062410732582948,
+      "brier_skill_down_pct": 3.4667780108778135,
+      "auc_down": 0.6206054072500736
+    }
+  },
+  "DK2": {
+    "trading": {
+      "quarters": 39219,
+      "trades": 9356,
+      "trade_rate_pct": 23.855784186236264,
+      "buy": 43,
+      "sell": 9313,
+      "mwh_traded": 3049.5,
+      "net_eur": 34496.337915713295,
+      "gross_eur": 41662.66291571329,
+      "cost_eur": 7166.324999999999,
+      "net_eur_per_mwh": 11.312129173868927,
+      "win_rate_pct": 53.54852501068833,
+      "days": 410,
+      "positive_days_pct": 61.951219512195124,
+      "worst_day_eur": -1786.5119681835172,
+      "max_drawdown_eur": -3885.4179999999988,
+      "max_drawdown_pct_collateral": -96.61739426666664,
+      "sharpe_daily_ann": 2.9824858015909075,
+      "net_eur_at_stress_costs": 27330.012915713298
+    },
+    "forecast": {
+      "mae_model": 74.38266310310529,
+      "mae_zero": 66.76881659280349,
+      "mae_median_q50": 66.5550447605984,
+      "dir_acc_model_pct": 39.10349575460874,
+      "dir_acc_always_negative_pct": 49.419924016420616,
+      "share_positive_spread_pct": 19.401310589255207,
+      "brier_up_model": 0.154553290161166,
+      "brier_up_climatology": 0.15637202063447747,
+      "pinball_q10": 13.157892013320948,
+      "coverage_q10_pct": 10.97427267395905,
+      "pinball_q50": 33.2775223802992,
+      "coverage_q50_pct": 45.97006552946276,
+      "pinball_q90": 30.19522497740856,
+      "coverage_q90_pct": 90.01504372880491
+    },
+    "direction": {
+      "brier_up": 0.1525250392425674,
+      "brier_skill_up_pct": 0.9482409127429592,
+      "auc_up": 0.5947567556836599,
+      "brier_down": 0.2437284761715915,
+      "brier_skill_down_pct": 2.481242614929935,
+      "auc_down": 0.6035833145923359
+    }
+  }
+}
