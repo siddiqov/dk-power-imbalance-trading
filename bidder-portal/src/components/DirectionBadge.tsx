@@ -1,10 +1,12 @@
-import { ArrowUp, ArrowDown, ArrowRight, ShieldAlert } from 'lucide-react';
+import { ArrowUp, ArrowDown, ArrowRight, ShieldAlert, Minus } from 'lucide-react';
 
 interface DirectionBadgeProps {
   decision: string;
+  status?: string;
 }
 
-export function DirectionBadge({ decision }: DirectionBadgeProps) {
+export function DirectionBadge({ decision, status }: DirectionBadgeProps) {
+  const isMissedGate = (status || '').toUpperCase() === 'MISSED';
   const isCircuitBreaker = decision.includes('Circuit Breaker');
   const isCrashOverride = decision.includes('Crash Override') || decision.includes('CRASH PRED');
   const isBuy = !isCircuitBreaker && !isCrashOverride && (decision.includes('BUY') || decision.includes('Long'));
@@ -14,7 +16,11 @@ export function DirectionBadge({ decision }: DirectionBadgeProps) {
   let colorClass = 'bg-gray-500/20 text-gray-400 border-gray-500/30';
   let label = 'HOLD';
 
-  if (isCircuitBreaker) {
+  if (isMissedGate) {
+    Icon = Minus;
+    colorClass = 'bg-slate-700/40 text-slate-500 border-slate-700/60';
+    label = '— Missed Gate';
+  } else if (isCircuitBreaker) {
     Icon = ShieldAlert;
     colorClass = 'bg-amber-500/20 text-amber-400 border-amber-500/40 font-bold shadow-sm shadow-amber-500/10';
     label = 'HOLD (Circuit Breaker)';

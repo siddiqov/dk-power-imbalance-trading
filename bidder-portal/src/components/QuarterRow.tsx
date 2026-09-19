@@ -48,6 +48,9 @@ export function QuarterRow({
   const deliveryEndTime = deliveryStartTime + 15 * 60 * 1000;
   const isCurrent = isTodayMode && now >= deliveryStartTime && now < deliveryEndTime;
   const isPast = isTodayMode && now >= deliveryEndTime;
+  const isLocked = (prediction.status || '').toUpperCase() === 'LOCKED'
+    || (prediction.status || '').toUpperCase() === 'LOCKED_PENDING';
+  const isMissed = (prediction.status || '').toUpperCase() === 'MISSED';
 
   return (
     <>
@@ -58,6 +61,8 @@ export function QuarterRow({
             ? 'bg-indigo-950/40 hover:bg-indigo-900/50 border-l-4 border-l-indigo-500'
             : isExpanded
             ? 'bg-slate-800/90 border-l-4 border-l-indigo-400'
+            : isLocked && !isTodayMode && !isAuditView
+            ? 'border-l-4 border-l-indigo-600/70 hover:bg-slate-750'
             : isPast
             ? 'opacity-85 hover:bg-slate-750'
             : 'hover:bg-slate-750'
@@ -87,6 +92,18 @@ export function QuarterRow({
             {isCurrent && (
               <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 rounded-full animate-pulse">
                 Active
+              </span>
+            )}
+            {/* 🔒 Locked pill — shown in live (non-audit) view only */}
+            {!isTodayMode && !isAuditView && isLocked && (
+              <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 rounded-full">
+                🔒 Locked
+              </span>
+            )}
+            {/* ⚠️ Missed pill */}
+            {!isTodayMode && !isAuditView && isMissed && (
+              <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 bg-amber-500/15 text-amber-400 border border-amber-500/30 rounded-full">
+                ⚠ Missed
               </span>
             )}
           </div>
@@ -123,7 +140,7 @@ export function QuarterRow({
 
         {/* Decision Badge */}
         <td className="px-3.5 py-3">
-          <DirectionBadge decision={prediction.decision} />
+          <DirectionBadge decision={prediction.decision} status={prediction.status} />
         </td>
 
         {/* Trade Volume */}

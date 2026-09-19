@@ -166,12 +166,14 @@ export function usePredictions(
       }
 
       if (viewMode === 'live') {
-        // Gate closure is exactly 120 minutes (2 hours) before physical delivery start.
-        // Shows the next 8 tradeable quarters whose gate closure has not yet passed.
-        const threshold = new Date(Date.now() + 120 * 60 * 1000).toISOString();
+        // Show the last 8 locked quarters — the active delivery batch whose gate has closed.
+        // We query time_dk <= now (gate closure happened) and filter for locked statuses.
+        // Results are fetched newest-first and reversed client-side so the table is oldest→newest.
+        const now = new Date().toISOString();
         query = query
-          .gt('time_dk', threshold)
-          .order('time_dk', { ascending: true })
+          .in('status', ['LOCKED', 'LOCKED_PENDING', 'MISSED', 'SETTLED_AUDITED', 'SETTLED'])
+          .lte('time_dk', now)
+          .order('time_dk', { ascending: false })
           .limit(8);
       } else if (viewMode === 'today') {
         // 'today' mode: fetch all 96 settlement quarters for the date directly from Supabase
@@ -195,7 +197,9 @@ export function usePredictions(
 
       if (supabaseError) throw supabaseError;
 
-      setPredictions((data as QuarterPrediction[]) || []);
+      // Live mode results come newest-first (for correct LIMIT direction); reverse to oldest→newest for display.
+      const rows = (data as QuarterPrediction[]) || [];
+      setPredictions(viewMode === 'live' ? [...rows].reverse() : rows);
       setLastUpdated(new Date());
     } catch (err: any) {
       setError(err.message || 'Failed to fetch predictions');

@@ -182,18 +182,33 @@ function App() {
         {!isAllScreen && (
           <>
             <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-800 p-5 sm:p-6 rounded-xl border border-slate-700 shadow-lg">
-              <CountdownTimer nextQuarter={predictions[0]} onExpire={refetch} />
+              <CountdownTimer
+                lastLockedQuarter={predictions.length > 0 ? predictions[predictions.length - 1] : undefined}
+                onExpire={refetch}
+              />
               <div className="flex flex-wrap items-center gap-3">
                 <LastUpdated timestamp={lastUpdated} />
               </div>
             </div>
 
-            <QuarterTable
-              predictions={predictions}
-              loading={loading}
-              error={error}
-              isTodayMode={false}
-            />
+            {!loading && predictions.length === 0 && !error && (
+              <div className="flex flex-col items-center justify-center gap-3 py-14 text-slate-500">
+                <span className="text-4xl">🔒</span>
+                <p className="text-base font-medium text-slate-400">No locked decisions yet today.</p>
+                <p className="text-sm text-slate-500">
+                  Gate closes every 15 minutes — data will appear shortly after the publisher runs.
+                </p>
+              </div>
+            )}
+
+            {(predictions.length > 0 || loading) && (
+              <QuarterTable
+                predictions={predictions}
+                loading={loading}
+                error={error}
+                isTodayMode={false}
+              />
+            )}
           </>
         )}
 
