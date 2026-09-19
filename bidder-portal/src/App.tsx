@@ -183,7 +183,7 @@ function App() {
           <>
             <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-800 p-5 sm:p-6 rounded-xl border border-slate-700 shadow-lg">
               <CountdownTimer
-                lastLockedQuarter={predictions.length > 0 ? predictions[predictions.length - 1] : undefined}
+                nextQuarter={predictions[0]}
                 onExpire={refetch}
               />
               <div className="flex flex-wrap items-center gap-3">

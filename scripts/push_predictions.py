@@ -30,6 +30,60 @@ from src.tournament_tables_v2 import TournamentTableGenerator
 from src.commercial_strategy_v3_1 import V31CommercialStrategyEngine
 from src.supabase_publisher import SupabasePublisher, ALL_MODELS
 
+# Resilient authentic Day-Ahead spot retrieval (with retry and V4.1 store fallback)
+def _resilient_fetch_day_ahead_96_spot_prices(self, start_dt, end_dt):
+    import json as _json
+    import requests as _rq
+    import pandas as _pd
+
+    spot = {}
+    params = {
+        "filter": _json.dumps({"PriceArea": [self.price_area]}),
+        "start": start_dt.strftime("%Y-%m-%dT00:00"),
+        "end": (start_dt + timedelta(days=1)).strftime("%Y-%m-%dT00:00"),
+        "sort": "TimeDK ASC",
+        "limit": 400,
+    }
+    for attempt in range(3):
+        try:
+            res = _rq.get("https://api.energidataservice.dk/dataset/DayAheadPrices",
+                          params=params, timeout=60).json()
+            for r in res.get("records", []):
+                val = r.get("DayAheadPriceEUR")
+                if r.get("PriceArea") == self.price_area and _pd.notnull(val):
+                    key = _pd.to_datetime(r["TimeDK"]).strftime("%Y-%m-%d %H:%M")
+                    spot[key] = float(val)
+            if len(spot) >= 96:
+                return spot
+        except Exception as exc:
+            logger.warning(f"  DayAheadPrices attempt {attempt + 1}/3 failed: {exc}")
+
+    try:
+        import duckdb as _dd
+        store = os.path.join("Nurex_V4_2", "data", "nurex42.duckdb")
+        if os.path.exists(store):
+            t0 = _pd.Timestamp(start_dt).tz_localize("Europe/Copenhagen").tz_convert("UTC").tz_localize(None)
+            t1 = _pd.Timestamp(start_dt + timedelta(days=1)).tz_localize("Europe/Copenhagen").tz_convert("UTC").tz_localize(None)
+            con = _dd.connect(store, read_only=True)
+            try:
+                rows = con.execute(
+                    "SELECT time_utc, price_eur FROM dayahead "
+                    "WHERE area = ? AND time_utc >= ? AND time_utc < ? AND source LIKE 'EDS:%'",
+                    [self.price_area, t0, t1]).fetchall()
+            finally:
+                con.close()
+            for ts, price in rows:
+                if price is None:
+                    continue
+                key = _pd.Timestamp(ts).tz_localize("UTC").tz_convert("Europe/Copenhagen").strftime("%Y-%m-%d %H:%M")
+                spot.setdefault(key, float(price))
+    except Exception as exc:
+        logger.warning(f"  V4.1 store lookup failed: {exc}")
+
+    return spot
+
+TournamentTableGenerator._fetch_day_ahead_96_spot_prices = _resilient_fetch_day_ahead_96_spot_prices
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -201,6 +255,13 @@ def push_predictions(
                                     f"{sum(1 for t in trades if t['status'] == 'MISSED')} MISSED) "
                                     f"for {area} {current_date}"
                                 )
+                                if not trades:
+                                    logger.warning(
+                                        f"  [V4.1-HighAlpha] adapter returned 0 trades, falling back to V41InferenceEngine"
+                                    )
+                                    from src.v4_1_inference_engine import V41InferenceEngine
+                                    v41_engine = V41InferenceEngine(price_area=area)
+                                    trades = v41_engine.evaluate_96q_schedule(df, current_date)
                             except Exception as e:
                                 logger.warning(
                                     f"  [V4.1-HighAlpha] adapter failed ({e}), falling back to V41InferenceEngine"
