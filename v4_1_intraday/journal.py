@@ -166,6 +166,61 @@ def _apply_live_risk(rows: list, con, area: str, cfg, now: pd.Timestamp) -> list
              area, mult, reason, len(rows))
     return rows
 
+def _apply_hourly_cap(rows: list, con, area: str, cfg, tz: str) -> list:
+    """Enforce max_mwh_per_hour: cap the aggregate MWh across all four quarters of a delivery
+    hour.  Reads already-locked (non-HOLD) rows from the journal, then scales down new rows
+    proportionally when the combined total would exceed the cap.
+
+    FIX (audit #6): without this, up to 4 open quarters in one hour accumulate unbounded
+    hourly exposure; the per-quarter cap alone does not limit the combined risk.
+    """
+    from collections import defaultdict
+    r = cfg["risk"]
+    cap = float(r.get("max_mwh_per_hour", float(r["max_mwh_per_quarter"]) * 2.0))
+    step = float(r["mwh_step"])
+    mn = float(r["min_mwh_per_quarter"])
+
+    # Group new LOCKED trade rows by delivery hour
+    hour_rows: dict = defaultdict(list)
+    for row in rows:
+        if row.get("status") == "LOCKED" and row.get("action") in ("BUY", "SELL"):
+            q = pd.Timestamp(row["quarter_utc"]).tz_localize("UTC").tz_convert(tz).floor("h")
+            hour_rows[q].append(row)
+
+    for hour, hrows in hour_rows.items():
+        h_start = hour.tz_convert("UTC").tz_localize(None)
+        h_end = h_start + pd.Timedelta(hours=1)
+        try:
+            db = pd.read_sql_query(
+                "SELECT COALESCE(SUM(mwh), 0.0) AS ex FROM decisions "
+                "WHERE area=? AND quarter_utc>=? AND quarter_utc<? AND action != 'HOLD'",
+                con, params=[area, _ts(h_start), _ts(h_end)])
+            existing_mwh = float(db["ex"].iloc[0])
+        except Exception:
+            existing_mwh = 0.0
+
+        new_mwh = sum(float(row["mwh"]) for row in hrows)
+        if existing_mwh + new_mwh <= cap + 1e-9:
+            continue  # within cap, no action needed
+
+        allowed = max(0.0, cap - existing_mwh)
+        log.warning("[%s] hourly cap %.1f MWh/h applied: existing=%.1f new=%.1f allowed=%.1f",
+                    area, cap, existing_mwh, new_mwh, allowed)
+        if allowed < mn:
+            for row in hrows:
+                row["action"] = "HOLD"; row["mwh"] = 0.0; row["mw"] = 0.0
+                row["reason"] = "hourly exposure cap"
+        else:
+            scale = allowed / new_mwh
+            for row in hrows:
+                snapped = np.floor(float(row["mwh"]) * scale / step) * step
+                row["mwh"] = snapped if snapped + 1e-9 >= mn else 0.0
+                row["mw"] = row["mwh"] * 4.0
+                if row["mwh"] <= 0:
+                    row["action"] = "HOLD"; row["reason"] = "hourly exposure cap"
+    return rows
+
+
 def lock(store, cfg, now=None, fb=None, bundles=None) -> dict:
     now = pd.Timestamp(now) if now is not None else pd.Timestamp.now(tz="UTC").tz_localize(None)
     ahead = pd.Timedelta(minutes=int(cfg["intraday"].get("lock_ahead_minutes", 20)))
@@ -223,6 +278,7 @@ def lock(store, cfg, now=None, fb=None, bundles=None) -> dict:
                                  "cost_eur_mwh": cfg.cost_per_mwh})
             # Apply live risk overlay (daily stop + drawdown guard) to sized rows
             rows = _apply_live_risk(rows, con, area, cfg, now)
+            rows = _apply_hourly_cap(rows, con, area, cfg, cfg["local_tz"])
             for row in rows:
                 keys = [k for k in COLS if k in row]
                 con.execute(f"INSERT OR IGNORE INTO decisions ({','.join(keys)}) VALUES ({','.join('?' * len(keys))})",

@@ -54,6 +54,11 @@ costs:
 risk:
   batch_risk_fraction: 0.10          # stressed loss of ONE quarter <= 10% of collateral
   max_mwh_per_quarter: 10.0
+  # Aggregate hourly exposure cap: total MWh locked across all four quarters of one
+  # delivery hour must not exceed this. With max_mwh_per_quarter = 10.0 and four
+  # quarters per hour the uncapped hourly risk is 40 MWh; this cap limits it to 20 MWh
+  # (≤ 2× the per-quarter stressed loss).  FIX audit #6.
+  max_mwh_per_hour: 20.0
   drawdown_window_days: 7            # drawdown guard looks at the equity peak of the last 7 days
 
 decision:

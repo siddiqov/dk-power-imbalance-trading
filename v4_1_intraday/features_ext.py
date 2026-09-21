@@ -334,7 +334,16 @@ class ExtMixin:
         aid = int(ids[0])
         con = con.dropna(subset=["contract_id", "dlvry_start", "dlvry_end"]).drop_duplicates("contract_id", keep="last")
         con = con.assign(dur=(con["dlvry_end"] - con["dlvry_start"]).dt.total_seconds())
-        con = con[con["area_ids"].astype(str).str.contains(str(aid)) | (con["area_ids"].astype(str) == "[]")]
+        # FIX (audit #5): str.contains(str(aid)) is a substring match — area id 1 also
+        # matches "10", "11", "110", etc.  Parse the JSON list instead so only exact
+        # membership is tested.  An empty list ([]) means no area restriction.
+        def _aid_in(s, _aid=aid):
+            try:
+                lst = __import__("json").loads(s)
+                return len(lst) == 0 or _aid in lst
+            except Exception:
+                return False
+        con = con[con["area_ids"].astype(str).apply(_aid_in)]
         c15 = con[con["dur"] == 900].drop_duplicates("dlvry_start", keep="last").set_index("dlvry_start")["contract_id"]
         c60 = con[con["dur"] == 3600].drop_duplicates("dlvry_start", keep="last").set_index("dlvry_start")["contract_id"]
         base = pd.DataFrame({"i": np.arange(len(q)), "a": a.values,
