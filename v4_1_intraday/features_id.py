@@ -108,6 +108,15 @@ class IntradayFeatureBuilder(ExtMixin, FeatureBuilder):
                 run[i] = min(cnt, 16) * (1 if v > 0 else (-1 if v < 0 else 0))
             f["dir_run"] = run
             f.loc[g["dominating_direction"].isna(), "dir_run"] = np.nan
+            # REC-02: upward regulation fraction over rolling windows
+            # 0.0 = all downward, 0.5 = neutral, 1.0 = all upward activation
+            afrr_up = f["afrr_up_mw"].fillna(0)
+            afrr_dn = f["afrr_down_mw"].fillna(0)
+            for _w in (3, 6, 12):
+                _total = (afrr_up + afrr_dn).rolling(_w, min_periods=1).sum()
+                f[f"up_reg_frac_{_w}q"] = (
+                    afrr_up.rolling(_w, min_periods=1).sum() / (_total + 1e-6)
+                ).clip(0.0, 1.0)
             self.fast[a] = f
 
         # live PSRN rolling summaries
@@ -152,6 +161,11 @@ class IntradayFeatureBuilder(ExtMixin, FeatureBuilder):
         X["holiday"] = ld.isin(self.holidays).astype(float).values
         X["pre_holiday"] = (ld + timedelta(days=1)).isin(self.holidays).astype(float).values if len(ld) else []
         X["minute_of_day"] = (loc.dt.hour * 60 + loc.dt.minute).values
+        # REC-03: cyclical hour encoding — trees handle midnight wrap-around correctly
+        _hour_frac = loc.dt.hour + loc.dt.minute / 60.0
+        X["hour_sin"] = np.sin(2 * np.pi * _hour_frac / 24.0).values
+        X["hour_cos"] = np.cos(2 * np.pi * _hour_frac / 24.0).values
+        X["is_evening_peak"] = ((_hour_frac >= 16.0) & (_hour_frac < 22.0)).astype(float).values
 
         # fast state for own and other zone
         tf = (a - self.lag_fast).dt.floor("15min") - Q

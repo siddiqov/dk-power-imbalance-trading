@@ -16,7 +16,7 @@ intraday:
   # Retraining cadence in the walk-forward replay
   retrain_every_days: 30
   min_train_days: 120
-  validation_days: 60
+  validation_days: 90   # REC-04: extended for DK2 BUY audit; re-run run_train_v41.bat
   # Paper-trading journal: decisions are locked this many minutes before their gate closure
   lock_ahead_minutes: 20
 

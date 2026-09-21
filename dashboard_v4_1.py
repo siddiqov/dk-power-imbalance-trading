@@ -158,7 +158,7 @@ TournamentTableGenerator._fetch_day_ahead_96_spot_prices = _v41_fetch_day_ahead_
 COST_EUR_MWH = v41id.cost_per_mwh()  # fee + imbalance fee + BRP + slippage (config_v41.yaml)
 
 st.set_page_config(
-    page_title="Nurex V4.1 Institutional High-Alpha Engine",
+    page_title="Nurex Trading Command Center",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -191,8 +191,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- SIDEBAR CONTROLLER ---
-st.sidebar.title("⚡ Nurex V4.1 High-Alpha Meta-Controller")
-st.sidebar.caption("High-Alpha Intraday & Balancing Engine | Port 5005")
+st.sidebar.title("⚡ Nurex Trading Command Center")
+st.sidebar.caption("Legacy V2/V3 tournament models + V4.1 Intraday (rebuilt) | Port 5005")
 
 # --- AUTO-REFRESH: current trade status every 15 min, matching the scheduled trading
 # cycle - or refresh immediately any time with the button below.
@@ -247,12 +247,14 @@ crash_protection_enabled = True
 threshold_level = st.sidebar.selectbox(
     "V4.1 Signal Thresholds",
     ["Validated (from training)", "Balanced (what-if)", "Aggressive (what-if)"],
-    index=2,  # default: Aggressive (what-if)
+    index=2,  # default: Aggressive (what-if); key= means index is only used on first load
+    key="threshold_level",  # persists selection across reruns within the same session
     help="Validated uses the margin / probability pair tuned on held-out data. The what-if levels halve or quarter the margin and lower the probability bar, so more quarters qualify - more trades, more exposure, and no validation behind them.")
 # The walk-forward replay has always applied a daily loss stop and drawdown scaling; until now
 # the live view did not, so backtest and live were not the same system. With this on, they are.
 risk_limits_on = st.sidebar.checkbox(
     "Apply risk limits (daily loss stop + drawdown)", value=True,
+    key="risk_limits_on",  # persists across reruns
     help="Stops trading for the rest of the day once the daily loss limit is hit, and halves or halts size on drawdown - the same overlay the replay uses. Off shows raw signal decisions, which will NOT match backtest results.")
 
 # Trade size scales with how much of the account's collateral a batch of quarters may risk
@@ -260,7 +262,8 @@ risk_limits_on = st.sidebar.checkbox(
 # not-yet-decided quarters; uncheck to go back to the original 0.1 - locked/settled quarters
 # keep the size they were actually decided and traded at either way.
 bigger_size_on = st.sidebar.checkbox(
-    "Bigger trade sizes (risk budget 0.1 → 0.2)", value=True,
+    "Bigger trade sizes (risk budget 0.1 → 0.2)", value=False,  # default OFF: matches validated backtest budget
+    key="bigger_size_on",  # persists across reruns
     help="On by default: doubles the share of collateral each batch of quarters may risk, roughly doubling trade size on new decisions. Bigger trades also mean bigger possible losses. Uncheck to use the smaller 0.1 budget instead.")
 if bigger_size_on:
     st.sidebar.caption("⚠️ Bigger trades also mean bigger possible losses.")
@@ -743,7 +746,7 @@ if THRESHOLD_KEY != 'validated':
         'untouched while this is on.')
 
 # --- TOP SUMMARY BANNER & METRICS ---
-st.title(f"⚡ Nurex V4.1 Institutional High-Alpha Command Center ({selected_area})")
+st.title(f"⚡ Nurex Trading Command Center ({selected_area})")
 st.markdown("### Real-Time MARI/PICASSO Balancing • SMARD German Grid • XBID Level-2 Order Flow Microstructure")
 
 settled_mask = df_day['is_settled'] if ('is_settled' in df_day.columns) else pd.Series([False]*len(df_day))
@@ -897,9 +900,17 @@ with tab_balancing:
 with tab_unified_ledger:
     st.subheader("96-Quarter Intraday Trading Ledger: V4.0 vs V4.1 Side-by-Side")
     st.markdown("""
-    **Authentic Multi-Generation Audit:** Side-by-side comparison across **V4.0 (Full-Grid Champion)** and **V4.1 (Institutional High-Alpha)**.
+    **Authentic Multi-Generation Audit:** Side-by-side comparison across **V4.0 (legacy, pre-rebuild)** and **V4.1 Intraday (rebuilt, point-in-time engine)**.
     Click on any row to open the full interactive breakdown drawer.
     """)
+    st.warning(
+        "The **V4.1 Intraday** cells below are computed live by this page for whichever date you pick, using "
+        "today's trained model run against the stored history - they are **not** read from the locked "
+        "paper-trading journal. A row only reflects a genuine, never-recomputed live decision if it is tagged "
+        "\U0001f512 (locked) in its decision text, or if it appears in the sidebar's "
+        "'\U0001f512 V4.1 paper-trading journal' section. For dates before that journal existed, every row here "
+        "is a same-model backtest estimate, not a real trade that was ever placed."
+    )
 
     if df_day.empty:
         st.warning("No live trading data available for selected date.")
@@ -1079,6 +1090,7 @@ with tab_unified_ledger:
                 
                 <!-- V4.1 Champion Column Group -->
                 <td style="font-weight:700; color:#0D9488; background-color:#F0FDFA;">€{v41_imb:.2f}</td>
+                <td style="font-weight:600; background-color:#F0FDFA; color:{('#0D9488' if v41_spread > 0.0 else ('#DC2626' if v41_spread < 0.0 else '#64748B'))}">€{v41_spread:+.2f}</td>
                 <td style="background-color:#F0FDFA;"><span class="badge {dec41_class}">{v41_dec}</span></td>
                 <td style="background-color:#F0FDFA; font-weight:600;">{v41_vol:.0f} MW</td>
                 <td style="background-color:#F0FDFA;" class="{pnl41_class}">{pnl41_text}</td>
@@ -1087,9 +1099,9 @@ with tab_unified_ledger:
                 <td>{status_badge}</td>
             </tr>
             <tr class="drawer-row" id="drawer-{row_idx}" style="display: none;">
-                <td colspan="{(13 if show_v40 else 10) + 1}" class="drawer-cell">
+                <td colspan="{(14 if show_v40 else 11) + 1}" class="drawer-cell">
                     <div class="drawer-banner">
-                        <span>⚡ <b>AUDIT BREAKDOWN:</b> {q_label} &mdash; V4.1 Institutional High-Alpha Engine</span>
+                        <span>⚡ <b>AUDIT BREAKDOWN:</b> {q_label} &mdash; V4.1 Intraday Engine</span>
                         <span><b>Delivery:</b> {time_val} CEST &bull; <b>MARI / PICASSO / SMARD / XBID Grounded</b></span>
                     </div>
                     <div class="drawer-cards-grid">
@@ -1118,7 +1130,7 @@ with tab_unified_ledger:
                                 </thead>
                                 <tbody>
                                     {v40_audit_row}
-                                    <tr class="highlight-champ"><td><b>V4.1 High-Alpha</b></td><td style="text-align:right;">€{v41_imb:.2f}</td><td style="text-align:center;">{v41_dec}</td><td style="text-align:right;">{pnl41_text}</td></tr>
+                                    <tr class="highlight-champ"><td><b>V4.1 Intraday</b></td><td style="text-align:right;">€{v41_imb:.2f}</td><td style="text-align:center;">{v41_dec}</td><td style="text-align:right;">{pnl41_text}</td></tr>
                                 </tbody>
                             </table>
                             {alpha_notice}
@@ -1571,7 +1583,8 @@ with tab_unified_ledger:
                   {ic_ths}
                   {v40_ths}
                   <th draggable="true" title="V4.1 Predicted Imbalance Price (€) [Spot + Spread]" style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">V4.1 Pred</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
-                  <th draggable="true" title="V4.1 Institutional Trading Decision" style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">V4.1 Pos</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
+                  <th draggable="true" title="V4.1 Predicted Spread (€/MWh) [Expected imbalance minus DA spot]. Positive = BUY signal; Negative = SELL signal." style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">V4.1 Spread</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
+                  <th draggable="true" title="V4.1 Intraday Trading Decision" style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">V4.1 Pos</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   <th draggable="true" title="V4.1 Position Size with Conviction Scaling" style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">V4.1 Vol</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   <th draggable="true" title="V4.1 Realized Trading PnL (€)" style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">V4.1 PnL</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   <th draggable="true" title="Authentic Energinet Settled Price (€)"><div class="col-header-wrap"><span class="col-title">Settled Imb</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
@@ -2353,16 +2366,18 @@ with tab_xbid:
 # TAB 5: GRID SEARCH MODEL TRANSPARENCY
 # ----------------------------------------------------------------------
 with tab_gridsearch:
-    st.subheader("V4.1 Model Selection & Hyperparameter Grid Search Transparency")
+    st.subheader("V4.1 Intraday Model Details")
     st.markdown("""
-    **Zero Blind Parameters Guarantee:** The V4.1 Champion model is selected via rigorous **5-Fold TimeSeriesSplit Walk-Forward Cross-Validation**
-    incorporating European balancing signals, SMARD German grid features, and XBID order flow metrics.
+    The V4.1 Intraday model (LightGBM direction classifier + regime magnitude + quantiles) is retrained on a rolling
+    walk-forward basis, with decision thresholds tuned on the trailing 60 days and checked for stability. This section reads
+    the trained model's own metadata file - if it looks empty below, run `train_v4_1.py train` (or `scripts_v41\run_train_v41.bat`)
+    to regenerate it.
     """)
 
     if log_v41:
         c1, c2 = st.columns([1, 1])
         with c1:
-            st.markdown("#### V4.1 Champion Model Specifications")
+            st.markdown("#### V4.1 Intraday Model Specifications")
             st.json(log_v41.get("champion", {}))
             
             st.markdown("#### Top 5 Cross-Validation Ranked Configurations")
@@ -2371,7 +2386,7 @@ with tab_gridsearch:
                 st.dataframe(top_df[['config_id', 'family', 'cv_mae', 'cv_rmse', 'cv_directional_accuracy_pct']], use_container_width=True)
 
         with c2:
-            st.markdown("#### Top 15 Feature Importances (V4.1 High-Alpha Contributions)")
+            st.markdown("#### Top 15 Feature Importances (V4.1 Intraday)")
             fi = log_v41.get("feature_importance_ranking", {})
             if fi:
                 fi_df = pd.DataFrame(list(fi.items())[:15], columns=['Feature', 'Importance (%)'])
