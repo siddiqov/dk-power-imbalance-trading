@@ -19,6 +19,10 @@ intraday:
   validation_days: 90   # REC-04: extended for DK2 BUY audit; re-run run_train_v41.bat
   # Paper-trading journal: decisions are locked this many minutes before their gate closure
   lock_ahead_minutes: 20
+  # Stale-data guard: if imbalance/PSRN data is older than this many minutes at
+  # decision time, force HOLD rather than trading on NaN features.
+  # lag + tolerance: imbalance_lag_minutes (30) + 60 min tolerance = 90 min.
+  stale_data_guard_minutes: 90
 
 # --- Point-in-time availability (minutes after the 15-min quarter END) ---------
 # Observed on Energi Data Service 17 Sep 2026: satisfied demand / aFRR volumes of the

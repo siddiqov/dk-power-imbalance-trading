@@ -16,6 +16,8 @@ import logging
 import sqlite3
 from pathlib import Path
 
+import itertools
+
 import numpy as np
 import pandas as pd
 
@@ -94,6 +96,76 @@ def _hour_agreement(d: pd.DataFrame, tz: str) -> pd.Series:
     return same.astype(int)
 
 
+
+def _live_risk_state(con, area: str, cfg, now: pd.Timestamp) -> tuple:
+    """Return (size_multiplier, reason) from settled journal PnL history.
+
+    Reads settled rows in the drawdown window and computes:
+      - daily loss stop (sum of today's settled PnL vs daily_loss_stop_fraction * collateral)
+      - drawdown guard (cumulative peak-to-trough over drawdown_window_days)
+
+    Returns (1.0, None) when no history yet (safe default = full size).
+    """
+    r = cfg["risk"]
+    coll = cfg.collateral_eur
+    daily_stop_thresh = -float(r["daily_loss_stop_fraction"]) * coll
+    half_thresh = float(r["drawdown_half_fraction"]) * coll
+    halt_thresh = float(r["drawdown_stop_fraction"]) * coll
+    win_days = int(float(r.get("drawdown_window_days", 7)))
+    tz = cfg["local_tz"]
+
+    horizon_ts = _ts(now - pd.Timedelta(days=win_days))
+    try:
+        df = pd.read_sql_query(
+            "SELECT quarter_utc, pnl_eur FROM decisions "
+            "WHERE area=? AND pnl_eur IS NOT NULL AND quarter_utc>=? ORDER BY quarter_utc",
+            con, params=[area, horizon_ts])
+    except Exception:
+        return 1.0, None
+    if df.empty:
+        return 1.0, None
+
+    pnls = df["pnl_eur"].astype(float).tolist()
+    cum = list(itertools.accumulate(pnls, initial=0.0))
+    peak = max(cum)
+    equity = cum[-1]
+    drawdown = max(0.0, peak - equity)
+
+    today_local = pd.Timestamp(now).tz_localize("UTC").tz_convert(tz).date()
+    today_pnl = df.loc[
+        pd.to_datetime(df["quarter_utc"]).dt.tz_localize("UTC").dt.tz_convert(tz).dt.date == today_local,
+        "pnl_eur"
+    ].astype(float).sum()
+
+    if today_pnl <= daily_stop_thresh:
+        return 0.0, "daily loss stop"
+    if drawdown >= halt_thresh:
+        return 0.0, "drawdown halt"
+    if drawdown >= half_thresh:
+        return 0.5, "drawdown guard"
+    return 1.0, None
+
+
+def _apply_live_risk(rows: list, con, area: str, cfg, now: pd.Timestamp) -> list:
+    """Scale or zero-out live lock rows according to the current risk state."""
+    mult, reason = _live_risk_state(con, area, cfg, now)
+    if mult == 1.0:
+        return rows
+    r = cfg["risk"]
+    step = float(r["mwh_step"])
+    mn = float(r["min_mwh_per_quarter"])
+    for row in rows:
+        if row.get("action") in ("BUY", "SELL"):
+            new_mwh = np.floor(float(row["mwh"]) * mult / step) * step if mult > 0 else 0.0
+            row["mwh"] = new_mwh if new_mwh + 1e-9 >= mn else 0.0
+            row["mw"] = row["mwh"] * 4.0
+            if row["mwh"] <= 0:
+                row["action"] = "HOLD"
+                row["reason"] = reason
+    log.info("[%s] live risk overlay: mult=%.1f reason=%s applied to %d rows",
+             area, mult, reason, len(rows))
+    return rows
+
 def lock(store, cfg, now=None, fb=None, bundles=None) -> dict:
     now = pd.Timestamp(now) if now is not None else pd.Timestamp.now(tz="UTC").tz_localize(None)
     ahead = pd.Timedelta(minutes=int(cfg["intraday"].get("lock_ahead_minutes", 20)))
@@ -149,6 +221,8 @@ def lock(store, cfg, now=None, fb=None, bundles=None) -> dict:
                                  "q10": float(r["q10"]), "q50": float(r["q50"]), "q90": float(r["q90"]),
                                  "reason": r["reason"], "hour_all_same_side": int(r["hour_all_same_side"]),
                                  "cost_eur_mwh": cfg.cost_per_mwh})
+            # Apply live risk overlay (daily stop + drawdown guard) to sized rows
+            rows = _apply_live_risk(rows, con, area, cfg, now)
             for row in rows:
                 keys = [k for k in COLS if k in row]
                 con.execute(f"INSERT OR IGNORE INTO decisions ({','.join(keys)}) VALUES ({','.join('?' * len(keys))})",

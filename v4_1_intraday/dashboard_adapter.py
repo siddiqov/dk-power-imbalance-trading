@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import copy
 import json
+import os
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -74,30 +76,84 @@ def model_info(area: str) -> dict | None:
     return info
 
 
+# --- Read-only access that survives the scheduled cycle ----------------------------------
+# The paper-trading cycle (train_v4_1.py cycle, every 15 min) writes nurex42.duckdb for a few
+# minutes per run. DuckDB lets no other process open the file while a writer holds it, so the
+# dashboard used to go blank ("HOLD") during every write. Whenever the dashboard does get a
+# read-only connection (so no writer is active and the file is consistent) it refreshes a copy,
+# nurex42.snapshot.duckdb, at most every _SNAPSHOT_MAX_AGE_S seconds. When the live file is
+# busy, reads fall back to that copy. The snapshot is only ever read by the dashboard; the
+# cycle and the journal keep using the live store.
+_SNAPSHOT_MAX_AGE_S = 600
+
+
+def _snapshot_path(cfg=None) -> Path:
+    p = Path((cfg or config()).db_path)
+    return p.with_name(p.stem + ".snapshot" + p.suffix)
+
+
+def _refresh_snapshot(cfg) -> None:
+    """Copy the live store to the snapshot. Call only while holding a read-only connection."""
+    snap = _snapshot_path(cfg)
+    try:
+        if snap.exists() and (_time.time() - snap.stat().st_mtime) < _SNAPSHOT_MAX_AGE_S:
+            return
+        src = Path(cfg.db_path)
+        tmp = snap.with_name(snap.name + ".tmp")
+        shutil.copyfile(src, tmp)
+        os.replace(tmp, snap)
+        wal, snap_wal = Path(str(src) + ".wal"), Path(str(snap) + ".wal")
+        if wal.exists():
+            shutil.copyfile(wal, snap_wal)
+        elif snap_wal.exists():
+            snap_wal.unlink()
+    except Exception:
+        pass  # best effort: never fail a read that already succeeded
+
+
+def _open_ro(cfg, attempts: int = 3):
+    """Read-only Store on the live file if it is free, else on the latest snapshot.
+    Returns (store, source) with source "live" or "snapshot"."""
+    last = None
+    for i in range(attempts):
+        try:
+            st = Store(cfg.db_path, read_only=True)
+            _refresh_snapshot(cfg)
+            return st, "live"
+        except Exception as e:  # database busy: one writer at a time
+            last = e
+            if i < attempts - 1:
+                _time.sleep(2)
+    snap = _snapshot_path(cfg)
+    if snap.exists():
+        try:
+            return Store(snap, read_only=True), "snapshot"
+        except Exception as e:
+            last = e
+    raise RuntimeError(f"V4.2 store busy: {last}")
+
+
 def _builder(max_age_s: int = 300):
-    """Feature builder cached for a few minutes. If the store is locked by a running update,
-    the previous builder is reused (DuckDB allows one writer at a time)."""
-    import time
+    """Feature builder cached for a few minutes. Reads the live store, or the snapshot while a
+    running update holds it; if neither can be opened the previous builder is reused."""
     now = pd.Timestamp.now()
     fb = _CACHE.get("fb")
     if fb is not None and (now - _CACHE["fb_at"]).total_seconds() <= max_age_s:
         return fb
-    last = None
-    for _ in range(3):
-        try:
-            st = Store(config().db_path, read_only=True)
-            try:
-                fb = IntradayFeatureBuilder(st, config())
-            finally:
-                st.close()
-            _CACHE["fb"], _CACHE["fb_at"] = fb, now
-            return fb
-        except Exception as e:  # database busy
-            last = e
-            time.sleep(2)
-    if _CACHE.get("fb") is not None:
-        return _CACHE["fb"]
-    raise RuntimeError(f"V4.2 store busy: {last}")
+    try:
+        st, src = _open_ro(config())
+    except RuntimeError:
+        if _CACHE.get("fb") is not None:
+            return _CACHE["fb"]
+        raise
+    try:
+        fb = IntradayFeatureBuilder(st, config())
+    finally:
+        st.close()
+    # a snapshot-based builder is kept for one minute only, so the live data comes back quickly
+    at = now if src == "live" else now - pd.Timedelta(seconds=max(0, max_age_s - 60))
+    _CACHE["fb"], _CACHE["fb_at"], _CACHE["fb_src"] = fb, at, src
+    return fb
 
 
 # What-if threshold levels for the dashboard. 'validated' uses the thresholds chosen on the
@@ -159,7 +215,7 @@ def day_decisions(area: str, date_str: str, now=None, params: dict | None = None
             out[col] = d[col].values
 
     out["time_dk_str"] = (out["quarter_utc"].dt.tz_localize("UTC").dt.tz_convert(cfg["local_tz"])
-                          .dt.strftime("%Y-%m-%d %H:%M"))
+                          .dt.strftime("%Y-%m-%d %H:%M%z"))
     c = cfg.cost_per_mwh
     s = np.where(out["action"] == "BUY", 1.0, np.where(out["action"] == "SELL", -1.0, 0.0))
     settled = out["spread_actual"].notna()
@@ -213,7 +269,7 @@ def _predictions(area: str, date_str: str, now=None, max_age_s: int = 900, cfg=N
     qs = tu.local_day_quarters(date_str, cfg["local_tz"])
     out = P.predict_quarters(None, cfg, b, qs, now=now, fb=_builder())
     out["time_dk_str"] = (out["quarter_utc"].dt.tz_localize("UTC").dt.tz_convert(cfg["local_tz"])
-                          .dt.strftime("%Y-%m-%d %H:%M"))
+                          .dt.strftime("%Y-%m-%d %H:%M%z"))
     if now is None and not override:
         _CACHE[key] = (pd.Timestamp.now(), out.copy())
     return out
@@ -308,7 +364,7 @@ def day_decisions_multi(area: str, date_str: str, levels=("validated", "balanced
     qs = tu.local_day_quarters(date_str, cfg["local_tz"])
     base = P.predict_quarters(None, cfg, b, qs, now=now, fb=_builder())
     base["time_dk_str"] = (base["quarter_utc"].dt.tz_localize("UTC").dt.tz_convert(cfg["local_tz"])
-                           .dt.strftime("%Y-%m-%d %H:%M"))
+                           .dt.strftime("%Y-%m-%d %H:%M%z"))
     c = cfg.cost_per_mwh
 
     out = {}
@@ -347,7 +403,7 @@ def sources_status() -> pd.DataFrame:
     with contextlib.redirect_stdout(buf):
         df = cmd_sources(types.SimpleNamespace(), config())
     df = df.rename(columns={"n": "rows"})
-    df["last"] = pd.to_datetime(df["last"]).dt.strftime("%Y-%m-%d %H:%M")
+    df["last"] = pd.to_datetime(df["last"]).dt.strftime("%Y-%m-%d %H:%M%z")
     return df[["source", "rows", "last"]]
 
 
@@ -386,23 +442,19 @@ def day_flows(area: str, date_str: str) -> pd.DataFrame:
     names = [f"{p}:{area}>{v}" for b, _ in borders for v in variants[b] for p in ("sched", "phys")]
 
     raw, last = None, None
-    for attempt in range(3):
+    try:
+        st, _src = _open_ro(cfg)  # live store, or the snapshot while the cycle is writing
         try:
-            st = Store(cfg.db_path, read_only=True)
-            try:
-                raw = st.df(
-                    "SELECT series, time_utc, value FROM entsoe_series "
-                    "WHERE time_utc >= ? AND time_utc <= ? AND series IN ("
-                    + ",".join("?" * len(names)) + ")",
-                    [qs.min(), qs.max()] + names)
-            finally:
-                st.close()
-            break
-        except Exception as e:  # database busy: one writer at a time
-            last = e
-            raw = None
-            if attempt < 2:
-                _time.sleep(2)
+            raw = st.df(
+                "SELECT series, time_utc, value FROM entsoe_series "
+                "WHERE time_utc >= ? AND time_utc <= ? AND series IN ("
+                + ",".join("?" * len(names)) + ")",
+                [qs.min(), qs.max()] + names)
+        finally:
+            st.close()
+    except Exception as e:  # neither the live store nor a snapshot could be read
+        last = e
+        raw = None
 
     if raw is None:  # never got a read in
         cached = _CACHE.get(("flows", area, date_str))
@@ -437,7 +489,7 @@ def day_flows(area: str, date_str: str) -> pd.DataFrame:
         return _flows_status(pd.DataFrame(), "unpublished")
 
     out["time_dk_str"] = (out.index.tz_localize("UTC").tz_convert(cfg["local_tz"])
-                          .strftime("%Y-%m-%d %H:%M"))
+                          .strftime("%Y-%m-%d %H:%M%z"))
     out = out.reset_index(drop=True)
     _CACHE[("flows", area, date_str)] = out.copy()
     return _flows_status(out, "ok")

@@ -265,4 +265,17 @@ def predict_quarters(store: Store, cfg, bundle: IntradayBundle, quarters, now=No
     known = (q + Q + fb.lag_imb <= now).values
     out["spread_actual"] = np.where(known, imb["spread"].reindex(pd.DatetimeIndex(q)).values, np.nan)
     out["data_age_min"] = X["age_last_min"].values if "age_last_min" in X.columns else np.nan
+    # --- stale-data guard: HOLD when imbalance data is too old to trade reliably ----------
+    guard_min = cfg["intraday"].get("stale_data_guard_minutes")
+    if guard_min is not None:
+        guard_min = float(guard_min)
+        stale = out["decision_final"] & (
+            out["data_age_min"].isna() | (out["data_age_min"] > guard_min)
+        )
+        if stale.any():
+            log.warning("[%s] stale-data guard: %d quarter(s) forced to HOLD "
+                        "(data_age_min > %.0f)", bundle.area, int(stale.sum()), guard_min)
+            out.loc[stale, "action"] = "HOLD"
+            out.loc[stale, "mwh"] = 0.0
+            out.loc[stale, "reason"] = "stale data"
     return out
