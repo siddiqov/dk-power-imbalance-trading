@@ -657,6 +657,7 @@ def get_v4_1_trading_day_data(area, date_str, threshold_key='validated', risk_li
     # before delivery - 60 min. Settlement uses the published imbalance price (negative prices included).
     v41_decisions, v41_vols, v41_pnls = [], [], []
     v41 = pd.DataFrame()
+    _v41_err = None
     if bundle_v41 is not None:
         try:
             _risk_overrides = {"batch_risk_fraction": 0.2} if size_boost else None
@@ -670,6 +671,7 @@ def get_v4_1_trading_day_data(area, date_str, threshold_key='validated', risk_li
                            if hasattr(v41id, 'decision_params') else None)
                 v41 = v41id.day_decisions(area, date_str, params=_params, risk_overrides=_risk_overrides)
         except Exception as e:
+            _v41_err = e
             _log_startup_error(f'day_decisions({area}, {date_str})', e)
             st.warning(f"V4.1 intraday engine unavailable: {type(e).__name__}: {e}")
     key = pd.to_datetime(df_matrix['time_dk']).dt.strftime('%Y-%m-%d %H:%M') if 'time_dk' in df_matrix.columns else None
@@ -702,7 +704,15 @@ def get_v4_1_trading_day_data(area, date_str, threshold_key='validated', risk_li
     else:
         df_matrix['V4_1_Predicted_Spread_EUR'] = 0.0
         df_matrix['V4_1_Settled'] = False
-        v41_decisions = ["⚪ HOLD (model not trained)"] * len(df_matrix)
+        if bundle_v41 is None:
+            _why = "model not trained"
+        elif _v41_err is not None and "busy" in str(_v41_err).lower():
+            _why = "data store busy, retrying"
+        elif _v41_err is not None:
+            _why = "V4.1 engine error - see logs/dashboard_v4_1_errors.log"
+        else:
+            _why = "no V4.1 data for this day"
+        v41_decisions = [f"⚪ HOLD ({_why})"] * len(df_matrix)
         v41_vols = [0.0] * len(df_matrix)
         v41_pnls = [np.nan] * len(df_matrix)
 
