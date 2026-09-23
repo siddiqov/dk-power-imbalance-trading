@@ -73,11 +73,17 @@ class V31QuantileModelSuite:
     def _train_suite_for_dataset(self, df_15m, df_hourly, feature_cols, suite_name="Day-Ahead"):
         print(f"\n--- [{self.price_area}] Training V3.1 {suite_name} Suite ({len(feature_cols)} features) ---")
         X_15m = df_15m[feature_cols].fillna(0.0).values
-        y_15m = df_15m["actual_spread_eur"].values
+        _spread_col_15m = next((c for c in ["actual_spread_eur", "error_spread_eur", "actual_settled_imbalance_eur"] if c in df_15m.columns), None)
+        if _spread_col_15m is None:
+            raise KeyError(f"No spread column found in 15m data. Available: {list(df_15m.columns)}")
+        y_15m = df_15m[_spread_col_15m].values
         y_dir = np.where(y_15m > 1.2, 2, np.where(y_15m < -1.2, 0, 1))
 
         X_1h = df_hourly[feature_cols].fillna(0.0).values
-        y_1h = df_hourly["actual_spread_eur"].values
+        _spread_col_1h = next((c for c in ["actual_spread_eur", "error_spread_eur", "actual_settled_imbalance_eur"] if c in df_hourly.columns), None)
+        if _spread_col_1h is None:
+            raise KeyError(f"No spread column found in 1h data. Available: {list(df_hourly.columns)}")
+        y_1h = df_hourly[_spread_col_1h].values
 
         # Load Optuna-tuned parameters
         params = self.opt_engine.load_best_parameters()
@@ -239,17 +245,23 @@ class V31QuantileModelSuite:
 
     def load_models(self):
         save_path = os.path.join(self.model_dir, f"v3_1_suite_{self.price_area}.pkl")
+        print(f"[load_models] Attempting: {save_path} (exists={os.path.exists(save_path)})")
         if os.path.exists(save_path):
-            data = joblib.load(save_path)
-            if isinstance(data, dict) and "day_ahead" in data and "intraday" in data:
-                self.models = data
-                self.models_day_ahead = data["day_ahead"]
-                self.models_intraday = data["intraday"]
-            else:
-                self.models = {"day_ahead": data, "intraday": data, "_default": data}
-                self.models_day_ahead = data
-                self.models_intraday = data
-            return True
+            try:
+                data = joblib.load(save_path)
+                if isinstance(data, dict) and "day_ahead" in data and "intraday" in data:
+                    self.models = data
+                    self.models_day_ahead = data["day_ahead"]
+                    self.models_intraday = data["intraday"]
+                else:
+                    self.models = {"day_ahead": data, "intraday": data, "_default": data}
+                    self.models_day_ahead = data
+                    self.models_intraday = data
+                print(f"[load_models] SUCCESS: {save_path}")
+                return True
+            except Exception as _e:
+                print(f"[load_models] FAILED: {_e}")
+                return False
         return False
 
     def predict_day_ahead_quantiles(self, df_day_d, market_mode="DAY_AHEAD_D1", approach="A", df_prev_day=None):

@@ -10,6 +10,9 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 from src.model_trainer_v3_1 import V31QuantileModelSuite
+
+# Absolute path to models directory, regardless of cwd when dashboard runs
+_MODELS_V3_1_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models_v3_1")
 from src.trade_journal import V3TradeJournal
 
 
@@ -38,7 +41,7 @@ class V31CommercialStrategyEngine:
         self.v_max = v_max
         self.fee_per_mwh = 0.51  # €0.06 Nord Pool + €0.20 TSO + €0.25 Slippage
         self.tax_rate = 0.22  # Danish 22% Corporate Tax
-        self.model_suite = V31QuantileModelSuite(price_area=price_area, model_dir='models_v3_1')
+        self.model_suite = V31QuantileModelSuite(price_area=price_area, model_dir=_MODELS_V3_1_DIR)
         self.journal = V3TradeJournal(db_path="data/v3_1_trade_journal.db")
 
     def compute_conviction_volume(self, pred_spread: float, p_up: float, p_down: float, action: str,
@@ -168,7 +171,9 @@ class V31CommercialStrategyEngine:
                 pred_spread = trade_record["locked_pred_spread_eur"]
                 p_pred = trade_record["locked_pred_price_eur"]
 
-            p_actual = row.get("actual_settled_imbalance_eur") or row.get("ImbalancePriceEUR")
+            p_actual = row.get("actual_settled_imbalance_eur")
+            if p_actual is None or (isinstance(p_actual, float) and np.isnan(p_actual)):
+                p_actual = row.get("ImbalancePriceEUR")  # a 0.00 EUR price is a real settlement, not missing
             is_settled = pd.notnull(p_actual) and str(p_actual) not in ["--", "nan", ""]
 
             gross_pnl = 0.0

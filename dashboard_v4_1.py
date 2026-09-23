@@ -483,28 +483,109 @@ def get_dynamic_price_cap(area, current_date_str):
     except Exception:
         return 223.40
 
+def _by_local_minute(df):
+    """Index an adapter frame by local 'YYYY-MM-DD HH:MM' (its time_dk_str carries a UTC
+    offset, e.g. '2026-09-22 18:45+0200', since the DST fix). The ledger scaffold has naive local
+    times, so the join is on the wall-clock minute. On the autumn DST day the repeated hour
+    keeps its first occurrence - the scaffold has only one row for it anyway."""
+    k = df['time_dk_str'].astype(str).str.slice(0, 16)
+    return df.assign(_k=k.values).drop_duplicates('_k', keep='first').set_index('_k')
+
 # --- LOAD TRADING DAY DATA MATRIX (V4.0 and V4.1) ---
 @st.cache_data(ttl=180)
+def _diag_log(msg):
+    try:
+        with open(r'C:\Users\Hafeez\Documents\Nurex_Trading\Basic_Approach\logs\diag_trading_day.log', 'a', encoding='utf-8') as _df:
+            from datetime import datetime as _dt
+            _df.write(f"{_dt.now()} | {msg}\n")
+    except Exception:
+        pass
+
 def get_v4_1_trading_day_data(area, date_str, threshold_key='validated', risk_limits=True, size_boost=False):
+    _diag_log(f"ENTER area={area} date_str={date_str}")
     fe41 = V41FeatureEngine(price_area=area)
     table_gen = TournamentTableGenerator(price_area=area)
     
+    target_df = pd.DataFrame()
     try:
         target_df = table_gen.generate_and_save_future_table(date_str=date_str)
-    except:
-        target_df = table_gen.get_backtest_table(date_str=date_str)
+        _diag_log(f"generate_and_save_future_table: rows={len(target_df)} empty={target_df.empty}")
+    except Exception as _ex1:
+        _diag_log(f"generate_and_save_future_table RAISED: {_ex1}")
+        try:
+            target_df = table_gen.get_backtest_table(date_str=date_str)
+            _diag_log(f"get_backtest_table fallback: rows={len(target_df)} empty={target_df.empty}")
+        except Exception as _ex1b:
+            # the legacy tournament retrain can fail on a short partial day (e.g. a single class)
+            _diag_log(f"get_backtest_table RAISED: {_ex1b}")
+            target_df = pd.DataFrame()
+
+    if target_df is None or target_df.empty:
+        # Authentic fallback: DA spot + published imbalance prices from the V4.2 store
+        try:
+            target_df = v41id.day_scaffold(area, date_str) if hasattr(v41id, 'day_scaffold') else pd.DataFrame()
+            _diag_log(f"day_scaffold (V4.2 store): rows={len(target_df)}")
+        except Exception as _ex1c:
+            _diag_log(f"day_scaffold RAISED: {_ex1c}")
+            target_df = pd.DataFrame()
         
     if target_df.empty:
-        target_df = table_gen.get_future_table(date_str=date_str)
-        
-    if target_df.empty:
+        _diag_log("RETURN EMPTY: target_df empty after all fallbacks")
         return pd.DataFrame()
 
+    # Date integrity: every row must be a quarter of the selected day. A table from another day
+    # (the old 'latest cache' fallback) would show that day's prices under this date.
+    _days = pd.to_datetime(target_df['time_dk'], errors='coerce').dt.strftime('%Y-%m-%d')
+    if not (_days == date_str).all():
+        _diag_log(f"RETURN EMPTY: scaffold rows belong to {sorted(_days.dropna().unique())}, not {date_str}")
+        st.error(f"Ledger scaffold for {area} {date_str} contained rows from another day "
+                 f"({', '.join(sorted(_days.dropna().unique()))}) - not shown.")
+        return pd.DataFrame()
+
+    # The legacy scaffold only has quarters already published by Energinet. Extend it with the
+    # rest of the day from the day-ahead auction (authentic DK spot in the V4.2 store) so the
+    # upcoming V4.1 decisions are visible; their imbalance price stays empty until published.
+    target_base = target_df.copy()
+    try:
+        _dk = v41id.day_dayahead(area, date_str) if hasattr(v41id, 'day_dayahead') else pd.DataFrame()
+        if not _dk.empty:
+            _dk = _by_local_minute(_dk)
+            _have = set(pd.to_datetime(target_df['time_dk']).dt.strftime('%Y-%m-%d %H:%M'))
+            _utc = (pd.to_datetime(_dk.index).tz_localize('Europe/Copenhagen', ambiguous='infer', nonexistent='shift_forward')
+                    .tz_convert('UTC').tz_localize(None).strftime('%Y-%m-%d %H:%M'))
+            _add = pd.DataFrame({'time_dk': _dk.index, 'time_utc': _utc, 'spot_price_eur': _dk[area].values})
+            _add = _add[~_add['time_dk'].isin(_have) & _add['spot_price_eur'].notna()]
+            if len(_add):
+                _add['actual_settled_imbalance_eur'] = np.nan
+                _add['status'] = 'Pending'
+                target_df = pd.concat([target_df, _add], ignore_index=True)
+                target_df = target_df.sort_values('time_dk').reset_index(drop=True)
+                target_df['quarter'] = [f"Q{i+1}" for i in range(len(target_df))]
+                _diag_log(f"scaffold extended with {len(_add)} unpublished quarters from day-ahead")
+    except Exception as _e:
+        _diag_log(f"scaffold extension skipped: {_e}")
+
     # Baseline ledger scaffold (V3.1 engine) - supplies the 96-quarter trade frame
+    _diag_log(f"Calling evaluate_trading_ledger with {len(target_df)} rows")
     strat_v31 = V31CommercialStrategyEngine(price_area=area)
-    res_v31 = strat_v31.evaluate_trading_ledger(target_df, model_name="Transfer-BiLSTM", market_mode="INTRADAY_D0")
+    try:
+        try:
+            res_v31 = strat_v31.evaluate_trading_ledger(target_df, model_name="Transfer-BiLSTM", market_mode="INTRADAY_D0")
+        except Exception as _ex_ext:
+            if len(target_df) == len(target_base):
+                raise
+            _diag_log(f"evaluate_trading_ledger failed on extended scaffold ({_ex_ext}); retrying published quarters only")
+            target_df = target_base
+            res_v31 = strat_v31.evaluate_trading_ledger(target_df, model_name="Transfer-BiLSTM", market_mode="INTRADAY_D0")
+        _diag_log(f"evaluate_trading_ledger returned keys={list(res_v31.keys()) if res_v31 else None}")
+    except Exception as _ex2:
+        _diag_log(f"evaluate_trading_ledger RAISED: {_ex2}")
+        import traceback as _tb2; _diag_log(_tb2.format_exc())
+        return pd.DataFrame()
     df_trades = pd.DataFrame(res_v31.get("trades", []))
+    _diag_log(f"df_trades: rows={len(df_trades)} empty={df_trades.empty}")
     if df_trades.empty:
+        _diag_log("RETURN EMPTY: df_trades is empty after evaluate_trading_ledger")
         return df_trades
 
     # Ground Truth Timestamps & Spot Prices
@@ -535,40 +616,73 @@ def get_v4_1_trading_day_data(area, date_str, threshold_key='validated', risk_li
     dynamic_cap = get_dynamic_price_cap(area, date_str)
     df_trades['Dynamic_Cap_EUR'] = dynamic_cap
 
-    # Ingest ENTSO-E DE Spot & Scheduled Flows
+    # DE day-ahead spot: authentic values only. Primary source is the V4.2 store (ENTSO-E
+    # prices collected by the V4.1 cycle); the live ENTSO-E call is a second source. A quarter
+    # with no published DE price stays NaN and shows "--" - it is never copied from DK.
+    df_trades['time_dk_str'] = pd.to_datetime(df_trades['time_dk']).dt.strftime('%Y-%m-%d %H:%M')
+    de_real = pd.Series(np.nan, index=df_trades.index)
+    de_src = 'unavailable'
+    try:
+        _da = v41id.day_dayahead('DE', date_str) if hasattr(v41id, 'day_dayahead') else pd.DataFrame()
+        if not _da.empty:
+            de_real = df_trades['time_dk_str'].map(_by_local_minute(_da)['DE']).astype(float)
+            if de_real.notna().any():
+                de_src = 'V4.2 store' + (' (last good read)' if _da.attrs.get('status') == 'stale' else '')
+    except Exception as _e:
+        _log_startup_error(f'day_dayahead(DE, {date_str})', _e)
+
     try:
         from entsoe import EntsoePandasClient
         client = EntsoePandasClient(api_key=ENTSOE_TOKEN)
-        start_ts = pd.Timestamp(date_str, tz='Europe/Copenhagen')
-        end_ts = start_ts + pd.Timedelta(days=1)
-        entsoe_area_to = 'DK_1' if area == 'DK1' else 'DK_2'
-        
-        de_prices = client.query_day_ahead_prices('DE_LU', start=start_ts, end=end_ts)
-        de_prices_df = de_prices.reset_index()
-        de_prices_df.columns = ['time_dk_obj', 'de_spot_eur']
-        de_prices_df['time_dk_obj'] = de_prices_df['time_dk_obj'].dt.tz_localize(None)
-        
+    except Exception as _e:
+        _log_startup_error('ENTSO-E client', _e)
+        client = None
+    start_ts = pd.Timestamp(date_str, tz='Europe/Copenhagen')
+    end_ts = start_ts + pd.Timedelta(days=1)
+    entsoe_area_to = 'DK_1' if area == 'DK1' else 'DK_2'
+    if de_real.isna().all() and client is not None:
+        try:
+            de_prices = client.query_day_ahead_prices('DE_LU', start=start_ts, end=end_ts)
+            de_prices = de_prices[~de_prices.index.duplicated(keep='first')]
+            # hourly publications cover their four quarters; nothing beyond the hour is filled
+            de_q = de_prices.resample('15min').ffill(limit=3)
+            de_map = pd.Series(de_q.values, index=de_q.index.tz_localize(None).strftime('%Y-%m-%d %H:%M'))
+            de_map = de_map[~de_map.index.duplicated(keep='first')]
+            de_real = df_trades['time_dk_str'].map(de_map).astype(float)
+            if de_real.notna().any():
+                de_src = 'ENTSO-E live'
+        except Exception as _e:
+            _log_startup_error(f'ENTSO-E DE prices ({date_str})', _e)
+    df_trades['de_spot_real'] = de_real.values
+    df_trades['_de_src'] = de_src
+
+    # Scheduled DE flow for the legacy V4.0 features (kept separate so a failure here can no
+    # longer wipe out the DE price as it did when both lived in one try block)
+    try:
+        if client is None:
+            raise RuntimeError('ENTSO-E client unavailable')
         flows = client.query_scheduled_exchanges('DE_LU', entsoe_area_to, start=start_ts, end=end_ts, day_ahead=True)
-        flows_df = flows.reset_index()
-        flows_df.columns = ['time_dk_obj', 'scheduled_flow_mw']
-        flows_df['time_dk_obj'] = flows_df['time_dk_obj'].dt.tz_localize(None)
-        
-        entsoe_df = pd.merge(de_prices_df, flows_df, on='time_dk_obj', how='outer')
-        entsoe_df['time_dk_str'] = entsoe_df['time_dk_obj'].dt.strftime('%Y-%m-%d %H:%M')
-        
-        df_trades['time_dk_str'] = pd.to_datetime(df_trades['time_dk']).dt.strftime('%Y-%m-%d %H:%M')
-        df_trades = pd.merge(df_trades, entsoe_df[['time_dk_str', 'de_spot_eur', 'scheduled_flow_mw']], on='time_dk_str', how='left')
-        df_trades['de_spot_eur'] = df_trades['de_spot_eur'].ffill().bfill().fillna(df_trades['spot_price_eur'])
-        df_trades['scheduled_flow_mw'] = df_trades['scheduled_flow_mw'].ffill().bfill().fillna(0.0)
-    except Exception:
-        df_trades['de_spot_eur'] = df_trades['spot_price_eur']
+        flows = flows[~flows.index.duplicated(keep='first')]
+        fl_map = pd.Series(flows.values, index=flows.index.tz_localize(None).strftime('%Y-%m-%d %H:%M'))
+        df_trades['scheduled_flow_mw'] = df_trades['time_dk_str'].map(fl_map).astype(float).ffill().bfill().fillna(0.0)
+    except Exception as _e:
+        _log_startup_error(f'ENTSO-E DE scheduled flow ({date_str})', _e)
         df_trades['scheduled_flow_mw'] = 0.0
+
+    # Legacy V4.0 feature input only (dk_de_price_spread): its models cannot take NaN, so a
+    # missing DE price enters as "coupled" (spread 0). The ledger displays de_spot_real.
+    df_trades['de_spot_eur'] = df_trades['de_spot_real'].fillna(df_trades['spot_price_eur'])
 
     # Build High-Alpha Matrix (V4.1 Engine)
     df_matrix = fe41.build_feature_matrix(df_trades)
     df_matrix['Dynamic_Cap_EUR'] = dynamic_cap
     if 'de_spot_eur' not in df_matrix.columns:
         df_matrix['de_spot_eur'] = df_trades['de_spot_eur']
+    _de_by_t = pd.Series(df_trades['de_spot_real'].values, index=df_trades['time_dk_str'].values)
+    _de_by_t = _de_by_t[~_de_by_t.index.duplicated(keep='first')]
+    df_matrix['de_spot_real'] = (pd.to_datetime(df_matrix['time_dk']).dt.strftime('%Y-%m-%d %H:%M')
+                                 .map(_de_by_t).astype(float).values)
+    df_matrix['_de_src'] = str(df_trades['_de_src'].iloc[0]) if len(df_trades) else 'unavailable'
     if 'scheduled_flow_mw' not in df_matrix.columns:
         df_matrix['scheduled_flow_mw'] = df_trades['scheduled_flow_mw']
 
@@ -674,7 +788,15 @@ def get_v4_1_trading_day_data(area, date_str, threshold_key='validated', risk_li
             st.warning(f"V4.1 intraday engine unavailable: {type(e).__name__}: {e}")
     key = pd.to_datetime(df_matrix['time_dk']).dt.strftime('%Y-%m-%d %H:%M') if 'time_dk' in df_matrix.columns else None
     if not v41.empty and key is not None:
-        m = v41.set_index('time_dk_str')
+        m = _by_local_minute(v41)
+        n_match = int(key.isin(m.index).sum())
+        df_matrix['_v41_join'] = f"{n_match}/{len(key)}"
+        if n_match == 0:
+            _log_startup_error(f'V4.1 join ({area}, {date_str})',
+                               RuntimeError(f"0 of {len(key)} quarters matched; adapter keys e.g. "
+                                            f"{list(v41['time_dk_str'].astype(str).head(2))}, ledger keys e.g. {list(key.head(2))}"))
+            st.warning(f"\u26a0\ufe0f V4.1 decisions could not be matched to the ledger quarters "
+                       f"({len(v41)} decisions, 0 matched) - the table shows no V4.1 signal.")
         pick = lambda c, d=np.nan: key.map(m[c]).fillna(d) if c in m.columns else d
         df_matrix['V4_1_Predicted_Spread_EUR'] = pick('exp_spread', 0.0).astype(float)
         df_matrix['p_down'] = pick('p_down')
@@ -689,9 +811,12 @@ def get_v4_1_trading_day_data(area, date_str, threshold_key='validated', risk_li
         acts = key.map(m['action']).fillna('HOLD')
         pn = key.map(m['pnl_eur'])
         srcs = key.map(m['source']).fillna('recomputed') if 'source' in m.columns else pd.Series('recomputed', index=key.index)
+        srcs = srcs.where(key.isin(m.index), '__nomatch__')
         rsn = df_matrix['V4_1_Reason'] if 'V4_1_Reason' in df_matrix.columns else pd.Series([''] * len(df_matrix))
         for a_, mw_, fin_, p_, src_, why_ in zip(acts, df_matrix['V4_1_MWh'], df_matrix['V4_1_Final'], pn, srcs, rsn):
             tag = " 🔒" if src_ == "LOCKED" else (" (missed gate)" if src_ == "MISSED" else ("" if fin_ else " (provisional)"))
+            if src_ == "__nomatch__":
+                tag = " (no V4.1 decision)"
             if str(why_) == 'daily loss stop':
                 tag = " (daily loss stop)"
             elif str(why_) == 'drawdown guard':
@@ -718,7 +843,11 @@ def get_v4_1_trading_day_data(area, date_str, threshold_key='validated', risk_li
     FLOW_STATUS[(area, date_str)] = fl_status
     df_matrix['_flow_status'] = fl_status  # survives st.cache_data, unlike a module global
     if not fl.empty and key is not None:
-        mf = fl.set_index('time_dk_str')
+        mf = _by_local_minute(fl)
+        if not key.isin(mf.index).any():
+            df_matrix['_flow_status'] = 'nomatch'
+            _log_startup_error(f'flow join ({area}, {date_str})',
+                               RuntimeError(f"0 quarters matched; flow keys e.g. {list(fl['time_dk_str'].astype(str).head(2))}"))
         for c in [c for c in mf.columns if c.startswith(('sched_', 'dev_'))]:
             df_matrix['ic_' + c] = key.map(mf[c]).astype(float)
 
@@ -732,7 +861,16 @@ def get_v4_1_trading_day_data(area, date_str, threshold_key='validated', risk_li
 
     return df_matrix
 
-df_day = get_v4_1_trading_day_data(selected_area, date_str_selected, THRESHOLD_KEY, risk_limits_on, bigger_size_on)
+try:
+    df_day = get_v4_1_trading_day_data(selected_area, date_str_selected, THRESHOLD_KEY, risk_limits_on, bigger_size_on)
+except Exception as _e:
+    import traceback as _tb_mod; _tb_str = _tb_mod.format_exc()
+    try:
+        with open(r'C:\Users\Hafeez\Documents\Nurex_Trading\Basic_Approach\logs\dashboard_v4_1_errors.log', 'a', encoding='utf-8') as _ef:
+            _ef.write(f'\n======\n{datetime.now()} MAIN_EXCEPT\n{_tb_str}\n')
+    except Exception:
+        pass
+    df_day = pd.DataFrame()
 if not risk_limits_on:
     st.warning(
         'Risk limits are OFF: the daily loss stop and drawdown scaling are not applied, so these '
@@ -949,6 +1087,8 @@ with tab_unified_ledger:
                 + ic_detail_ths)
             if (df_day['_flow_status'].iloc[0] if '_flow_status' in df_day.columns and len(df_day) else '') == 'stale':
                 st.caption('\u2139\ufe0f Cross-border flows served from the last good read - the V4.2 store was busy.')
+            if (df_day['_flow_status'].iloc[0] if '_flow_status' in df_day.columns and len(df_day) else '') == 'nomatch':
+                st.warning('\u26a0\ufe0f Cross-border flows were read but could not be matched to the ledger quarters - see the dashboard log.')
         else:
             _fs = (str(df_day['_flow_status'].iloc[0]) if '_flow_status' in df_day.columns and len(df_day)
                    else FLOW_STATUS.get((selected_area, date_str_selected), 'unknown'))
@@ -977,7 +1117,7 @@ with tab_unified_ledger:
             
             spot_val = row.get('spot_price_eur', 0.0)
             cap_val = row.get('Dynamic_Cap_EUR', 223.40)
-            de_spot_val = row.get('de_spot_eur', spot_val)
+            de_spot_val = row.get('de_spot_real', np.nan)
             # Energinet live snapshot, shown export-positive like every other table
             f_de = exp_pos(row.get('flow_de', row.get('scheduled_flow_mw', 0.0)))
             f_nl = exp_pos(row.get('flow_nl', 0.0))
@@ -1083,7 +1223,7 @@ with tab_unified_ledger:
                 <td class="chevron-cell" onclick="event.stopPropagation(); toggleRow({row_idx});"><span class="chevron-icon" id="icon-{row_idx}">&#9654;</span></td>
                 <td style="font-weight:700; color:#0F172A;">{q_label}</td>
                 <td>€{spot_val:.2f}</td>
-                <td>€{de_spot_val:.2f}</td>
+                <td>{f"€{de_spot_val:.2f}" if pd.notna(de_spot_val) else '<span style="color:#94A3B8;" title="DE day-ahead price not available">--</span>'}</td>
                 {ic_tds}
                 
                 {v40_tds}
@@ -1155,6 +1295,9 @@ with tab_unified_ledger:
 
         table_body = "\n".join(rows_html)
 
+        _de_src_txt = (str(df_day['_de_src'].iloc[0]) if '_de_src' in df_day.columns and len(df_day) else 'unavailable')
+        if _de_src_txt == 'unavailable':
+            st.caption('\u2139\ufe0f DE day-ahead prices are not available for this day (V4.2 store and ENTSO-E) - the DE Spot column shows "--".')
         accordion_html = f"""
         <!DOCTYPE html>
         <html>
@@ -1579,7 +1722,7 @@ with tab_unified_ledger:
                   <th class="no-drag" style="width:20px; padding:7px 0;"></th>
                   <th draggable="true" title="Trading Quarter & Delivery Time"><div class="col-header-wrap"><span class="col-title">Quarter</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   <th draggable="true" title="DK Day-Ahead Spot Price"><div class="col-header-wrap"><span class="col-title">DK Spot</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
-                  <th draggable="true" title="German Day-Ahead Spot Price"><div class="col-header-wrap"><span class="col-title">DE Spot</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
+                  <th draggable="true" title="German (DE-LU) Day-Ahead Spot Price - source: {_de_src_txt}"><div class="col-header-wrap"><span class="col-title">DE Spot</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   {ic_ths}
                   {v40_ths}
                   <th draggable="true" title="V4.1 Predicted Imbalance Price (€) [Spot + Spread]" style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">V4.1 Pred</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
@@ -2529,3 +2672,4 @@ with tab_tournament:
                     "recomputed on the same basis, so locked paper-trading decisions are not mixed in. "
                     "PnL is net of costs at the configured rate and counts settled quarters only."
                 )
+# HOT_RELOAD: 1790105935.6781862

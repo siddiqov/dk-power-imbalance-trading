@@ -1,0 +1,38 @@
+{
+  "area": "DK2",
+  "version": "4.1-intraday-2026-09-17",
+  "n_train": 51081,
+  "trained_until": "2026-09-21 14:45:00",
+  "decision_params": {
+    "buy": {
+      "margin": 0.0,
+      "pmin": 0.45
+    },
+    "sell": {
+      "margin": 20.0,
+      "pmin": 0.45
+    },
+    "val_net_eur": 11729.38,
+    "val_trades": 1490,
+    "no_trade": false
+  },
+  "cost_eur_mwh": 2.3499999999999996,
+  "gate_lead_minutes": 60,
+  "feature_importance_top15": {
+    "da_dev_day": 4.76,
+    "last_spread_absmean_96": 2.66,
+    "da": 2.5,
+    "da_spread_DE": 2.26,
+    "umm_trans_own": 1.87,
+    "da_spread_SE4": 1.74,
+    "da_z_day": 1.67,
+    "da_spread_DK1": 1.5,
+    "rev_off": 1.49,
+    "rev_sol_recent": 1.45,
+    "live_wind_err_dk": 1.29,
+    "da_day_mean": 1.26,
+    "wx_cloud_cover_dev7d": 1.26,
+    "wx_temperature_2m": 1.25,
+    "last_spread_mean_16": 1.25
+  }
+}

@@ -47,9 +47,14 @@ class V2ModelTournament:
     def _prepare_features(self, df):
         """Applies feature engineering and extracts X, y_spread, y_class."""
         df_feat = self.fe.transform(df)
-        available_feats = [c for c in self.feature_cols if c in df_feat.columns]
-
-        X = df_feat[available_feats].copy().fillna(0)
+        # Always produce the full feature matrix (fill missing cols with 0)
+        # so LightGBM never sees a feature-count mismatch across calls.
+        import pandas as _pd
+        X = _pd.DataFrame(0.0, index=df_feat.index, columns=self.feature_cols)
+        for _col in self.feature_cols:
+            if _col in df_feat.columns:
+                X[_col] = df_feat[_col]
+        X = X.fillna(0)
         y_spread = df_feat["target_spread"].values if "target_spread" in df_feat.columns else None
         y_class = df_feat["target_class"].values if "target_class" in df_feat.columns else None
 
@@ -71,7 +76,7 @@ class V2ModelTournament:
                 "spread_eur": "mean", "direction": "first"
             })
 
-        val_cutoff = len(df_15m) - (val_days * 96)
+        val_cutoff = max(0, len(df_15m) - (val_days * 96))
         df_15m_train = df_15m.iloc[:val_cutoff].copy()
         df_15m_val = df_15m.iloc[val_cutoff:].copy()
 
@@ -82,19 +87,34 @@ class V2ModelTournament:
         # 1. Transfer-LightGBM
         print(f"  [P1.1] Training Transfer-LightGBM on {len(X_15m_tr):,} records...")
         lgb_reg = lgb.LGBMRegressor(n_estimators=70, learning_rate=0.04, random_state=42, verbose=-1)
-        lgb_reg.fit(X_15m_tr, y_15m_tr_spread)
-
         lgb_clf = lgb.LGBMClassifier(n_estimators=70, learning_rate=0.04, random_state=42, verbose=-1)
-        lgb_clf.fit(X_15m_tr, y_15m_tr_class)
 
-        pred_spread_lgb = lgb_reg.predict(X_val)
-        pred_class_lgb = lgb_clf.predict(X_val)
+        # BUG FIX 1: Guard against empty training set
+        if len(X_15m_tr) == 0 or y_15m_tr_spread is None or len(y_15m_tr_spread) == 0:
+            print("  [P1.1] WARNING: empty training slice – falling back to naive zero predictions")
+            pred_spread_lgb = np.zeros(len(X_val))
+            pred_class_lgb = np.ones(len(X_val), dtype=int)
+        else:
+            _y_tr_spread_clean = np.nan_to_num(y_15m_tr_spread, nan=0.0)
+            _y_tr_class_clean = np.nan_to_num(y_15m_tr_class, nan=1).astype(int)
+            lgb_reg.fit(X_15m_tr, _y_tr_spread_clean)
+            lgb_clf.fit(X_15m_tr, _y_tr_class_clean)
+            pred_spread_lgb = lgb_reg.predict(X_val)
+            pred_class_lgb = lgb_clf.predict(X_val)
+
         class_to_dir = {0: -1, 1: 0, 2: 1}
-        pred_dir_lgb = np.array([class_to_dir[c] for c in pred_class_lgb])
+        pred_dir_lgb = np.array([class_to_dir.get(int(c), 0) for c in pred_class_lgb])
 
-        mae_lgb = mean_absolute_error(y_val_spread, pred_spread_lgb)
-        acc_lgb = accuracy_score(df_val_feat["target_direction"].values, pred_dir_lgb)
-        f1_lgb = f1_score(df_val_feat["target_direction"].values, pred_dir_lgb, average='macro')
+        # BUG FIX 2: Guard against NaN in validation targets before computing metrics
+        _valid_mask = ~np.isnan(y_val_spread) if y_val_spread is not None else np.zeros(len(pred_spread_lgb), dtype=bool)
+        mae_lgb = mean_absolute_error(y_val_spread[_valid_mask], pred_spread_lgb[_valid_mask]) if _valid_mask.sum() > 0 else 0.0
+        _dir_true = df_val_feat["target_direction"].values if "target_direction" in df_val_feat.columns else np.zeros(len(pred_dir_lgb))
+        _dir_valid = ~np.isnan(_dir_true.astype(float))
+        if _dir_valid.sum() == 0:
+            acc_lgb, f1_lgb = 0.0, 0.0
+        else:
+            acc_lgb = accuracy_score(_dir_true[_dir_valid], pred_dir_lgb[_dir_valid])
+            f1_lgb = f1_score(_dir_true[_dir_valid], pred_dir_lgb[_dir_valid], average='macro', zero_division=0)
 
         res_lgb = {
             "paradigm": "1. Transfer Learning",
@@ -123,19 +143,34 @@ class V2ModelTournament:
                 X_val_recent=X_15m_tr
             )
             pred_dir_lstm = np.sign(pred_spread_lstm)
-            mae_lstm = mean_absolute_error(y_val_spread[:len(pred_spread_lstm)], pred_spread_lstm)
-            acc_lstm = accuracy_score(df_val_feat["target_direction"].values[:len(pred_spread_lstm)], pred_dir_lstm)
-            f1_lstm = f1_score(df_val_feat["target_direction"].values[:len(pred_spread_lstm)], pred_dir_lstm, average='macro')
+            _yvs = y_val_spread[:len(pred_spread_lstm)] if y_val_spread is not None else np.array([])
+            _vmask2 = ~np.isnan(_yvs) if len(_yvs) > 0 else np.zeros(len(pred_spread_lstm), dtype=bool)
+            mae_lstm = mean_absolute_error(_yvs[_vmask2], pred_spread_lstm[_vmask2]) if _vmask2.sum() > 0 else 0.0
+            _dt2 = df_val_feat["target_direction"].values[:len(pred_spread_lstm)] if "target_direction" in df_val_feat.columns else np.zeros(len(pred_dir_lstm))
+            _dv2 = ~np.isnan(_dt2.astype(float))
+            acc_lstm = accuracy_score(_dt2[_dv2], pred_dir_lstm[_dv2]) if _dv2.sum() > 0 else 0.0
+            f1_lstm = f1_score(_dt2[_dv2], pred_dir_lstm[_dv2], average='macro', zero_division=0) if _dv2.sum() > 0 else 0.0
         except Exception as e:
             print(f"    Bi-LSTM Note ({e}), fitting Ridge sequence projection...")
             from sklearn.linear_model import Ridge
-            ridge = Ridge(alpha=1.0).fit(X_15m_tr, y_15m_tr_spread)
-            pred_spread_lstm = ridge.predict(X_val)
+            # Guard: Ridge also needs at least 1 training row
+            if len(X_15m_tr) == 0 or y_15m_tr_spread is None or len(y_15m_tr_spread) == 0:
+                print("    Ridge fallback skipped – no training data, using zeros")
+                pred_spread_lstm = np.zeros(len(X_val))
+                lstm_mod = None
+            else:
+                _y_tr_clean = np.nan_to_num(y_15m_tr_spread, nan=0.0)
+                ridge = Ridge(alpha=1.0).fit(X_15m_tr, _y_tr_clean)
+                pred_spread_lstm = ridge.predict(X_val)
+                lstm_mod = ridge
             pred_dir_lstm = np.sign(pred_spread_lstm)
-            mae_lstm = mean_absolute_error(y_val_spread, pred_spread_lstm)
-            acc_lstm = accuracy_score(df_val_feat["target_direction"].values, pred_dir_lstm)
-            f1_lstm = f1_score(df_val_feat["target_direction"].values, pred_dir_lstm, average='macro')
-            lstm_mod = ridge
+            _vmask = ~np.isnan(y_val_spread) if y_val_spread is not None else np.zeros(len(pred_spread_lstm), dtype=bool)
+            mae_lstm = mean_absolute_error(y_val_spread[_vmask], pred_spread_lstm[_vmask]) if _vmask.sum() > 0 else 0.0
+            _dt = df_val_feat["target_direction"].values if "target_direction" in df_val_feat.columns else np.zeros(len(pred_dir_lstm))
+            _dv = ~np.isnan(_dt.astype(float))
+            acc_lstm = accuracy_score(_dt[_dv], pred_dir_lstm[_dv]) if _dv.sum() > 0 else 0.0
+            f1_lstm = f1_score(_dt[_dv], pred_dir_lstm[_dv], average='macro', zero_division=0) if _dv.sum() > 0 else 0.0
+            # lstm_mod already set inside if/else above (None or ridge)
 
         self.trained_models["Deep-BiLSTM"] = {
             "model": lstm_mod, "mae": mae_lstm, "acc": acc_lstm
@@ -172,26 +207,32 @@ class V2ModelTournament:
                 "spread_eur": "mean", "direction": "first"
             })
 
-        val_cutoff = len(df_micro) - (val_days * 96)
+        val_cutoff = max(0, len(df_micro) - (val_days * 96))
         df_micro_train = df_micro.iloc[:val_cutoff].copy()
         df_micro_val = df_micro.iloc[val_cutoff:].copy()
 
         _, X_macro, y_macro_spread, _ = self._prepare_features(df_macro)
         macro_model = lgb.LGBMRegressor(n_estimators=80, learning_rate=0.05, random_state=42, verbose=-1)
-        macro_model.fit(X_macro, y_macro_spread)
+        _y_mac = np.nan_to_num(y_macro_spread, nan=0.0) if y_macro_spread is not None and len(y_macro_spread) > 0 else np.zeros(len(X_macro))
+        if len(X_macro) > 0:
+            macro_model.fit(X_macro, _y_mac)
 
         _, X_micro_tr, y_micro_tr_spread, y_micro_tr_class = self._prepare_features(df_micro_train)
         df_val_feat, X_val, y_val_spread, _ = self._prepare_features(df_micro_val)
 
-        macro_preds_tr = macro_model.predict(X_micro_tr)
-        residuals_tr = y_micro_tr_spread - macro_preds_tr
+        macro_preds_tr = macro_model.predict(X_micro_tr) if len(X_micro_tr) > 0 and len(X_macro) > 0 else np.zeros(len(X_micro_tr))
+        _y_micro_tr_clean = np.nan_to_num(y_micro_tr_spread, nan=0.0) if y_micro_tr_spread is not None else np.zeros(len(X_micro_tr))
+        residuals_tr = _y_micro_tr_clean - macro_preds_tr
 
         print(f"  [P2] Training Micro Residual XGBoost on {len(X_micro_tr):,} offsets...")
         micro_model = XGBRegressor(n_estimators=80, learning_rate=0.04, random_state=42)
-        micro_model.fit(X_micro_tr, residuals_tr)
+        _y_micro_tr_class_clean = np.nan_to_num(y_micro_tr_class, nan=1).astype(int) if y_micro_tr_class is not None else np.ones(len(X_micro_tr), dtype=int)
+        if len(X_micro_tr) > 0:
+            micro_model.fit(X_micro_tr, residuals_tr)
 
         micro_clf = XGBClassifier(n_estimators=80, learning_rate=0.04, random_state=42)
-        micro_clf.fit(X_micro_tr, y_micro_tr_class)
+        if len(X_micro_tr) > 0:
+            micro_clf.fit(X_micro_tr, _y_micro_tr_class_clean)
 
         macro_val_pred = macro_model.predict(X_val)
         micro_val_pred = micro_model.predict(X_val)
@@ -201,9 +242,13 @@ class V2ModelTournament:
         class_to_dir = {0: -1, 1: 0, 2: 1}
         pred_dir = np.array([class_to_dir[c] for c in pred_class])
 
-        mae = mean_absolute_error(y_val_spread, combined_spread_pred)
-        acc = accuracy_score(df_val_feat["target_direction"].values, pred_dir)
-        f1 = f1_score(df_val_feat["target_direction"].values, pred_dir, average='macro')
+        # Guard NaN in val targets (feature engineering may leave last row NaN)
+        _vmask_p2 = ~np.isnan(y_val_spread)
+        mae = mean_absolute_error(y_val_spread[_vmask_p2], combined_spread_pred[_vmask_p2]) if _vmask_p2.sum() > 0 else 0.0
+        _dir_true_p2 = df_val_feat["target_direction"].values if "target_direction" in df_val_feat.columns else np.zeros(len(pred_dir))
+        _dir_valid_p2 = ~np.isnan(_dir_true_p2.astype(float))
+        acc = accuracy_score(_dir_true_p2[_dir_valid_p2], pred_dir[_dir_valid_p2]) if _dir_valid_p2.sum() > 0 else 0.0
+        f1 = f1_score(_dir_true_p2[_dir_valid_p2], pred_dir[_dir_valid_p2], average='macro', zero_division=0) if _dir_valid_p2.sum() > 0 else 0.0
 
         self.trained_models["Hierarchical-LGBM+XGB"] = {
             "macro": macro_model, "micro": micro_model, "clf": micro_clf, "mae": mae, "acc": acc
@@ -241,19 +286,22 @@ class V2ModelTournament:
         # 1. Pure15m-CatBoost
         print(f"  [P3.1] Training Pure15m-CatBoost on {len(X_tr):,} native 15m rows...")
         cat_reg = CatBoostRegressor(iterations=120, learning_rate=0.05, verbose=0, random_seed=42)
-        cat_reg.fit(X_tr, y_tr_spread)
+        cat_reg.fit(X_tr, np.nan_to_num(y_tr_spread, nan=0.0) if y_tr_spread is not None else np.zeros(len(X_tr)))
 
         cat_clf = CatBoostClassifier(iterations=120, learning_rate=0.05, verbose=0, random_seed=42)
-        cat_clf.fit(X_tr, y_tr_class)
+        cat_clf.fit(X_tr, np.nan_to_num(y_tr_class, nan=1).astype(int) if y_tr_class is not None else np.ones(len(X_tr), dtype=int))
 
         pred_spread_cat = cat_reg.predict(X_val)
         pred_class_cat = cat_clf.predict(X_val)
         class_to_dir = {0: -1, 1: 0, 2: 1}
         pred_dir_cat = np.array([class_to_dir[int(c[0] if isinstance(c, (list, np.ndarray)) else c)] for c in pred_class_cat])
 
-        mae_cat = mean_absolute_error(y_val_spread, pred_spread_cat)
-        acc_cat = accuracy_score(df_val_feat["target_direction"].values, pred_dir_cat)
-        f1_cat = f1_score(df_val_feat["target_direction"].values, pred_dir_cat, average='macro')
+        _vm3 = ~np.isnan(y_val_spread)
+        mae_cat = mean_absolute_error(y_val_spread[_vm3], pred_spread_cat[_vm3]) if _vm3.sum() > 0 else 0.0
+        _dt3 = df_val_feat["target_direction"].values if "target_direction" in df_val_feat.columns else np.zeros(len(pred_dir_cat))
+        _dv3 = ~np.isnan(_dt3.astype(float))
+        acc_cat = accuracy_score(_dt3[_dv3], pred_dir_cat[_dv3]) if _dv3.sum() > 0 else 0.0
+        f1_cat = f1_score(_dt3[_dv3], pred_dir_cat[_dv3], average='macro', zero_division=0) if _dv3.sum() > 0 else 0.0
 
         self.trained_models["Pure15m-CatBoost"] = {
             "reg": cat_reg, "clf": cat_clf, "mae": mae_cat, "acc": acc_cat
@@ -283,19 +331,30 @@ class V2ModelTournament:
                 X_val_future_known=X_val
             )
             pred_dir_tft = np.sign(pred_spread_tft)
-            mae_tft = mean_absolute_error(y_val_spread[:len(pred_spread_tft)], pred_spread_tft)
-            acc_tft = accuracy_score(df_val_feat["target_direction"].values[:len(pred_spread_tft)], pred_dir_tft)
-            f1_tft = f1_score(df_val_feat["target_direction"].values[:len(pred_spread_tft)], pred_dir_tft, average='macro')
+            _yvs3 = y_val_spread[:len(pred_spread_tft)] if y_val_spread is not None else np.array([])
+            _vm3t = ~np.isnan(_yvs3) if len(_yvs3) > 0 else np.zeros(len(pred_spread_tft), dtype=bool)
+            mae_tft = mean_absolute_error(_yvs3[_vm3t], pred_spread_tft[_vm3t]) if _vm3t.sum() > 0 else 0.0
+            _dt3t = df_val_feat["target_direction"].values[:len(pred_spread_tft)] if "target_direction" in df_val_feat.columns else np.zeros(len(pred_dir_tft))
+            _dv3t = ~np.isnan(_dt3t.astype(float))
+            acc_tft = accuracy_score(_dt3t[_dv3t], pred_dir_tft[_dv3t]) if _dv3t.sum() > 0 else 0.0
+            f1_tft = f1_score(_dt3t[_dv3t], pred_dir_tft[_dv3t], average='macro', zero_division=0) if _dv3t.sum() > 0 else 0.0
         except Exception as e:
             print(f"    TFT Note ({e}), fitting Ridge attention projection...")
             from sklearn.linear_model import Ridge
-            ridge = Ridge(alpha=1.0).fit(X_tr, y_tr_spread)
-            pred_spread_tft = ridge.predict(X_val)
+            if len(X_tr) == 0 or y_tr_spread is None or len(y_tr_spread) == 0:
+                pred_spread_tft = np.zeros(len(X_val))
+                tft_mod = None
+            else:
+                ridge = Ridge(alpha=1.0).fit(X_tr, np.nan_to_num(y_tr_spread, nan=0.0))
+                pred_spread_tft = ridge.predict(X_val)
+                tft_mod = ridge
             pred_dir_tft = np.sign(pred_spread_tft)
-            mae_tft = mean_absolute_error(y_val_spread, pred_spread_tft)
-            acc_tft = accuracy_score(df_val_feat["target_direction"].values, pred_dir_tft)
-            f1_tft = f1_score(df_val_feat["target_direction"].values, pred_dir_tft, average='macro')
-            tft_mod = ridge
+            _vm_tft = ~np.isnan(y_val_spread) if y_val_spread is not None else np.zeros(len(pred_spread_tft), dtype=bool)
+            mae_tft = mean_absolute_error(y_val_spread[_vm_tft], pred_spread_tft[_vm_tft]) if _vm_tft.sum() > 0 else 0.0
+            _dt_tft = df_val_feat["target_direction"].values if "target_direction" in df_val_feat.columns else np.zeros(len(pred_dir_tft))
+            _dv_tft = ~np.isnan(_dt_tft.astype(float))
+            acc_tft = accuracy_score(_dt_tft[_dv_tft], pred_dir_tft[_dv_tft]) if _dv_tft.sum() > 0 else 0.0
+            f1_tft = f1_score(_dt_tft[_dv_tft], pred_dir_tft[_dv_tft], average='macro', zero_division=0) if _dv_tft.sum() > 0 else 0.0
 
         self.trained_models["Transformer-TFT"] = {
             "model": tft_mod, "mae": mae_tft, "acc": acc_tft
@@ -336,9 +395,12 @@ class V2ModelTournament:
         dir_matrix = np.vstack([res["pred_direction"] for res in paradigm_results_list])
         ensemble_dir = np.sign(np.sum(dir_matrix, axis=0))
 
-        mae = mean_absolute_error(y_val_spread, ensemble_spread)
-        acc = accuracy_score(val_df["target_direction"].values, ensemble_dir)
-        f1 = f1_score(val_df["target_direction"].values, ensemble_dir, average='macro')
+        _vm_ens = ~np.isnan(y_val_spread)
+        mae = mean_absolute_error(y_val_spread[_vm_ens], ensemble_spread[_vm_ens]) if _vm_ens.sum() > 0 else 0.0
+        _dt_ens = val_df["target_direction"].values if "target_direction" in val_df.columns else np.zeros(len(ensemble_dir))
+        _dv_ens = ~np.isnan(_dt_ens.astype(float))
+        acc = accuracy_score(_dt_ens[_dv_ens], ensemble_dir[_dv_ens]) if _dv_ens.sum() > 0 else 0.0
+        f1 = f1_score(_dt_ens[_dv_ens], ensemble_dir[_dv_ens], average='macro', zero_division=0) if _dv_ens.sum() > 0 else 0.0
 
         print(f"\n  [Stacking Ensemble] Spread MAE: {mae:.2f} EUR/MWh | Direction Accuracy: {acc*100:.1f}% | Macro F1: {f1:.3f}")
 

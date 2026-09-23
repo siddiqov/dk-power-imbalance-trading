@@ -264,7 +264,16 @@ def predict_quarters(store: Store, cfg, bundle: IntradayBundle, quarters, now=No
     imb = fb.imb[bundle.area]
     known = (q + Q + fb.lag_imb <= now).values
     out["spread_actual"] = np.where(known, imb["spread"].reindex(pd.DatetimeIndex(q)).values, np.nan)
-    out["data_age_min"] = X["age_last_min"].values if "age_last_min" in X.columns else np.nan
+    # Data age AT DECISION TIME: minutes from as_of back to the start of the latest quarter whose
+    # imbalance price is actually in the store and was published by as_of. (The feature
+    # age_last_min is measured from the delivery quarter, so with a 60-min gate lead it is always
+    # >= 105 min and a 90-min guard on it forced every quarter to HOLD.)
+    sp = imb["spread"].dropna()
+    pub = sp.index + Q + fb.lag_imb                      # publication time of each quarter
+    ts = pd.DatetimeIndex(as_of)
+    pos = np.searchsorted(pub.values, ts.values, side="right") - 1
+    last_q = np.where(pos >= 0, sp.index.values[np.clip(pos, 0, None)], np.datetime64("NaT", "ns"))
+    out["data_age_min"] = (ts.values - last_q) / np.timedelta64(1, "m")
     # --- stale-data guard: HOLD when imbalance data is too old to trade reliably ----------
     guard_min = cfg["intraday"].get("stale_data_guard_minutes")
     if guard_min is not None:

@@ -9,7 +9,7 @@
   python run.py train                       train the models used for live paper trading
   python run.py cycle                       one live paper-trading cycle
   python run.py live [--every 5]            run cycles forever (update data + cycle every N minutes)
-  python run.py dashboard                   start the dashboard on port 5006
+  python run.py dashboard                   RETIRED (2026-09-22) - V4.1 dashboard uses port 5006
 """
 from __future__ import annotations
 
@@ -194,6 +194,12 @@ def cmd_live(args, cfg):
 
 
 def cmd_dashboard(args, cfg):
+    # RETIRED 2026-09-22: the V4.2 dashboard is no longer used. Port 5006 is reserved for the
+    # V4.1-only dashboard (dashboard_v41_live.py). Old launchers are in _retired_dashboard/.
+    if not getattr(args, "force_retired", False):
+        print("The V4.2 dashboard (nurex42/dashboard.py) is retired. Use the V4.1 dashboard instead.\n"
+              "To start it anyway: python run.py dashboard --force-retired")
+        return
     port = str(cfg["dashboard"]["port"])
     subprocess.run([sys.executable, "-m", "streamlit", "run", str(ROOT / "nurex42" / "dashboard.py"),
                     "--server.port", port, "--server.headless", "true"], check=False)
@@ -215,7 +221,7 @@ def main():
     sub.add_parser("cycle")
     sp = sub.add_parser("live"); sp.add_argument("--every", type=int, default=5)
     sp.add_argument("--retrain-daily", action="store_true")
-    sub.add_parser("dashboard")
+    sub.add_parser("dashboard").add_argument("--force-retired", action="store_true")
     args = p.parse_args()
     cfg = load_settings(args.config)
     {"seed-legacy": cmd_seed, "backfill": cmd_backfill, "update": cmd_update, "coverage": cmd_coverage,

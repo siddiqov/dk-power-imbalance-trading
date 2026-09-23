@@ -500,3 +500,80 @@ def _flows_status(df: pd.DataFrame, status: str, err=None) -> pd.DataFrame:
     df.attrs["status"] = status
     df.attrs["error"] = None if err is None else str(err)
     return df
+
+
+def day_dayahead(areas, date_str: str) -> pd.DataFrame:
+    """Day-ahead prices (EUR/MWh) per local delivery quarter of `date_str`, from the V4.2 store.
+
+    One column per area (e.g. 'DE', 'DK1'), plus 'time_dk_str' keyed like day_flows. Authentic
+    values only: a quarter with no published price stays NaN - nothing is copied or filled in.
+    The reason for an empty frame is in df.attrs['status'] ('ok', 'stale', 'busy', 'unpublished').
+    """
+    cfg = config()
+    areas = [areas] if isinstance(areas, str) else list(areas)
+    qs = tu.local_day_quarters(date_str, cfg["local_tz"])
+    ck = ("da", tuple(areas), date_str)
+    if len(qs) == 0 or not areas:
+        return _flows_status(pd.DataFrame(), "unpublished")
+    try:
+        st, _src = _open_ro(cfg)
+        try:
+            raw = st.df("SELECT area, time_utc, price_eur FROM dayahead WHERE time_utc >= ? AND "
+                        "time_utc <= ? AND area IN (" + ",".join("?" * len(areas)) + ")",
+                        [qs.min(), qs.max()] + areas)
+        finally:
+            st.close()
+    except Exception as e:
+        cached = _CACHE.get(ck)
+        if cached is not None:
+            return _flows_status(cached.copy(), "stale", e)
+        return _flows_status(pd.DataFrame(), "busy", e)
+    if raw.empty:
+        return _flows_status(pd.DataFrame(), "unpublished")
+    wide = raw.pivot_table(index="time_utc", columns="area", values="price_eur", aggfunc="last")
+    wide = wide.reindex(pd.DatetimeIndex(qs))
+    out = pd.DataFrame({a: (wide[a].values if a in wide.columns else np.nan) for a in areas},
+                       index=wide.index)
+    out["time_dk_str"] = (out.index.tz_localize("UTC").tz_convert(cfg["local_tz"])
+                          .strftime("%Y-%m-%d %H:%M%z"))
+    out = out.reset_index(drop=True)
+    _CACHE[ck] = out.copy()
+    return _flows_status(out, "ok")
+
+
+def day_scaffold(area: str, date_str: str) -> pd.DataFrame:
+    """96-quarter ledger frame for one local day built only from authentic stored data.
+
+    Columns: quarter, time_dk ('YYYY-MM-DD HH:MM' local), time_utc, spot_price_eur (DA auction),
+    actual_settled_imbalance_eur (Energinet imbalance price, NaN until published), status.
+    Used when the legacy tournament table cannot be built. Empty if the day has no DA prices.
+    """
+    cfg = config()
+    qs = tu.local_day_quarters(date_str, cfg["local_tz"])
+    if len(qs) == 0:
+        return pd.DataFrame()
+    st, _src = _open_ro(cfg)
+    try:
+        da = st.df("SELECT time_utc, price_eur FROM dayahead WHERE area = ? AND time_utc >= ? AND time_utc <= ?",
+                   [area, qs.min(), qs.max()])
+        im = st.df("SELECT time_utc, imbalance_eur FROM imbalance WHERE area = ? AND time_utc >= ? AND time_utc <= ?",
+                   [area, qs.min(), qs.max()])
+    finally:
+        st.close()
+    if da.empty:
+        return pd.DataFrame()
+    idx = pd.DatetimeIndex(qs)
+    spot = da.drop_duplicates("time_utc").set_index("time_utc")["price_eur"].reindex(idx)
+    imb = (im.drop_duplicates("time_utc").set_index("time_utc")["imbalance_eur"].reindex(idx)
+           if not im.empty else pd.Series(np.nan, index=idx))
+    local = idx.tz_localize("UTC").tz_convert(cfg["local_tz"])
+    out = pd.DataFrame({
+        "time_dk": local.strftime("%Y-%m-%d %H:%M"),
+        "time_utc": idx.strftime("%Y-%m-%d %H:%M"),
+        "spot_price_eur": spot.values,
+        "actual_settled_imbalance_eur": imb.values,
+    })
+    out = out[out["spot_price_eur"].notna()].drop_duplicates("time_dk").reset_index(drop=True)
+    out["status"] = np.where(out["actual_settled_imbalance_eur"].notna(), "Settled", "Pending")
+    out.insert(0, "quarter", [f"Q{i + 1}" for i in range(len(out))])
+    return out

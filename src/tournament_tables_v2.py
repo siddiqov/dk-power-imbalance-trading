@@ -8,6 +8,9 @@
 # ==============================================================================
 
 import os
+
+# Absolute path to the results directory, regardless of cwd when the dashboard runs
+_RESULTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "results")
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
@@ -27,21 +30,60 @@ class TournamentTableGenerator:
         self.engine = V2DataEngine()
         self.fe = V2FeatureEngineer()
 
+    @staticmethod
+    def _is_day(df, date_str):
+        """True when every row of `df` is a local quarter of `date_str`. A table for another
+        day must never be shown under this date."""
+        if df is None or df.empty or "time_dk" not in df.columns:
+            return False
+        d = pd.to_datetime(df["time_dk"], errors="coerce").dt.strftime("%Y-%m-%d")
+        return bool((d == date_str).all())
+
     def get_backtest_table(self, date_str="2026-08-31"):
         if not date_str:
             date_str = "2026-08-31"
-        csv_path = f"results/96Q_backtest_table_{self.price_area}_{date_str}.csv"
+        csv_path = os.path.join(_RESULTS_DIR, f"96Q_backtest_table_{self.price_area}_{date_str}.csv")
         if os.path.exists(csv_path):
-            return pd.read_csv(csv_path)
+            cached = pd.read_csv(csv_path)
+            # A cached table is reused only if it is really this day and fully settled; a partial
+            # day (today) is rebuilt so quarters settled since it was written are picked up.
+            complete = "status" in cached.columns and (cached["status"] == "Settled").all() and len(cached) >= 92
+            if self._is_day(cached, date_str) and complete:
+                return cached
         # Fallback to standard if exists and date is default
-        legacy_path = f"results/96Q_backtest_table_{self.price_area}.csv"
+        legacy_path = os.path.join(_RESULTS_DIR, f"96Q_backtest_table_{self.price_area}.csv")
         if date_str == "2026-08-31" and os.path.exists(legacy_path):
             return pd.read_csv(legacy_path)
-        return self.generate_and_save_backtest_table(date_str=date_str)
+        result = self.generate_and_save_backtest_table(date_str=date_str)
+        # No data for this day -> empty. Another day's cached table is never substituted: it
+        # would be displayed with this date on it (that is how 21 Sep appeared as 22 Sep).
+        return result if self._is_day(result, date_str) else pd.DataFrame()
 
     def get_future_table(self, date_str=None):
-        # Always dynamically generate to pull the latest 15-minute settled quarters from Energinet
-        return self.generate_and_save_future_table(date_str=date_str)
+        # Check for cached CSV first to avoid re-running model training on every page load
+        import glob as _glob
+        if date_str is None:
+            try:
+                from zoneinfo import ZoneInfo
+                date_str = datetime.now(ZoneInfo("Europe/Copenhagen")).strftime("%Y-%m-%d")
+            except Exception:
+                from datetime import timezone
+                date_str = (datetime.now(timezone.utc) + timedelta(hours=2)).strftime("%Y-%m-%d")
+        csv_path = os.path.join(_RESULTS_DIR, f"96Q_backtest_table_{self.price_area}_{date_str}.csv")
+        if os.path.exists(csv_path):
+            cached = pd.read_csv(csv_path)
+            if self._is_day(cached, date_str):
+                print(f"[TournamentTableGenerator] Loading cached future table: {csv_path}")
+                return cached
+        # Try full generation
+        try:
+            result = self.generate_and_save_future_table(date_str=date_str)
+            if result is not None and not result.empty:
+                return result
+        except Exception as _e:
+            print(f"[TournamentTableGenerator] generate_and_save_future_table failed: {_e}")
+        # No other day's cached table is substituted (it would carry the wrong date's prices).
+        return pd.DataFrame()
 
     def generate_and_save_backtest_table(self, date_str="2026-08-31"):
         """
@@ -84,7 +126,8 @@ class TournamentTableGenerator:
         df_31 = df_zone[mask].copy().reset_index(drop=True)
 
         if df_31.empty:
-            df_31 = df_zone.iloc[-96:].copy().reset_index(drop=True)
+            # nothing published for this day yet - do not borrow the latest 96 rows of another day
+            return pd.DataFrame()
 
         # Train models on prior historical real dataset (Walk-Forward strict isolation)
         tournament = V2ModelTournament(price_area=self.price_area)
@@ -101,8 +144,11 @@ class TournamentTableGenerator:
             row = df_31.iloc[i]
             t_dk = row["time_dk"].strftime("%Y-%m-%d %H:%M")
             t_utc = row["time_utc"].strftime("%Y-%m-%d %H:%M")
-            p_spot = float(row["spot_price_eur"]) if pd.notnull(row["spot_price_eur"]) else 50.0
-            p_actual = float(row["imbalance_price_eur"]) if pd.notnull(row["imbalance_price_eur"]) else p_spot
+            if pd.isnull(row["spot_price_eur"]):
+                continue  # no authentic spot price for this quarter - no row rather than a made-up 50
+            p_spot = float(row["spot_price_eur"])
+            # unpublished imbalance price stays empty: it is NOT the spot price
+            p_actual = float(row["imbalance_price_eur"]) if pd.notnull(row["imbalance_price_eur"]) else np.nan
 
             # Extract predicted spreads
             def get_pred_price(m_name):
@@ -126,7 +172,7 @@ class TournamentTableGenerator:
             elif pred_spread < -1.2:
                 action = "SELL Spot"
 
-            error_spread = abs(price_ens - p_actual)
+            error_spread = abs(price_ens - p_actual) if pd.notnull(p_actual) else np.nan
 
             rows.append({
                 "quarter": f"Q{i+1}",
@@ -140,16 +186,18 @@ class TournamentTableGenerator:
                 "pure15m_catboost_eur": round(price_cat, 2),
                 "meta_ensemble_eur": round(price_ens, 2),
                 "meta_ensemble_dkk": round(price_ens_dkk, 2),
-                "actual_settled_imbalance_eur": round(p_actual, 2),
-                "error_spread_eur": round(error_spread, 2),
+                "actual_settled_imbalance_eur": round(p_actual, 2) if pd.notnull(p_actual) else np.nan,
+                "error_spread_eur": round(error_spread, 2) if pd.notnull(error_spread) else np.nan,
                 "agent_action": action,
-                "status": "Settled"
+                "status": "Settled" if pd.notnull(p_actual) else "Pending"
             })
 
         df_out = pd.DataFrame(rows)
-        os.makedirs("results", exist_ok=True)
-        df_out.to_csv(f"results/96Q_backtest_table_{self.price_area}_{date_str}.csv", index=False)
-        df_out.to_csv(f"results/96Q_backtest_table_{self.price_area}.csv", index=False)
+        if not self._is_day(df_out, date_str):
+            return pd.DataFrame()
+        os.makedirs(_RESULTS_DIR, exist_ok=True)
+        df_out.to_csv(os.path.join(_RESULTS_DIR, f"96Q_backtest_table_{self.price_area}_{date_str}.csv"), index=False)
+        df_out.to_csv(os.path.join(_RESULTS_DIR, f"96Q_backtest_table_{self.price_area}.csv"), index=False)
         return df_out
 
     def _fetch_day_ahead_96_spot_prices(self, start_dt, end_dt):
@@ -332,6 +380,6 @@ class TournamentTableGenerator:
             })
 
         df_out = pd.DataFrame(rows)
-        os.makedirs("results", exist_ok=True)
-        df_out.to_csv(f"results/96Q_future_table_{self.price_area}.csv", index=False)
+        os.makedirs(_RESULTS_DIR, exist_ok=True)
+        df_out.to_csv(os.path.join(_RESULTS_DIR, f"96Q_future_table_{self.price_area}.csv"), index=False)
         return df_out
