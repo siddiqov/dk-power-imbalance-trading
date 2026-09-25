@@ -76,12 +76,14 @@ decision:
   - 20.0
   - 40.0
   prob_grid:
+  - 0.35
+  - 0.40
   - 0.45
-  - 0.5
+  - 0.50
   - 0.55
-  - 0.6
-  - 0.65
-  - 0.7
+  - 0.60
+  buy_min_pmin: 0.35
+  buy_max_loss_fraction: 1.5
   hysteresis_eur: 3.0
 replay:
   retrain_every_days: 30

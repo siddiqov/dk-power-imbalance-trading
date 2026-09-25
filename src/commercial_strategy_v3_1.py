@@ -125,8 +125,14 @@ class V31CommercialStrategyEngine:
                 direction = "BALANCED (0)"
 
                 if pred_spread > 1.2:
-                    action = "BUY Spot (Long)"
-                    direction = "UP-REGULATION (+1)"
+                    # BUY-FIX [Change 4]: crash guard mirrors SELL spike shield
+                    # Suppress BUY when q10 is deeply negative (crash risk)
+                    if (q10_s < -80.0 and (1.0 - p_up_spike) > 0.35) or p_up_spike < 0.20:
+                        action = "HOLD (Crash Guard Protected)"
+                        direction = "BALANCED (Guard)"
+                    else:
+                        action = "BUY Spot (Long)"
+                        direction = "UP-REGULATION (+1)"
                 elif pred_spread < -1.2:
                     if (q90_s > 80.0 and p_up_spike > 0.35) or p_up_spike > 0.45:
                         action = "HOLD (Spike Shield Protected)"

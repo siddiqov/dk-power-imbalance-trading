@@ -179,16 +179,21 @@ class V31QuantileModelSuite:
         # 6. TRI-STATE DIRECTION CLASSIFIER
         # ---------------------------------------------------------------------
         print(f"  [Optimeering] Training Direction Classifier (Tri-State Softmax)...")
+        # BUY-FIX [Change 1]: balanced sample weights so p_up is not systematically
+        # underestimated and tune() can discover profitable BUY thresholds.
+        from sklearn.utils.class_weight import compute_sample_weight
+        sample_weights = compute_sample_weight(class_weight='balanced', y=y_dir)
+
         m_clf = XGBClassifier(
-            n_estimators=120,
-            learning_rate=0.04,
+            n_estimators=200,
+            learning_rate=0.03,
             max_depth=5,
             objective='multi:softprob',
             num_class=3,
             random_state=42,
             n_jobs=2
         )
-        m_clf.fit(X_15m, y_dir)
+        m_clf.fit(X_15m, y_dir, sample_weight=sample_weights)
         models["Direction_Classifier"] = m_clf
         models["_feature_cols"] = feature_cols
 

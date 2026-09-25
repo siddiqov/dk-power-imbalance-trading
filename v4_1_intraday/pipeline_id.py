@@ -287,4 +287,17 @@ def predict_quarters(store: Store, cfg, bundle: IntradayBundle, quarters, now=No
             out.loc[stale, "action"] = "HOLD"
             out.loc[stale, "mwh"] = 0.0
             out.loc[stale, "reason"] = "stale data"
+
+    # --- BUY-FIX [Change 3]: crash guard — suppress BUY when q10 signals deep downside risk
+    buy_mask = out["action"] == "BUY"
+    if buy_mask.any() and "q10" in out.columns:
+        crash_risk = out["q10"] < -30.0
+        suppressed = buy_mask & crash_risk
+        if suppressed.any():
+            log.warning("[%s] BUY crash guard: %d quarter(s) suppressed to HOLD "
+                        "(q10 < -30 EUR/MWh)", bundle.area, int(suppressed.sum()))
+            out.loc[suppressed, "action"] = "HOLD"
+            out.loc[suppressed, "mwh"] = 0.0
+            out.loc[suppressed, "reason"] = "buy suppressed: q10 crash risk"
+
     return out
