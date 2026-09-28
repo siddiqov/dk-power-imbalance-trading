@@ -435,6 +435,71 @@ def load(table: str, start=None, end=None, root: Path | None = None) -> pd.DataF
     return pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
 
 
+COMPACT_NAME = "compact.parquet"
+
+
+def compact(root: Path | None = None, keep_days: int = 0, dry_run: bool = False,
+            min_age_minutes: int = 5) -> list[str]:
+    """Merge each finished day's many part files into one file per table (2026-09-28).
+
+    book   : only the LAST update per (contract, area) per minute is kept, with its real
+             recv_utc, so an as-of lookup at a minute boundary returns exactly what it did
+             before (decision times are on quarter-hour boundaries). ~30k raw rows/minute -> a
+             few hundred.
+    others : merged unchanged (lossless).
+    Days younger than keep_days (UTC) are left alone. Within the current day only part files
+    older than min_age_minutes are merged (the recorder writes one part per minute, each named
+    part-HHMMSS-n by its UTC write time), so today's folder never grows to millions of rows.
+    A day is only rewritten after the merged file has been written and read back."""
+    root = root or data_dir()
+    today = pd.Timestamp.now(tz="UTC").tz_localize(None).normalize()
+    done = []
+    for table in ("book", "trades", "stats", "contracts", "areas"):
+        tdir = root / table
+        if not tdir.exists():
+            continue
+        for p in sorted(tdir.glob("date=*")):
+            day = pd.Timestamp(p.name.split("=", 1)[1])
+            if day > today - pd.Timedelta(days=keep_days):
+                continue
+            parts = sorted(f for f in p.glob("*.parquet") if f.name != COMPACT_NAME)
+            if day >= today:          # current day: only parts the recorder has finished with
+                cutoff = pd.Timestamp.now(tz="UTC").tz_localize(None) - pd.Timedelta(minutes=min_age_minutes)
+                def _written(f, _day=day):
+                    try:
+                        return _day + pd.to_timedelta(f.name.split("-")[1][:6][:2] + ":" + f.name.split("-")[1][2:4]
+                                                      + ":" + f.name.split("-")[1][4:6])
+                    except Exception:
+                        return pd.Timestamp.max
+                parts = [f for f in parts if _written(f) <= cutoff]
+            if not parts:
+                continue
+            frames = [pd.read_parquet(f) for f in parts]
+            old = p / COMPACT_NAME
+            if old.exists():
+                frames.insert(0, pd.read_parquet(old))
+            df = pd.concat(frames, ignore_index=True)
+            n0 = len(df)
+            if table == "book" and len(df):
+                df = df.sort_values("recv_utc", kind="stable")
+                df["_m"] = df["recv_utc"].dt.floor("min")
+                df = df.groupby(["contract_id", "area_id", "_m"], dropna=False, sort=False).tail(1) \
+                    .drop(columns="_m").sort_values("recv_utc", kind="stable").reset_index(drop=True)
+            if dry_run:
+                done.append(f"{table}/{p.name}: {len(parts)} files, {n0} -> {len(df)} rows (dry run)")
+                continue
+            tmp = p / (COMPACT_NAME + ".tmp")
+            df.to_parquet(tmp, index=False)
+            if len(pd.read_parquet(tmp)) != len(df):
+                tmp.unlink()
+                raise RuntimeError(f"compaction check failed for {table}/{p.name}")
+            tmp.replace(old)
+            for f in parts:
+                f.unlink()
+            done.append(f"{table}/{p.name}: {len(parts)} files, {n0} -> {len(df)} rows")
+    return done
+
+
 def coverage(root: Path | None = None) -> pd.DataFrame:
     rows = []
     for t in ("areas", "contracts", "stats", "trades", "book"):

@@ -66,6 +66,9 @@ class IntradayFeatureBuilder(ExtMixin, FeatureBuilder):
         super().__init__(store, cfg, areas)
         self._load_intraday(store)
 
+    def _mfrr_raw_hook(self, raw) -> None:
+        """Called with the raw mfrr_market rows before anything is derived (leak test overrides)."""
+
     # ------------------------------------------------------------------ loading
     def _load_intraday(self, store) -> None:
         start = self.start
@@ -118,6 +121,37 @@ class IntradayFeatureBuilder(ExtMixin, FeatureBuilder):
                     afrr_up.rolling(_w, min_periods=1).sum() / (_total + 1e-6)
                 ).clip(0.0, 1.0)
             self.fast[a] = f
+
+        # mFRR activation volumes (EDS MfrrEnergyActivationMarket, table mfrr_market), 2026-09-28.
+        # Published at delivery; used as known fast_state_lag after the quarter END (like NRV).
+        self.mfrr = {}
+        try:
+            mr = store.df("SELECT area, time_utc, total_up_mw, total_down_mw FROM mfrr_market "
+                          "WHERE time_utc >= ?", [start])
+        except Exception:
+            mr = None
+        self._mfrr_raw_hook(mr)
+        if mr is not None and len(mr):
+            for a in ("DK1", "DK2"):
+                d = mr[mr["area"] == a].drop(columns="area").set_index("time_utc").sort_index()
+                d = d[~d.index.duplicated(keep="last")]
+                if d.empty:
+                    continue
+                f = _grid(d, start, self.end)
+                up, dn = f["total_up_mw"], f["total_down_mw"]
+                m = pd.DataFrame(index=f.index)
+                m["up"], m["down"] = up, dn
+                m["net"] = up.fillna(0) - dn.fillna(0)
+                m.loc[up.isna() & dn.isna(), "net"] = np.nan
+                for w in (4, 8, 16):
+                    m[f"net_mean_{w}"] = m["net"].rolling(w, min_periods=1).mean()
+                    m[f"up_mean_{w}"] = up.rolling(w, min_periods=1).mean()
+                    m[f"down_mean_{w}"] = dn.rolling(w, min_periods=1).mean()
+                m["up_frac_16"] = (up > 0).astype(float).where(up.notna()).rolling(16, min_periods=1).mean()
+                m["down_frac_16"] = (dn > 0).astype(float).where(dn.notna()).rolling(16, min_periods=1).mean()
+                m["net_d4"] = m["net"] - m["net"].shift(4)
+                m["up_max_16"] = up.rolling(16, min_periods=1).max()
+                self.mfrr[a] = m
 
         # live PSRN rolling summaries
         if self.psrn is not None:
@@ -184,6 +218,20 @@ class IntradayFeatureBuilder(ExtMixin, FeatureBuilder):
             v = self._look(oz, t0, ["spread", "spread_mean_4"])
             X["oz_last_spread"] = v["spread"].values
             X["oz_last_spread_mean_4"] = v["spread_mean_4"].values
+
+        # mFRR activation volumes, own zone + other zone (same point-in-time rule as fast state)
+        # switch: config model.mfrr_volume_features = true/false or a list of zones, e.g. [DK2]
+        # (off = feature set identical to before 2026-09-28)
+        _mv = (self.cfg.get("model") or {}).get("mfrr_volume_features", False)
+        use_mfrr = (area in _mv) if isinstance(_mv, (list, tuple)) else bool(_mv)
+        for zone, tag in (((area, "mfrr"), (OTHER[area], "oz_mfrr")) if use_mfrr else ()):
+            mz = self.mfrr.get(zone)
+            if mz is None:
+                continue
+            cols = list(mz.columns) if tag == "mfrr" else ["net", "net_mean_4", "up_frac_16"]
+            v = self._look(mz, tf, cols)
+            for c in cols:
+                X[f"{tag}_{c}"] = v[c].values
 
         # 1-hour forecasts: only once published (60 min before delivery)
         f1 = self.fc1.get(area)

@@ -13,7 +13,7 @@ from nurex42.storage import Store  # noqa: E402
 
 @pytest.fixture(scope="module")
 def env(tmp_path_factory):
-    cfg = S.load()
+    cfg = S.load(mode="gate")               # this test covers the 60-min gate schedule
     if not cfg.db_path.exists() or not P.model_path(cfg, "DK1").exists():
         pytest.skip("needs V4.2 store and trained V4.1 models")
     cfg.raw["journal_path"] = str(tmp_path_factory.mktemp("j") / "journal.sqlite")

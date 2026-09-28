@@ -45,7 +45,8 @@ def test_target_not_in_features(env):
 def test_gate_closure_times(env):
     cfg, st = env
     fb = IntradayFeatureBuilder(st, cfg)
-    t = P.target_frame(fb, "DK1", cfg).iloc[:10]
+    gcfg = S.load(mode="gate")                       # this test covers the 60-min gate schedule
+    t = P.target_frame(fb, "DK1", gcfg).iloc[:10]
     assert ((t["quarter_utc"] - t["as_of_trade"]) == pd.Timedelta(minutes=60)).all()
     assert (t["label_known_at"] > t["as_of_trade"]).all()
 

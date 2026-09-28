@@ -7,6 +7,15 @@
 
 # --- Trading moment ------------------------------------------------------------
 intraday:
+  # Schedule of the trading decisions:
+  #   batch = client schedule (2026-09-27): every hour the next hour's 4 quarters are LOCKED and
+  #           sent 2h15 before their first quarter (e.g. 21:45 -> Q1-Q4 = 00:00-00:45 next day,
+  #           07:45 -> Q41-Q44 = 10:00-10:45). All later quarters stay PROVISIONAL and are
+  #           re-forecast every cycle. Settings: see `batch_schedule` below.
+  #   gate  = original V4.1: every quarter decided on its own, gate_lead_minutes before delivery.
+  # Each mode has its own models, journal and reports (see batch_schedule), so switching back
+  # and forth never mixes the two track records.
+  mode: batch
   # Decision time = delivery start - gate_lead_minutes.
   # 60 = Nordic cross-border intraday gate closure (confirm Danish local gate closure with the BRP).
   gate_lead_minutes: 60
@@ -64,9 +73,53 @@ risk:
 decision:
   margin_grid: [0.0, 2.0, 5.0, 10.0, 20.0, 40.0]
   prob_grid: [0.45, 0.50, 0.55, 0.60, 0.65, 0.70]
+  # Fallback BUY rule (2026-09-28). Used ONLY while the trained model has no validated BUY rule
+  # ("buy": null in the model file); a BUY rule found by the Sunday retrain replaces it.
+  # Chosen on the batch walk-forward replay Jul 2025 - Sep 2026 (out-of-sample, 1 MWh/trade):
+  #   DK1 1,522 trades +17,840 EUR (11.7 EUR/MWh, 13/15 months positive, last 90 days +5,210)
+  #   DK2   607 trades +25,558 EUR (42.1 EUR/MWh, last 90 days -200)
+  # Profit comes from rare up-spikes (win rate ~33%, median trade -2.4 EUR/MWh), hence a small
+  # fixed size. The q10 crash guard does not apply to fallback BUYs; all other risk limits do.
+  # Decision guards, tuned per retrain on the validation window (kept only if they improve
+  # validation net and stay positive in both halves; otherwise no guard):
+  #   SELL -> HOLD when P(up-spike) is high; BUY -> HOLD when P(down-spike) is high;
+  #   any  -> HOLD when P(flat quarter, imbalance price = spot) is high (such trades only pay costs)
+  guards:
+    enabled: true
+    spike_grid: [0.10, 0.15, 0.20, 0.30]
+    flat_grid: [0.40, 0.50, 0.60, 0.70]
+  fallback_buy:
+    enabled: true
+    areas: [DK1, DK2]
+    pmin: 0.40               # model probability that the spread is UP
+    margin_eur: 10.0         # expected spread must exceed costs + this margin (EUR/MWh)
+    mwh: 0.2                 # fixed size per quarter
+    kill_loss_eur: 300.0     # switch off when fallback BUYs lost more than this ...
+    kill_window_days: 30     # ... over the last N days of settled quarters
 
 model:
   direction_deadband_eur: 0.5
+  # --- 2026-09-28 upgrade (model_v41.SpreadModelV41). false = the original two-part model ---
+  # Full replay 28 Sep (Jul 2025-Sep 2026) with everything on: forecast error improved (DK1 MAE
+  # 68.4 -> 59.6) but trading got worse in DK1 (net 24,691 -> 14,251 EUR, max DD -3,180 -> -7,319)
+  # and only slightly better in DK2 (10,512 -> 11,569, DD -6,061 -> -7,223). Kept OFF until the
+  # parts are tested one by one. Results: results/v4_1_batch_eval/.
+  enhanced: false
+  # 16 mFRR activation-volume inputs (features_id.py): true / false / list of zones.
+  # mFRR-only replay 28 Sep (Jul 2025-Sep 2026, same settings as live):
+  #   DK1: net 24,691 -> 17,921 EUR, max DD -3,349 -> -5,707  -> off
+  #   DK2: net 10,512 -> 20,471 EUR, max DD -6,440 -> -4,263  -> on
+  # Takes effect when the models are retrained (weekly, Sunday 03:00).
+  mfrr_volume_features: [DK2]
+  # Safeguard for the Nord Pool intraday-market inputs (id15_/id60_/book15_/trd15_): they enter
+  # training only when switched on here (after a replay shows they help) AND each has values for
+  # at least intraday_market_min_days x 96 quarters. Until then the model ignores them.
+  intraday_market_features: false
+  intraday_market_min_days: 90
+  size_objective: huber          # size regressors: huber (robust to spikes) | regression (squared error)
+  huber_delta: 40.0              # EUR/MWh; errors beyond this count linearly, not squared
+  recency_half_life_days: 180    # training row weight halves every 180 days of age
+  spike_level_eur: 150.0         # spike classifiers: P(spread > +150) and P(spread < -150)
   lgbm:
     n_estimators: 300
     learning_rate: 0.03
@@ -98,3 +151,18 @@ sign_calibration_days: 45
 models_dir: models_v4_1_intraday
 journal_path: data/v41_journal.sqlite
 reports_dir: results/v4_1_intraday
+
+# --- Client batch schedule (used when intraday.mode = batch) -----------------------
+batch_schedule:
+  quarters_per_batch: 4          # one delivery hour per batch (local wall-clock hours)
+  lead_minutes: 135              # batch deadline = first quarter start - 2h15
+  final_run_minutes: 15          # final forecast uses data up to deadline - 15 min (= 2h30 before)
+  # Extra training copies of every quarter at longer leads (minutes before delivery). The batch
+  # rows already cover 150-195 min; the extras teach the model how information decays for the
+  # provisional quarters further ahead.
+  train_extra_leads_minutes: [240]
+  # Own storage for batch mode (never mixed with the gate-mode track record)
+  models_dir: models_v4_1_batch
+  journal_path: data/v41_batch_journal.sqlite
+  reports_dir: results/v4_1_batch
+  batch_files_dir: results/v4_1_batch/batches   # one CSV + JSON per locked batch (for the BRP)

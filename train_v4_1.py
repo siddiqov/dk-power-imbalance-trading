@@ -1,7 +1,12 @@
 """Nurex V4.1 Intraday — command line (replaces the old T-60 trainer).
 
-The model decides each 15-min quarter at intraday gate closure (delivery - 60 min)
-using only information published before that moment. Data comes from the V4.2
+Two decision schedules (config_v41.yaml intraday.mode, or --mode on the command line):
+  gate   each 15-min quarter is decided at intraday gate closure (delivery - 60 min)
+  batch  client schedule: every hour the next hour's 4 quarters are locked 2h15 before the
+         first quarter (21:45 -> Q1-Q4, 07:45 -> Q41-Q44); later quarters stay provisional.
+         Own models (models_v4_1_batch/), journal (data/v41_batch_journal.sqlite), reports and
+         batch files (results/v4_1_batch/).
+Only information published before the decision moment is used. Data comes from the V4.2
 point-in-time store (Nurex_V4_2/data/nurex42.duckdb).
 
   python train_v4_1.py update                 download new data (runs Nurex_V4_2/run.py update)
@@ -17,10 +22,13 @@ point-in-time store (Nurex_V4_2/data/nurex42.duckdb).
   python train_v4_1.py sources                coverage of every data source
   python train_v4_1.py probe-nordpool         test Nord Pool Intraday login + 60 s of live data
   python train_v4_1.py record-intraday        record Nord Pool intraday market data (run 24/7)
+  python train_v4_1.py compact-intraday       merge finished days of recorder data (also runs in every cycle)
 
   Paper trading (locked decisions, judged honestly):
   python train_v4_1.py cycle                  update + collect + lock upcoming gates + settle (every 15 min)
   python train_v4_1.py lock                   only lock upcoming gates + settle (no downloads)
+  python train_v4_1.py --mode batch train     train the hourly-batch models (models_v4_1_batch/)
+  python train_v4_1.py --mode batch replay    walk-forward replay at the batch schedule
   python train_v4_1.py journal [--days 30]    locked-decision performance per zone
 
 Simulation / research only - no orders are sent.
@@ -39,6 +47,7 @@ import pandas as pd
 
 from v4_1_intraday import settings as S
 from v4_1_intraday import leakage, pipeline_id as P, report_id as R
+from v4_1_intraday import journal as J
 from v4_1_intraday.features_id import IntradayFeatureBuilder
 from nurex42 import timeutil as tu
 from nurex42.storage import Store
@@ -75,17 +84,19 @@ def cmd_replay(args, cfg):
     fb = IntradayFeatureBuilder(st, cfg)
     areas = [args.area] if args.area else cfg["areas"]
     stamp = datetime.now().strftime("%Y%m%d_%H%M")
+    out_dir = Path(args.out) if getattr(args, "out", None) else cfg.path("reports_dir")
+    out_dir.mkdir(parents=True, exist_ok=True)
     summary = {}
     for a in areas:
         out = P.walk_forward(st, cfg, a, fb=fb)
-        path = cfg.path("reports_dir") / f"replay_{a}_{stamp}.md"
+        path = out_dir / f"replay_{a}_{stamp}.md"
         rep = R.write(out, cfg, path)
         summary[a] = {"trading": rep["trading"], "forecast": rep["forecast"], "direction": rep["direction"]}
         tm = rep["trading"]
         print(f"[{a}] trades={tm['trades']} MWh={tm['mwh_traded']:.0f} net={tm['net_eur']:,.0f} EUR "
               f"({tm['net_eur_per_mwh']:.2f} EUR/MWh), at 2x costs {tm['net_eur_at_stress_costs']:,.0f} EUR, "
               f"max DD {tm['max_drawdown_eur']:,.0f} EUR -> {path}")
-    (cfg.path("reports_dir") / f"replay_summary_{stamp}.json").write_text(
+    (out_dir / f"replay_summary_{stamp}.json").write_text(
         json.dumps(summary, indent=2, default=float), encoding="utf-8")
     st.close()
 
@@ -105,6 +116,8 @@ def cmd_train(args, cfg):
             "area": a, "version": b.version, "n_train": b.n_train, "trained_until": str(b.trained_until),
             "decision_params": b.decision_params, "cost_eur_mwh": cfg.cost_per_mwh,
             "gate_lead_minutes": cfg["intraday"]["gate_lead_minutes"],
+            "mode": cfg.mode, "schedule": cfg.schedule_text(),
+            "batch_schedule": cfg.bs if cfg.batch_mode else None,
             "feature_importance_top15": imp.to_dict()}, indent=2, default=str), encoding="utf-8")
     st.close()
 
@@ -116,8 +129,10 @@ def cmd_predict(args, cfg):
     qs = tu.local_day_quarters(day, cfg["local_tz"])
     out = P.predict_quarters(st, cfg, b, qs)
     out["time_local"] = out["quarter_utc"].dt.tz_localize("UTC").dt.tz_convert(cfg["local_tz"]).dt.strftime("%H:%M")
-    cols = ["time_local", "decision_final", "p_down", "p_flat", "p_up", "exp_spread", "q10", "q90",
-            "action", "mwh", "edge", "spread_actual"]
+    out["q_no"] = J.quarter_number(out["quarter_utc"], cfg["local_tz"]).values
+    out["deadline_local"] = out["gate_utc"].dt.tz_localize("UTC").dt.tz_convert(cfg["local_tz"]).dt.strftime("%d %H:%M")
+    cols = ["q_no", "time_local", "deadline_local", "decision_final", "p_down", "p_flat", "p_up", "exp_spread",
+            "q10", "q90", "action", "mwh", "edge", "spread_actual"]
     pd.set_option("display.width", 200)
     print(out[cols].round(2).to_string(index=False))
     path = cfg.path("reports_dir") / f"decisions_{args.area}_{day}.csv"
@@ -272,6 +287,17 @@ def cmd_cycle(args, cfg):
     except Exception as e:
         print(f"WARNING: imbalance backfill failed: {e}")
     cmd_lock(args, cfg)
+    # after locking (never delays a decision): shrink finished days of Nord Pool recorder data
+    try:
+        cmd_compact_intraday(args, cfg)
+    except Exception as e:
+        print(f"WARNING: intraday compaction failed: {e}")
+
+
+def cmd_compact_intraday(args, cfg):
+    from v4_1_intraday.collectors import nordpool_id as npid
+    for line in npid.compact(dry_run=bool(getattr(args, "dry_run", False))):
+        print("compacted", line)
 
 
 def cmd_journal(args, cfg):
@@ -297,10 +323,17 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--config", default=None)
+    p.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
+                   help="override one config value for this run only, e.g. --set model.mfrr_volume_features=true")
+    p.add_argument("--db", default=None,
+                   help="read this copy of the V4.2 store instead of the live one (long jobs never block the cycle)")
+    p.add_argument("--mode", choices=["gate", "batch"], default=None,
+                   help="override config intraday.mode for this run (e.g. train batch models while live runs gate)")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("update")
     sp = sub.add_parser("leaktest"); sp.add_argument("--samples", type=int, default=5)
     sp = sub.add_parser("replay"); sp.add_argument("--area")
+    sp.add_argument("--out", help="write the replay reports here instead of reports_dir (evaluation runs)")
     sp = sub.add_parser("train"); sp.add_argument("--area")
     sp = sub.add_parser("predict"); sp.add_argument("--area", required=True); sp.add_argument("--day")
     sp = sub.add_parser("all"); sp.add_argument("--area"); sp.add_argument("--samples", type=int, default=5)
@@ -308,15 +341,27 @@ def main():
     sub.add_parser("sources")
     sp = sub.add_parser("probe-nordpool"); sp.add_argument("--seconds", type=int, default=60)
     sp = sub.add_parser("record-intraday"); sp.add_argument("--no-book", action="store_true")
+    sp = sub.add_parser("compact-intraday"); sp.add_argument("--dry-run", action="store_true")
     sp = sub.add_parser("cycle"); sp.add_argument("--source")
     sub.add_parser("lock")
     sp = sub.add_parser("backfill"); sp.add_argument("--hours", type=int, default=48)
     sp = sub.add_parser("journal"); sp.add_argument("--days", type=int, default=None)
     args = p.parse_args()
-    cfg = S.load(args.config)
+    cfg = S.load(args.config, db_path=args.db, mode=args.mode)
+    import yaml as _yaml
+    for kv in args.set:
+        k, v = kv.split("=", 1)
+        node = cfg.raw
+        *path, last = k.split(".")
+        for part in path:
+            node = node.setdefault(part, {})
+        node[last] = _yaml.safe_load(v)
+        logging.getLogger("nurex41id").info("config override %s = %r", k, node[last])
+    logging.getLogger("nurex41id").info("mode=%s: %s", cfg.mode, cfg.schedule_text())
     {"update": cmd_update, "leaktest": cmd_leaktest, "replay": cmd_replay, "train": cmd_train,
      "predict": cmd_predict, "all": cmd_all, "collect": cmd_collect, "sources": cmd_sources,
      "probe-nordpool": cmd_probe_nordpool, "record-intraday": cmd_record,
+     "compact-intraday": cmd_compact_intraday,
      "cycle": cmd_cycle, "lock": cmd_lock, "backfill": cmd_backfill, "journal": cmd_journal}[args.cmd](args, cfg)
 
 

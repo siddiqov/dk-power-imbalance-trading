@@ -45,14 +45,20 @@ def extra_baselines(r: pd.DataFrame, cfg) -> pd.DataFrame:
 
 def write(out: dict, cfg, path: Path) -> dict:
     r = out["results"].copy()
-    r["deadline_utc"] = r["as_of_trade"]
+    if "deadline_utc" not in r.columns:
+        r["deadline_utc"] = r["as_of_trade"]
     rep = ev.write_report(out, cfg, path)            # writes markdown + csv
     ds = direction_skill(r)
     eb = extra_baselines(r, cfg)
     txt = path.read_text(encoding="utf-8")
     txt = txt.replace("# Nurex V4.2 walk-forward replay", "# Nurex V4.1 Intraday walk-forward replay")
-    txt = txt.replace("at its batch decision time (deadline minus 15 min)",
-                      f"at intraday gate closure (delivery start minus {cfg['intraday']['gate_lead_minutes']} min)")
+    if cfg.batch_mode:
+        txt = txt.replace("# Nurex V4.1 Intraday walk-forward replay", "# Nurex V4.1 Batch walk-forward replay")
+        txt = txt.replace("at its batch decision time (deadline minus 15 min)",
+                          f"at its batch decision time: {cfg.schedule_text()}")
+    else:
+        txt = txt.replace("at its batch decision time (deadline minus 15 min)",
+                          f"at intraday gate closure (delivery start minus {cfg['intraday']['gate_lead_minutes']} min)")
     txt = txt.replace(f"retrained every {cfg['replay']['retrain_every_days']} days",
                       f"retrained every {cfg['intraday']['retrain_every_days']} days")
     raw = {}

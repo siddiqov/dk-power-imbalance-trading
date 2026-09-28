@@ -5,9 +5,14 @@ changes history. The journal stores each quarter's decision ONCE, before its gat
 with the information and model available at that moment. Performance is judged on this
 journal only.
 
-  lock(store, cfg)    decide every quarter whose gate closes within `lock_ahead_minutes`
-                      (as of now, i.e. before the gate); quarters whose gate passed without a
-                      lock are written as MISSED/HOLD (never decided with later information)
+  lock(store, cfg)    decide every quarter whose deadline is within `lock_ahead_minutes`
+                      (as of min(now, decision time), i.e. before the deadline); quarters whose
+                      deadline passed without a lock are written as MISSED/HOLD (never decided
+                      with later information).
+                      gate mode : deadline = the quarter's own gate closure (delivery - 60 min)
+                      batch mode: deadline = batch deadline (first quarter of the hour - 2h15);
+                                  the 4 quarters of a batch are locked together and a CSV + JSON
+                                  batch file is written for the BRP (batch_schedule.batch_files_dir)
   settle(store, cfg)  add the published imbalance spread and PnL to locked quarters
 """
 from __future__ import annotations
@@ -30,7 +35,7 @@ Q = pd.Timedelta(minutes=15)
 COLS = ["area", "quarter_utc", "gate_utc", "locked_at_utc", "as_of_utc", "status", "model_version",
         "model_trained_until", "action", "mwh", "mw", "edge", "exp_spread", "p_up", "p_flat", "p_down",
         "q10", "q50", "q90", "reason", "hour_all_same_side", "spread_actual", "pnl_eur", "cost_eur_mwh",
-        "settled_at_utc"]
+        "settled_at_utc", "batch_start_utc", "deadline_utc"]
 
 SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS decisions (
@@ -38,6 +43,7 @@ CREATE TABLE IF NOT EXISTS decisions (
     status TEXT, model_version TEXT, model_trained_until TEXT, action TEXT, mwh REAL, mw REAL, edge REAL,
     exp_spread REAL, p_up REAL, p_flat REAL, p_down REAL, q10 REAL, q50 REAL, q90 REAL, reason TEXT,
     hour_all_same_side INTEGER, spread_actual REAL, pnl_eur REAL, cost_eur_mwh REAL, settled_at_utc TEXT,
+    batch_start_utc TEXT, deadline_utc TEXT,
     PRIMARY KEY (area, quarter_utc));
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
@@ -52,6 +58,12 @@ def connect(cfg) -> sqlite3.Connection:
     p.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(str(p), timeout=30)
     con.executescript(SCHEMA)
+    # journals created before 2026-09-27 lack the batch columns -> add them (existing rows stay NULL)
+    have = {r[1] for r in con.execute("PRAGMA table_info(decisions)")}
+    for c in ("batch_start_utc", "deadline_utc"):
+        if c not in have:
+            con.execute(f"ALTER TABLE decisions ADD COLUMN {c} TEXT")
+    con.commit()
     return con
 
 
@@ -83,8 +95,10 @@ def read(cfg, area: str | None = None, start=None, end=None) -> pd.DataFrame:
         df = pd.read_sql_query(sql + " ORDER BY area, quarter_utc", con, params=args)
     finally:
         con.close()
-    for c in ("quarter_utc", "gate_utc", "locked_at_utc", "as_of_utc", "settled_at_utc"):
-        df[c] = pd.to_datetime(df[c])
+    for c in ("quarter_utc", "gate_utc", "locked_at_utc", "as_of_utc", "settled_at_utc",
+              "batch_start_utc", "deadline_utc"):
+        if c in df.columns:
+            df[c] = pd.to_datetime(df[c])
     return df
 
 
@@ -221,10 +235,80 @@ def _apply_hourly_cap(rows: list, con, area: str, cfg, tz: str) -> list:
     return rows
 
 
+def quarter_number(quarters_utc, tz: str) -> pd.Series:
+    """Client quarter number within the local delivery day: Q1 = 00:00 local. Counts real
+    15-minute steps, so the clock-change days have 92 / 100 quarters."""
+    q = pd.to_datetime(pd.Series(quarters_utc)).reset_index(drop=True)
+    loc = q.dt.tz_localize("UTC").dt.tz_convert(tz)
+    day0 = loc.dt.normalize()          # local midnight (tz-aware) -> real elapsed time
+    return ((loc - day0).dt.total_seconds() // 900 + 1).astype(int)
+
+
+def write_batch_files(cfg, area: str, rows: list) -> list[Path]:
+    """One CSV + JSON per locked batch: results/v4_1_batch/batches/<area>/<local date>/batch_<HHMM>.*
+    Only newly LOCKED rows are passed in, so an existing file is never rewritten."""
+    import json
+    if not rows:
+        return []
+    tz = cfg["local_tz"]
+    d = pd.DataFrame(rows)
+    d["q"] = pd.to_datetime(d["quarter_utc"])
+    d["bs"] = pd.to_datetime(d["batch_start_utc"])
+    from .settings import BASE
+    root = Path(cfg.bs.get("batch_files_dir") or "results/v4_1_batch/batches")
+    root = root if root.is_absolute() else BASE / root
+    written = []
+    for bs, g in d.groupby("bs"):
+        g = g.sort_values("q")
+        bl = pd.Timestamp(bs).tz_localize("UTC").tz_convert(tz)
+        qloc = g["q"].dt.tz_localize("UTC").dt.tz_convert(tz)
+        out = pd.DataFrame({
+            "area": area,
+            "delivery_date_local": qloc.dt.strftime("%Y-%m-%d").values,
+            "quarter_no": quarter_number(g["q"], tz).values,
+            "quarter_start_local": qloc.dt.strftime("%Y-%m-%d %H:%M%z").values,
+            "quarter_start_utc": g["q"].dt.strftime("%Y-%m-%d %H:%M").values,
+            "action": g["action"].values, "mwh": g["mwh"].astype(float).round(3).values,
+            "exp_spread_eur_mwh": pd.to_numeric(g.get("exp_spread"), errors="coerce").round(2).values,
+            "reason": g["reason"].values})
+        folder = root / area / bl.strftime("%Y-%m-%d")
+        folder.mkdir(parents=True, exist_ok=True)
+        stem = folder / f"batch_{bl.strftime('%H%M')}"
+        if stem.with_suffix(".csv").exists():       # repeated hour on the October clock change
+            stem = stem.with_name(stem.name + f"_{bl.strftime('%z').lstrip('+')}")
+        out.to_csv(stem.with_suffix(".csv"), index=False)
+        meta = {"area": area, "batch_start_utc": _ts(bs), "batch_start_local": bl.strftime("%Y-%m-%d %H:%M%z"),
+                "deadline_utc": g["deadline_utc"].iloc[0], "locked_at_utc": g["locked_at_utc"].iloc[0],
+                "as_of_utc": g["as_of_utc"].iloc[0], "model_version": g["model_version"].iloc[0],
+                "status": "LOCKED", "quarters": out.to_dict(orient="records")}
+        stem.with_suffix(".json").write_text(json.dumps(meta, indent=2, default=str), encoding="utf-8")
+        written.append(stem.with_suffix(".csv"))
+        log.info("[%s] batch file %s (%d quarters)", area, stem.with_suffix(".csv").name, len(out))
+    return written
+
+
+def _fallback_buy_ok(con, area: str, cfg, now) -> tuple[bool, float]:
+    """Kill switch of the fallback BUY rule: off when its settled PnL over the last
+    kill_window_days is below -kill_loss_eur."""
+    f = (cfg["decision"].get("fallback_buy") or {})
+    if not f.get("enabled"):
+        return False, 0.0
+    since = _ts(now - pd.Timedelta(days=int(f.get("kill_window_days", 30))))
+    r = con.execute("SELECT COALESCE(SUM(pnl_eur), 0) FROM decisions WHERE area=? AND reason='fallback BUY rule' "
+                    "AND pnl_eur IS NOT NULL AND quarter_utc>=?", (area, since)).fetchone()
+    net = float(r[0] or 0.0)
+    ok = net > -float(f.get("kill_loss_eur", 300.0))
+    if not ok:
+        log.warning("[%s] fallback BUY rule OFF: %.0f EUR over the last %s days", area, net,
+                    f.get("kill_window_days", 30))
+    return ok, net
+
+
 def lock(store, cfg, now=None, fb=None, bundles=None) -> dict:
     now = pd.Timestamp(now) if now is not None else pd.Timestamp.now(tz="UTC").tz_localize(None)
     ahead = pd.Timedelta(minutes=int(cfg["intraday"].get("lock_ahead_minutes", 20)))
-    lead = cfg.lead
+    # longest distance between a quarter and its deadline (batch: last quarter of the hour)
+    span = pd.Timedelta(hours=8)
     con = connect(cfg)
     out = {}
     try:
@@ -232,6 +316,7 @@ def lock(store, cfg, now=None, fb=None, bundles=None) -> dict:
         if start is None:
             start = now
             con.execute("INSERT INTO meta VALUES ('journal_start_utc', ?)", (_ts(now),))
+            con.execute("INSERT OR REPLACE INTO meta VALUES ('mode', ?)", (cfg.mode,))
             con.commit()
         fb = fb or IntradayFeatureBuilder(store, cfg)
         for area in cfg["areas"]:
@@ -239,31 +324,39 @@ def lock(store, cfg, now=None, fb=None, bundles=None) -> dict:
             if b is None:
                 mp = P.model_path(cfg, area)
                 if not mp.exists():
-                    log.warning("[%s] no model - run `train_v4_1.py train`", area)
+                    log.warning("[%s] no %s-mode model - run `train_v4_1.py%s train`", area, cfg.mode,
+                                " --mode batch" if cfg.batch_mode else "")
                     continue
                 b = P.IntradayBundle.load(mp)
             done = {r[0] for r in con.execute(
                 "SELECT quarter_utc FROM decisions WHERE area=? AND quarter_utc>=?", (area, _ts(start)))}
-            # candidate quarters: gate in [start, now + ahead]
-            q0 = (start + lead).ceil("15min")
-            q1 = (now + ahead + lead).floor("15min")
-            qs = pd.date_range(q0, q1, freq="15min")
-            qs = [q for q in qs if _ts(q) not in done]
-            future = [q for q in qs if q - lead > now]
-            missed = [q for q in qs if q - lead <= now]
+            # candidate quarters: deadline in [journal start, now + ahead]
+            grid = pd.Series(pd.date_range(start.floor("15min"), (now + ahead + span).ceil("15min"), freq="15min"))
+            dl = cfg.deadlines(grid)
+            sel = ((dl >= start) & (dl <= now + ahead)).values
+            cand = pd.DataFrame({"q": grid[sel].values, "dl": dl[sel].values,
+                                 "bs": cfg.batch_starts(grid)[sel].values})
+            cand = cand[~cand["q"].map(_ts).isin(done)]
+            fut_m = (cand["dl"] > now).values
+            future = list(cand.loc[fut_m, "q"])
+            info = cand.set_index("q")
             rows = []
-            for q in missed:
-                rows.append({"area": area, "quarter_utc": _ts(q), "gate_utc": _ts(q - lead), "locked_at_utc": _ts(now),
+            for q, r0 in cand[~fut_m].set_index("q").iterrows():
+                rows.append({"area": area, "quarter_utc": _ts(q), "gate_utc": _ts(r0["dl"]), "locked_at_utc": _ts(now),
                              "as_of_utc": None, "status": "MISSED", "model_version": b.version,
                              "model_trained_until": _ts(b.trained_until), "action": "HOLD", "mwh": 0.0, "mw": 0.0,
-                             "reason": "gate passed before the system ran", "cost_eur_mwh": cfg.cost_per_mwh})
+                             "reason": ("batch deadline" if cfg.batch_mode else "gate") + " passed before the system ran",
+                             "cost_eur_mwh": cfg.cost_per_mwh,
+                             "batch_start_utc": _ts(r0["bs"]), "deadline_utc": _ts(r0["dl"])})
+            missed = [r["quarter_utc"] for r in rows]
             if future:
                 # decide the whole local hour(s) so the hourly agreement flag can be computed
                 tz = cfg["local_tz"]
                 hours = {pd.Timestamp(q).tz_localize("UTC").tz_convert(tz).floor("h") for q in future}
                 allq = sorted({h.tz_convert("UTC").tz_localize(None) + k * Q for h in hours for k in range(4)}
                               | set(future))
-                pr = P.predict_quarters(store, cfg, b, pd.Series(allq), now=now, fb=fb)
+                fb_ok, fb_net = _fallback_buy_ok(con, area, cfg, now)
+                pr = P.predict_quarters(store, cfg, b, pd.Series(allq), now=now, fb=fb, fallback_buy_ok=fb_ok)
                 pr["hour_all_same_side"] = _hour_agreement(pr, tz).values
                 pr = pr[pr["quarter_utc"].isin(future)]
                 for _, r in pr.iterrows():
@@ -275,7 +368,9 @@ def lock(store, cfg, now=None, fb=None, bundles=None) -> dict:
                                  "p_up": float(r["p_up"]), "p_flat": float(r["p_flat"]), "p_down": float(r["p_down"]),
                                  "q10": float(r["q10"]), "q50": float(r["q50"]), "q90": float(r["q90"]),
                                  "reason": r["reason"], "hour_all_same_side": int(r["hour_all_same_side"]),
-                                 "cost_eur_mwh": cfg.cost_per_mwh})
+                                 "cost_eur_mwh": cfg.cost_per_mwh,
+                                 "batch_start_utc": _ts(info.loc[r["quarter_utc"], "bs"]),
+                                 "deadline_utc": _ts(info.loc[r["quarter_utc"], "dl"])})
             # Apply live risk overlay (daily stop + drawdown guard) to sized rows
             rows = _apply_live_risk(rows, con, area, cfg, now)
             rows = _apply_hourly_cap(rows, con, area, cfg, cfg["local_tz"])
@@ -284,6 +379,11 @@ def lock(store, cfg, now=None, fb=None, bundles=None) -> dict:
                 con.execute(f"INSERT OR IGNORE INTO decisions ({','.join(keys)}) VALUES ({','.join('?' * len(keys))})",
                             [row[k] for k in keys])
             con.commit()
+            if cfg.batch_mode and future:
+                try:
+                    write_batch_files(cfg, area, [r for r in rows if r.get("status") == "LOCKED"])
+                except Exception as e:          # a file problem must never undo the lock
+                    log.error("[%s] batch file not written: %s", area, e)
             out[area] = {"locked": len(future), "missed": len(missed),
                          "trades": int(sum(1 for r in rows if r["action"] != "HOLD"))}
             log.info("[%s] journal: %s", area, out[area])

@@ -1,7 +1,10 @@
 """Nurex V4.1 Intraday: design matrix, walk-forward replay, final training and prediction.
 
 Trading model (simulation):
-  For every delivery quarter q the decision is taken at a = q - gate_lead (60 min).
+  Decision time (information cut-off) a per delivery quarter q, see settings.py:
+    gate mode   a = q - gate_lead (60 min), every quarter on its own
+    batch mode  a = batch deadline - final_run; batch = local wall-clock hour (4 quarters),
+                deadline = first quarter - 2h15  ->  a = first quarter - 2h30 for all 4 quarters
   BUY  x MWh -> pnl = x * (imbalance - day-ahead) - x * cost
   SELL x MWh -> pnl = x * (day-ahead - imbalance) - x * cost
   (the intraday fill price is approximated by the day-ahead price + slippage in the cost,
@@ -21,11 +24,13 @@ from . import settings as S
 from .features_id import IntradayFeatureBuilder
 from nurex42 import decision as dec
 from nurex42.models import SpreadModel
+from .model_v41 import SpreadModelV41, recency_weights
 from nurex42.storage import Store
 
 log = logging.getLogger("nurex41id")
 Q = pd.Timedelta(minutes=15)
 VERSION = "4.1-intraday-2026-09-17"
+VERSION_BATCH = "4.1-batch-2026-09-27"      # hourly client batches, locked 2h15 ahead
 
 
 # ----------------------------------------------------------------------------- data
@@ -37,9 +42,10 @@ def target_frame(fb: IntradayFeatureBuilder, area: str, cfg, start=None, end=Non
     if end is not None:
         t = t[t["quarter_utc"] < pd.Timestamp(end)]
     t = t.reset_index(drop=True)
-    t["as_of_trade"] = t["quarter_utc"] - cfg.lead
+    t["as_of_trade"] = cfg.decision_times(t["quarter_utc"]).values
     t["label_known_at"] = t["quarter_utc"] + Q + fb.lag_imb
-    t["batch_start_utc"] = t["quarter_utc"]          # intraday: every quarter is its own decision
+    t["batch_start_utc"] = cfg.batch_starts(t["quarter_utc"]).values   # gate mode: the quarter itself
+    t["deadline_utc"] = cfg.deadlines(t["quarter_utc"]).values
     return t
 
 
@@ -51,7 +57,7 @@ def design(fb, area, t, cfg):
     """X at the trading lead, plus extra-lead copies used only for training."""
     Xt = build_X(fb, area, t["quarter_utc"], t["as_of_trade"])
     extras = []
-    for m in cfg["intraday"].get("train_extra_leads_minutes", []) or []:
+    for m in cfg.train_extra_leads:
         extras.append(build_X(fb, area, t["quarter_utc"], t["quarter_utc"] - pd.Timedelta(minutes=int(m))))
     cols = sorted(set(Xt.columns).union(*[set(e.columns) for e in extras]))
     return Xt.reindex(columns=cols), [e.reindex(columns=cols) for e in extras]
@@ -61,13 +67,122 @@ def usable_columns(X: pd.DataFrame) -> list[str]:
     return [c for c in X.columns if X[c].notna().mean() > 0.02 and X[c].nunique(dropna=True) > 1]
 
 
-def fit_model(Xt, extras, y, rows, cfg) -> SpreadModel:
+ID_MARKET_PREFIXES = ("id15_", "id60_", "book15_", "trd15_")   # Nord Pool intraday market inputs
+
+
+def intraday_market_allowed(Xt_rows: pd.DataFrame, cfg) -> list[str]:
+    """Safeguard (2026-09-28): Nord Pool intraday-market inputs enter training only when
+    switched on (model.intraday_market_features, after a replay shows they help) AND each has
+    values for at least model.intraday_market_min_days x 96 quarters at the trading lead.
+    Returns the id-market columns that are allowed; all others of that family are dropped."""
+    mc = cfg["model"]
+    cols = [c for c in Xt_rows.columns if c.startswith(ID_MARKET_PREFIXES)]
+    if not cols or not mc.get("intraday_market_features", False):
+        return []
+    need = int(mc.get("intraday_market_min_days", 90)) * 96
+    return [c for c in cols if int(Xt_rows[c].notna().sum()) >= need]
+
+
+def fit_model(Xt, extras, y, rows, cfg, times=None) -> SpreadModel:
     X = pd.concat([Xt.loc[rows]] + [e.loc[rows] for e in extras], ignore_index=True)
     yy = pd.concat([y.loc[rows]] * (1 + len(extras)), ignore_index=True)
-    cols = usable_columns(X)
-    m = SpreadModel(params=cfg["model"]["lgbm"], deadband=cfg["model"]["direction_deadband_eur"],
-                    quantiles=tuple(cfg["model"]["quantiles"]))
-    return m.fit(X[cols], yy, stress_q=cfg["risk"]["stress_quantile"])
+    allowed = set(intraday_market_allowed(Xt.loc[rows], cfg))
+    cols = [c for c in usable_columns(X) if not c.startswith(ID_MARKET_PREFIXES) or c in allowed]
+    mc = cfg["model"]
+    if not mc.get("enhanced"):
+        m = SpreadModel(params=mc["lgbm"], deadband=mc["direction_deadband_eur"], quantiles=tuple(mc["quantiles"]))
+        return m.fit(X[cols], yy, stress_q=cfg["risk"]["stress_quantile"])
+    # 2026-09-28 upgrade: Huber size loss, recency weights, spike classifiers (see model_v41.py)
+    w = None
+    if times is not None and mc.get("recency_half_life_days"):
+        tt = pd.concat([pd.Series(times.loc[rows].values)] * (1 + len(extras)), ignore_index=True)
+        w = recency_weights(tt, mc["recency_half_life_days"])
+    m = SpreadModelV41(params=mc["lgbm"], deadband=mc["direction_deadband_eur"], quantiles=tuple(mc["quantiles"]),
+                       size_objective=mc.get("size_objective", "huber"), huber_delta=float(mc.get("huber_delta", 40.0)),
+                       spike_level=float(mc.get("spike_level_eur", 150.0)))
+    return m.fit(X[cols], yy, stress_q=cfg["risk"]["stress_quantile"], sample_weight=w)
+
+
+# ----------------------------------------------------------------------------- guards (2026-09-28)
+def apply_guards(pred: pd.DataFrame, d: pd.DataFrame, guards: dict | None) -> pd.DataFrame:
+    """HOLD a trade when the model sees a likely spike against it or a likely flat quarter.
+      spike_up_max  : SELL -> HOLD when P(spread > +spike_level) >= this
+      spike_down_max: BUY  -> HOLD when P(spread < -spike_level) >= this
+      flat_max      : any  -> HOLD when P(flat: imbalance price == spot) >= this (costs only)
+    `pred` and `d` share the same index. Missing columns (old models) = guard off."""
+    if not guards:
+        return d
+    d = d.copy()
+    rules = (("spike_up_max", "p_spike_up", "SELL", "spike guard: likely up-spike"),
+             ("spike_down_max", "p_spike_down", "BUY", "spike guard: likely down-spike"),
+             ("flat_max", "p_flat", None, "flat guard: imbalance likely = spot"))
+    for key, col, side, why in rules:
+        lim = guards.get(key)
+        if lim is None or col not in pred.columns:
+            continue
+        hit = (pred[col].values >= float(lim)) & (d["action"].values != "HOLD")
+        if side:
+            hit &= d["action"].values == side
+        if hit.any():
+            d.loc[hit, ["action", "reason"]] = ["HOLD", why]
+            d.loc[hit, ["mwh", "edge"]] = 0.0
+    return d
+
+
+def tune_guards(pred: pd.DataFrame, spread: pd.Series, keys: pd.Series, stress: dict, params: dict,
+                cfg) -> dict | None:
+    """Pick guard thresholds on the validation window (after the BUY/SELL rule is tuned).
+    Kept only if net PnL improves and stays positive in both halves; else no guard."""
+    gc = cfg["decision"].get("guards") or {}
+    if not gc.get("enabled", True) or "p_flat" not in pred.columns:
+        return None
+    d0 = dec.decide(pred, keys, stress, cfg, params)
+    cost = cfg.cost_per_mwh
+    half = np.arange(len(pred)) < len(pred) // 2
+
+    def score(d):
+        _, _, net = dec.pnl(d["action"], d["mwh"], spread, cost)
+        net = np.asarray(net, dtype=float)
+        return float(net.sum()), net[half].sum() > 0 and net[~half].sum() > 0
+
+    best_net, _ = score(d0)
+    best = None
+    import itertools
+    grid_s = [None] + list(gc.get("spike_grid", [0.10, 0.15, 0.20, 0.30]))
+    grid_f = [None] + list(gc.get("flat_grid", [0.40, 0.50, 0.60, 0.70]))
+    for su, sd, fm in itertools.product(grid_s, grid_s, grid_f):
+        g = {"spike_up_max": su, "spike_down_max": sd, "flat_max": fm}
+        if su is None and sd is None and fm is None:
+            continue
+        net, stable = score(apply_guards(pred, d0, g))
+        if stable and net > best_net + 1e-6:
+            best, best_net = g, net
+    return best
+
+
+def apply_fallback_buy(out: pd.DataFrame, pred: pd.DataFrame, decision_params: dict, area: str, cfg,
+                       ok: bool = True) -> pd.DataFrame:
+    """Fallback BUY rule (config decision.fallback_buy): only while the model has no BUY rule."""
+    fb_cfg = (cfg["decision"].get("fallback_buy") or {}) if "decision" in cfg.raw else {}
+    if not (ok and fb_cfg.get("enabled") and not (decision_params or {}).get("buy")
+            and area in (fb_cfg.get("areas") or [area])):
+        return out
+    edge = pred["exp_spread"] - cfg.cost_per_mwh
+    fbuy = ((out["action"] == "HOLD") & (pred["p_up"] >= float(fb_cfg.get("pmin", 0.40)))
+            & (edge > float(fb_cfg.get("margin_eur", 10.0))))
+    # never a fallback BUY into a likely down-spike or a likely flat quarter
+    g = (decision_params or {}).get("guards") or {}
+    if g.get("spike_down_max") is not None and "p_spike_down" in pred.columns:
+        fbuy &= pred["p_spike_down"] < float(g["spike_down_max"])
+    if g.get("flat_max") is not None:
+        fbuy &= pred["p_flat"] < float(g["flat_max"])
+    if fbuy.any():
+        out = out.copy()
+        out.loc[fbuy, "action"] = "BUY"
+        out.loc[fbuy, "mwh"] = float(fb_cfg.get("mwh", 0.2))
+        out.loc[fbuy, "edge"] = edge[fbuy]
+        out.loc[fbuy, "reason"] = "fallback BUY rule"
+    return out
 
 
 def train_with_validation(Xt, extras, t, cfg, cut: pd.Timestamp):
@@ -78,17 +193,22 @@ def train_with_validation(Xt, extras, t, cfg, cut: pd.Timestamp):
     fit_rows = t.index[known & (t["label_known_at"] <= val_start)]
     val_rows = t.index[known & (t["as_of_trade"] >= val_start)]
     all_rows = t.index[known]
+    times = t["quarter_utc"]
     if len(fit_rows) < 3000 or len(val_rows) < 1000:
         params = {"no_trade": True, "val_net_eur": 0.0, "val_trades": 0,
                   "note": f"insufficient history (fit={len(fit_rows)}, val={len(val_rows)})"}
         val_pred = None
     else:
-        mv = fit_model(Xt, extras, t["spread"], fit_rows, cfg)
+        mv = fit_model(Xt, extras, t["spread"], fit_rows, cfg, times=times)
         val_pred = mv.predict(Xt.loc[val_rows])
-        params = dec.tune(val_pred, t.loc[val_rows, "spread"], t.loc[val_rows, "batch_start_utc"], mv.stress, cfg)
+        # risk budget key = the quarter (as before); the hourly MWh cap limits a whole batch/hour
+        params = dec.tune(val_pred, t.loc[val_rows, "spread"], t.loc[val_rows, "quarter_utc"], mv.stress, cfg)
+        if cfg["model"].get("enhanced") and not params.get("no_trade"):
+            params["guards"] = tune_guards(val_pred, t.loc[val_rows, "spread"], t.loc[val_rows, "quarter_utc"],
+                                           mv.stress, params, cfg)
     if len(all_rows) < 3000:
         raise RuntimeError(f"only {len(all_rows)} labelled quarters before {cut}")
-    m = fit_model(Xt, extras, t["spread"], all_rows, cfg)
+    m = fit_model(Xt, extras, t["spread"], all_rows, cfg, times=times)
     return m, params, len(all_rows)
 
 
@@ -186,9 +306,13 @@ def walk_forward(store: Store, cfg, area: str, start=None, end=None, fb=None) ->
         cut = t.loc[rows, "as_of_trade"].min()
         m, params, n_train = train_with_validation(Xt, extras, t, cfg, cut)
         pt = m.predict(Xt.loc[rows])
-        d = dec.decide(pt, t.loc[rows, "batch_start_utc"], m.stress, cfg, params)
-        r = t.loc[rows, ["quarter_utc", "batch_start_utc", "as_of_trade", "label_known_at", "spread"]].copy()
-        r = r.join(pt[["exp_spread", "p_up", "p_down", "p_flat", "q10", "q50", "q90"]])
+        d = dec.decide(pt, t.loc[rows, "quarter_utc"], m.stress, cfg, params)
+        d = apply_guards(pt, d, params.get("guards"))
+        d = apply_fallback_buy(d, pt, params, area, cfg)
+        r = t.loc[rows, ["quarter_utc", "batch_start_utc", "deadline_utc", "as_of_trade", "label_known_at",
+                         "spread"]].copy()
+        r = r.join(pt[[c for c in ("exp_spread", "p_up", "p_down", "p_flat", "q10", "q50", "q90",
+                                   "p_spike_up", "p_spike_down") if c in pt.columns]])
         for col in ("last_spread", "spread_qod_mean7", "fast_satisfied_demand_mw", "fast_dominating_direction"):
             r[col] = Xt.loc[rows, col].values if col in Xt.columns else np.nan
         r[["action", "mwh", "edge", "reason"]] = d[["action", "mwh", "edge", "reason"]]
@@ -228,7 +352,8 @@ class IntradayBundle:
 
 
 def model_path(cfg, area: str) -> Path:
-    return cfg.path("models_dir") / f"v4_1_intraday_{area}.pkl"
+    name = "v4_1_batch" if cfg.batch_mode else "v4_1_intraday"
+    return cfg.path("models_dir") / f"{name}_{area}.pkl"
 
 
 def train_final(store: Store, cfg, area: str, fb=None, now=None) -> IntradayBundle:
@@ -239,26 +364,34 @@ def train_final(store: Store, cfg, area: str, fb=None, now=None) -> IntradayBund
     m, params, n = train_with_validation(Xt, extras, t, cfg, cut)
     return IntradayBundle(area=area, model=m, decision_params=params,
                           trained_until=t.loc[t["label_known_at"] <= cut, "quarter_utc"].max(),
-                          n_train=n, config=cfg.raw)
+                          n_train=n, version=VERSION_BATCH if cfg.batch_mode else VERSION, config=cfg.raw)
 
 
-def predict_quarters(store: Store, cfg, bundle: IntradayBundle, quarters, now=None, fb=None) -> pd.DataFrame:
+def predict_quarters(store: Store, cfg, bundle: IntradayBundle, quarters, now=None, fb=None,
+                     fallback_buy_ok: bool = True) -> pd.DataFrame:
     """Forecast + decision for the given delivery quarters (UTC-naive).
 
-    Each quarter is evaluated as of min(now, quarter - gate_lead): past quarters are replayed
+    Each quarter is evaluated as of min(now, its decision time): past quarters are replayed
     exactly as they would have been decided; future quarters use the information available now
-    (lead_min > gate lead, the model was trained with longer leads too).
+    (provisional; lead_min > decision lead, the model was trained with longer leads too).
+
+    Columns: gate_utc = the deadline (gate closure in gate mode, batch submission deadline in batch
+    mode), decision_utc = information cut-off of the final decision, decision_final = that cut-off
+    has passed, so the decision can no longer change.
     """
     fb = fb or IntradayFeatureBuilder(store, cfg)
     q = pd.Series(pd.to_datetime(quarters)).reset_index(drop=True)
     now = pd.Timestamp(now) if now is not None else pd.Timestamp.now(tz="UTC").tz_localize(None)
-    gate = q - cfg.lead
-    as_of = gate.where(gate <= now, now)
+    gate = cfg.deadlines(q)
+    dtime = cfg.decision_times(q)
+    as_of = dtime.where(dtime <= now, now)
     X = build_X(fb, bundle.area, q, as_of)
     pr = bundle.model.predict(X)
     d = dec.decide(pr, q, bundle.model.stress, cfg, bundle.decision_params)
+    d = apply_guards(pr, d, (bundle.decision_params or {}).get("guards"))
     out = pd.DataFrame({"quarter_utc": q, "as_of_utc": as_of, "gate_utc": gate,
-                        "decision_final": (gate <= now).values})
+                        "batch_start_utc": cfg.batch_starts(q), "decision_utc": dtime,
+                        "decision_final": (dtime <= now).values})
     out = pd.concat([out, pr.reset_index(drop=True), d[["action", "mwh", "edge", "reason"]].reset_index(drop=True)],
                     axis=1)
     imb = fb.imb[bundle.area]
@@ -299,5 +432,14 @@ def predict_quarters(store: Store, cfg, bundle: IntradayBundle, quarters, now=No
             out.loc[suppressed, "action"] = "HOLD"
             out.loc[suppressed, "mwh"] = 0.0
             out.loc[suppressed, "reason"] = "buy suppressed: q10 crash risk"
+
+    # --- fallback BUY rule: only while the trained model has no validated BUY rule -------------
+    before = out["action"].copy()
+    out = apply_fallback_buy(out, out, bundle.decision_params, bundle.area, cfg, ok=fallback_buy_ok)
+    fbuy = (out["action"] == "BUY") & (before != "BUY")
+    # stale data still forces HOLD
+    if fbuy.any() and guard_min is not None:
+        st = fbuy & out["decision_final"] & (out["data_age_min"].isna() | (out["data_age_min"] > guard_min))
+        out.loc[st, ["action", "mwh", "reason"]] = ["HOLD", 0.0, "stale data"]
 
     return out

@@ -374,7 +374,7 @@ if log_v41:
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 🏆 V4.1 Intraday Model")
     st.sidebar.markdown(f"**Model:** `LightGBM direction + regime size + quantiles`")
-    st.sidebar.markdown(f"**Decision time:** `delivery − {log_v41.get('gate_lead_minutes', 60)} min`")
+    st.sidebar.markdown(f"**Decision time:** `{log_v41.get('schedule') or ('delivery − ' + str(log_v41.get('gate_lead_minutes', 60)) + ' min')}`")
     st.sidebar.markdown(f"**Trained on:** `{log_v41.get('n_train', 0):,} quarters until {str(log_v41.get('trained_until', ''))[:16]} UTC`")
     st.sidebar.markdown(f"**Cost model:** `{log_v41.get('cost_eur_mwh', 0):.2f} EUR/MWh`")
     dp = log_v41.get('decision_params', {}) or {}
@@ -798,7 +798,11 @@ def get_v4_1_trading_day_data(area, date_str, threshold_key='validated', risk_li
             st.warning(f"\u26a0\ufe0f V4.1 decisions could not be matched to the ledger quarters "
                        f"({len(v41)} decisions, 0 matched) - the table shows no V4.1 signal.")
         pick = lambda c, d=np.nan: key.map(m[c]).fillna(d) if c in m.columns else d
-        df_matrix['V4_1_Predicted_Spread_EUR'] = pick('exp_spread', 0.0).astype(float)
+        # 2026-09-28: show the median forecast (q50) - ~15% lower error than the probability-weighted
+        # mean, which rare spikes pull around. Positions are still decided by probabilities + edge.
+        _q50 = pick('q50')
+        df_matrix['V4_1_Predicted_Spread_EUR'] = (_q50 if not np.isscalar(_q50) else pd.Series(np.nan, index=key.index)) \
+            .fillna(pick('exp_spread', 0.0)).astype(float)
         df_matrix['p_down'] = pick('p_down')
         df_matrix['p_none'] = pick('p_flat')
         df_matrix['p_up'] = pick('p_up')
@@ -922,14 +926,14 @@ with tab_cables:
     """)
 
     cables_data = [
-        {"Border": "DK1 → Germany (DE-LU)", "Zone": "DK1", "Cable Name": "Kassø-Audorf Lines", "Capacity (MW)": 2500, "Current Flow (MW)": exp_pos(df_day['flow_de'].iloc[-1]) if not df_day.empty and 'flow_de' in df_day.columns else -120.0},
-        {"Border": "DK1 → Norway (NO2)", "Zone": "DK1", "Cable Name": "Skagerrak 1-4", "Capacity (MW)": 1640, "Current Flow (MW)": exp_pos(df_day['flow_nordic'].iloc[-1]) * 0.7 if not df_day.empty and 'flow_nordic' in df_day.columns else 350.0},
-        {"Border": "DK1 → Sweden (SE3)", "Zone": "DK1", "Cable Name": "Konti-Skan 1-2", "Capacity (MW)": 680, "Current Flow (MW)": exp_pos(df_day['flow_nordic'].iloc[-1]) * 0.3 if not df_day.empty and 'flow_nordic' in df_day.columns else 350.0},
-        {"Border": "DK1 → Great Britain (GB)", "Zone": "DK1", "Cable Name": "Viking Link", "Capacity (MW)": 1400, "Current Flow (MW)": exp_pos(df_day['flow_gb'].iloc[-1]) if not df_day.empty and 'flow_gb' in df_day.columns else 450.0},
-        {"Border": "DK1 → Netherlands (NL)", "Zone": "DK1", "Cable Name": "COBRAcable", "Capacity (MW)": 700, "Current Flow (MW)": exp_pos(df_day['flow_nl'].iloc[-1]) if not df_day.empty and 'flow_nl' in df_day.columns else -40.0},
-        {"Border": "DK1 → DK2", "Zone": "Both", "Cable Name": "Great Belt (Storebælt HVDC)", "Capacity (MW)": 580, "Current Flow (MW)": exp_pos(df_day['flow_great_belt'].iloc[-1]) if not df_day.empty and 'flow_great_belt' in df_day.columns else -80.0},
-        {"Border": "DK2 → Sweden (SE4)", "Zone": "DK2", "Cable Name": "Øresund Cable", "Capacity (MW)": 1240, "Current Flow (MW)": exp_pos(df_day['flow_se'].iloc[-1]) if not df_day.empty and 'flow_se' in df_day.columns else 280.0},
-        {"Border": "DK2 → Germany (DE-LU)", "Zone": "DK2", "Cable Name": "Kontek + Kriegers Flak", "Capacity (MW)": 985, "Current Flow (MW)": exp_pos(df_day['flow_de'].iloc[-1]) if not df_day.empty and 'flow_de' in df_day.columns else 90.0}
+        {"Border": "DK1 → Germany (DE-LU)", "Zone": "DK1", "Cable Name": "Kassø-Audorf Lines", "Capacity (MW)": 2500, "Current Flow (MW)": exp_pos(df_day['flow_de'].iloc[-1]) if not df_day.empty and 'flow_de' in df_day.columns else np.nan},
+        {"Border": "DK1 → Norway (NO2)", "Zone": "DK1", "Cable Name": "Skagerrak 1-4", "Capacity (MW)": 1640, "Current Flow (MW)": exp_pos(df_day['flow_nordic'].iloc[-1]) * 0.7 if not df_day.empty and 'flow_nordic' in df_day.columns else np.nan},
+        {"Border": "DK1 → Sweden (SE3)", "Zone": "DK1", "Cable Name": "Konti-Skan 1-2", "Capacity (MW)": 680, "Current Flow (MW)": exp_pos(df_day['flow_nordic'].iloc[-1]) * 0.3 if not df_day.empty and 'flow_nordic' in df_day.columns else np.nan},
+        {"Border": "DK1 → Great Britain (GB)", "Zone": "DK1", "Cable Name": "Viking Link", "Capacity (MW)": 1400, "Current Flow (MW)": exp_pos(df_day['flow_gb'].iloc[-1]) if not df_day.empty and 'flow_gb' in df_day.columns else np.nan},
+        {"Border": "DK1 → Netherlands (NL)", "Zone": "DK1", "Cable Name": "COBRAcable", "Capacity (MW)": 700, "Current Flow (MW)": exp_pos(df_day['flow_nl'].iloc[-1]) if not df_day.empty and 'flow_nl' in df_day.columns else np.nan},
+        {"Border": "DK1 → DK2", "Zone": "Both", "Cable Name": "Great Belt (Storebælt HVDC)", "Capacity (MW)": 580, "Current Flow (MW)": exp_pos(df_day['flow_great_belt'].iloc[-1]) if not df_day.empty and 'flow_great_belt' in df_day.columns else np.nan},
+        {"Border": "DK2 → Sweden (SE4)", "Zone": "DK2", "Cable Name": "Øresund Cable", "Capacity (MW)": 1240, "Current Flow (MW)": exp_pos(df_day['flow_se'].iloc[-1]) if not df_day.empty and 'flow_se' in df_day.columns else np.nan},
+        {"Border": "DK2 → Germany (DE-LU)", "Zone": "DK2", "Cable Name": "Kontek + Kriegers Flak", "Capacity (MW)": 985, "Current Flow (MW)": exp_pos(df_day['flow_de'].iloc[-1]) if not df_day.empty and 'flow_de' in df_day.columns else np.nan}
     ]
 
     st.caption(FLOW_CONVENTION_NOTE)
@@ -937,7 +941,7 @@ with tab_cables:
     cable_df['Headroom (MW)'] = cable_df['Capacity (MW)'] - cable_df['Current Flow (MW)'].abs()
     cable_df['Utilization (%)'] = ((cable_df['Current Flow (MW)'].abs() / cable_df['Capacity (MW)']) * 100).round(1)
     cable_df['Status'] = cable_df['Utilization (%)'].apply(
-        lambda u: "🔴 CONGESTED" if u >= 85 else ("🟠 HIGH LOAD" if u >= 65 else "🟢 LIQUID")
+        lambda u: "⚪ NO DATA" if pd.isna(u) else ("🔴 CONGESTED" if u >= 85 else ("🟠 HIGH LOAD" if u >= 65 else "🟢 LIQUID"))
     )
 
     col_l, col_r = st.columns([3, 2])
@@ -947,7 +951,7 @@ with tab_cables:
             "Current Flow (MW)": "{:+,.1f} MW",
             "Headroom (MW)": "{:,.1f} MW",
             "Utilization (%)": "{:.1f}%"
-        }), use_container_width=True)
+        }, na_rep="-- (no data)"), use_container_width=True)
         
     with col_r:
         chart_data = cable_df[['Border', 'Utilization (%)']].copy()
@@ -1726,7 +1730,7 @@ with tab_unified_ledger:
                   {ic_ths}
                   {v40_ths}
                   <th draggable="true" title="V4.1 Predicted Imbalance Price (€) [Spot + Spread]" style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">V4.1 Pred</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
-                  <th draggable="true" title="V4.1 Predicted Spread (€/MWh) [Expected imbalance minus DA spot]. Positive = BUY signal; Negative = SELL signal." style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">V4.1 Spread</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
+                  <th draggable="true" title="V4.1 Predicted Spread (€/MWh) [median forecast of imbalance minus DA spot]. BUY/SELL come from the model's up/down probabilities and expected edge, so the sign can differ from the position." style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">V4.1 Spread</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   <th draggable="true" title="V4.1 Intraday Trading Decision" style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">V4.1 Pos</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   <th draggable="true" title="V4.1 Position Size with Conviction Scaling" style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">V4.1 Vol</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   <th draggable="true" title="V4.1 Realized Trading PnL (€)" style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">V4.1 PnL</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
@@ -2139,6 +2143,29 @@ with tab_xbid:
         )
 
     st.caption(FLOW_CONVENTION_NOTE + "  Live Energinet snapshot, repeated across quarters.")
+    # --- REAL NORD POOL INTRADAY DATA (recorder: train_v4_1.py record-intraday) ---
+    @st.cache_data(ttl=60, show_spinner=False)
+    def _load_id_market(area, day):
+        try:
+            from v4_1_intraday.id_terminal import latest_market
+            return latest_market(area, day)
+        except Exception as _e:
+            _log_startup_error('XBID terminal: recorder data', _e)
+            return pd.DataFrame()
+    _idm = _load_id_market(selected_area, date_str_selected)
+    def _id_row(duration_min, hh, mm):
+        if _idm.empty:
+            return {}
+        _s = _idm[(_idm['duration_min'] == duration_min) & (_idm['dlvry_start_local'].dt.hour == hh)
+                  & (_idm['dlvry_start_local'].dt.minute == mm)]
+        return _s.iloc[-1].to_dict() if len(_s) else {}
+    if _idm.empty:
+        st.info("No Nord Pool intraday data recorded for this day - bid/ask/VWAP cells stay empty. "
+                "Keep the recorder running (scripts_v41\\run_recorder_v41.bat).")
+    else:
+        _bt = pd.to_datetime(_idm['book_time_utc']).max()
+        st.caption(f"Bid/Ask/VWAP: recorded Nord Pool intraday data for {len(_idm)} products; last order-book "
+                   f"update {_bt:%H:%M} UTC. Empty cells = nothing recorded / order book empty (contract closed).")
     # --- BUILD NORD POOL ORDER BOOK DATASET ---
     if df_day.empty:
         st.warning("No live trading data available for selected date.")
@@ -2161,21 +2188,19 @@ with tab_xbid:
                 v41_spread = sub['V4_1_Predicted_Spread_EUR'].mean() if 'V4_1_Predicted_Spread_EUR' in sub.columns else sub.get('V4_Predicted_Spread_EUR', pd.Series(0.0)).mean()
                 v41_vol = sub['V4_1_Volume_MW'].mean() if 'V4_1_Volume_MW' in sub.columns else sub.get('V4_Volume_MW', pd.Series(10.0)).mean()
                 
-                # Best Bid / Ask estimation grounded in authentic ML spread & conviction
-                # Removed fake mathematical UI interpolation
-                bid_price = row.get('xbid_vwap_eur', dam_spot) - 1.0 if not pd.isna(row.get('xbid_vwap_eur')) else dam_spot - 1.0
-                ask_price = row.get('xbid_vwap_eur', dam_spot) + 1.0 if not pd.isna(row.get('xbid_vwap_eur')) else dam_spot + 1.0
-                bid_qty = 0.0
-                ask_qty = 0.0
-                vwap = row.get('xbid_vwap_eur', dam_spot)
-                dam_diff = round(vwap - dam_spot, 2)
+                # Real Nord Pool intraday data from the recorder (hourly PH contract); empty if not recorded
+                _m = _id_row(60, h, 0)
+                bid_price, ask_price = _m.get('bid', np.nan), _m.get('ask', np.nan)
+                bid_qty, ask_qty = _m.get('bid_mw', np.nan), _m.get('ask_mw', np.nan)
+                vwap = _m.get('vwap', np.nan)
+                dam_diff = round(vwap - dam_spot, 2) if pd.notna(vwap) else np.nan
                 
                 # Cross-Border Flows & Capacities
                 # export-positive for display (see FLOW_CONVENTION_NOTE)
                 f_de = exp_pos(sub.get('flow_de', sub.get('scheduled_flow_mw', pd.Series(0.0))).mean())
                 f_nl = exp_pos(sub.get('flow_nl', pd.Series(0.0)).mean())
-                f_no = exp_pos(sub.get('flow_nordic', pd.Series(0.0)).mean()) * 0.7
-                f_se = exp_pos(sub.get('flow_nordic', pd.Series(0.0)).mean()) * 0.3
+                f_no = exp_pos(sub['flow_no'].mean()) if 'flow_no' in sub.columns else np.nan
+                f_se = exp_pos(sub['flow_se'].mean()) if 'flow_se' in sub.columns else np.nan
                 f_gb = exp_pos(sub.get('flow_gb', pd.Series(0.0)).mean())
                 f_sb = exp_pos(sub.get('flow_great_belt', pd.Series(0.0)).mean())
                 
@@ -2189,7 +2214,9 @@ with tab_xbid:
                 pnl_hourly_40 = sub.loc[settled_mask_sub, 'PnL_V4_0'].sum() if (any_settled and 'PnL_V4_0' in sub.columns) else np.nan
 
                 # Bias Signal
-                if dam_diff <= -np_decouple_threshold:
+                if pd.isna(dam_diff):
+                    bias = "⚪ NO TRADES RECORDED"
+                elif dam_diff <= -np_decouple_threshold:
                     bias = f"🔴 CRASH BIAS ({dam_diff:+.1f} €)"
                 elif dam_diff >= np_decouple_threshold:
                     bias = f"🟢 SPIKE BIAS ({dam_diff:+.1f} €)"
@@ -2233,20 +2260,18 @@ with tab_xbid:
                 v41_spread = row.get('V4_1_Predicted_Spread_EUR', row.get('V4_Predicted_Spread_EUR', 0.0))
                 v41_vol = row.get('V4_1_Volume_MW', row.get('V4_Volume_MW', 10.0))
                 
-                # Removed fake mathematical UI interpolation
-                bid_price = row.get('xbid_vwap_eur', dam_spot) - 1.0 if not pd.isna(row.get('xbid_vwap_eur')) else dam_spot - 1.0
-                ask_price = row.get('xbid_vwap_eur', dam_spot) + 1.0 if not pd.isna(row.get('xbid_vwap_eur')) else dam_spot + 1.0
-                bid_qty = 0.0
-                ask_qty = 0.0
-                vwap = row.get('xbid_vwap_eur', dam_spot)
-                dam_diff = round(vwap - dam_spot, 2)
+                # Real Nord Pool intraday data from the recorder (15-min QH contract); empty if not recorded
+                _m = _id_row(15, h_val, m_val)
+                bid_price, ask_price = _m.get('bid', np.nan), _m.get('ask', np.nan)
+                bid_qty, ask_qty = _m.get('bid_mw', np.nan), _m.get('ask_mw', np.nan)
+                vwap = _m.get('vwap', np.nan)
+                dam_diff = round(vwap - dam_spot, 2) if pd.notna(vwap) else np.nan
                 
                 # export-positive for display (see FLOW_CONVENTION_NOTE)
                 f_de = exp_pos(row.get('flow_de', row.get('scheduled_flow_mw', 0.0)))
                 f_nl = exp_pos(row.get('flow_nl', 0.0))
-                f_nord = exp_pos(row.get('flow_nordic', 0.0))
-                f_no = f_nord * 0.7
-                f_se = f_nord * 0.3
+                f_no = exp_pos(row['flow_no']) if 'flow_no' in row.index else np.nan
+                f_se = exp_pos(row['flow_se']) if 'flow_se' in row.index else np.nan
                 f_gb = exp_pos(row.get('flow_gb', 0.0))
                 f_sb = exp_pos(row.get('flow_great_belt', 0.0))
                 
@@ -2255,7 +2280,9 @@ with tab_xbid:
                 pnl_quarter_41 = row.get('PnL_V4_1', np.nan) if is_settled else np.nan
                 pnl_quarter_40 = row.get('PnL_V4_0', np.nan) if is_settled else np.nan
 
-                if dam_diff <= -np_decouple_threshold:
+                if pd.isna(dam_diff):
+                    bias = "⚪ NO TRADES RECORDED"
+                elif dam_diff <= -np_decouple_threshold:
                     bias = f"🔴 CRASH BIAS ({dam_diff:+.1f} €)"
                 elif dam_diff >= np_decouple_threshold:
                     bias = f"🟢 SPIKE BIAS ({dam_diff:+.1f} €)"
@@ -2294,12 +2321,13 @@ with tab_xbid:
         avg_vwap = df_np['VWAP (€)'].mean()
         decoupled_crash_count = (df_np['DAM Spread (€)'] <= -np_decouple_threshold).sum()
         decoupled_spike_count = (df_np['DAM Spread (€)'] >= np_decouple_threshold).sum()
-        max_discount_row = df_np.loc[df_np['DAM Spread (€)'].idxmin()] if not df_np.empty else None
+        max_discount_row = df_np.loc[df_np['DAM Spread (€)'].idxmin()] if df_np['DAM Spread (€)'].notna().any() else None
 
         with kpi1:
             st.metric("Day-Ahead (DAM) Avg Spot", f"€ {avg_dam:.2f}")
         with kpi2:
-            st.metric("Intraday (VWAP) Avg Price", f"€ {avg_vwap:.2f}", f"{avg_vwap - avg_dam:+.2f} € vs DAM")
+            st.metric("Intraday (VWAP) Avg Price", f"€ {avg_vwap:.2f}" if pd.notna(avg_vwap) else "--",
+                      f"{avg_vwap - avg_dam:+.2f} € vs DAM" if pd.notna(avg_vwap) else "no recorded trades")
         with kpi3:
             st.metric("Decoupled Crash Products", f"{decoupled_crash_count} Products", f"≤ -€{np_decouple_threshold:.0f} Discount")
         with kpi4:
@@ -2321,6 +2349,7 @@ with tab_xbid:
         else:
             cable_cols = [f"{selected_area}\u2192DE (MW)", f"{selected_area}\u2192NO2 (MW)", f"{selected_area}\u2192SE (MW)", f"{selected_area}\u2192GB (MW)", f"{selected_area}\u2192NL (MW)", f"{selected_area}\u2192{'DK2' if selected_area == 'DK1' else 'DK1'} (MW)"]
 
+        _f = lambda v, fmt: fmt.format(v) if pd.notna(v) else "--"
         np_table_rows = []
         for idx, r in df_np.iterrows():
             is_decoupled_crash = (r['DAM Spread (€)'] <= -np_decouple_threshold)
@@ -2339,7 +2368,7 @@ with tab_xbid:
                 pnl_str = "--"
 
             settled_str = f"€{r['Settled Imb (€)']:.2f}" if pd.notna(r['Settled Imb (€)']) else "--"
-            cable_cells_html = "".join([f'<td style="text-align:right; font-weight:500; font-size:11px;">{r[c]:+.0f} MW</td>' for c in cable_cols])
+            cable_cells_html = "".join([f'<td style="text-align:right; font-weight:500; font-size:11px;">{_f(r[c], "{:+.0f} MW")}</td>' for c in cable_cols])
 
             bg_row = "#FFFFFF" if idx % 2 == 0 else "#F8FAFC"
             if is_decoupled_crash:
@@ -2352,19 +2381,19 @@ with tab_xbid:
                 <td style="padding:6px 8px; color:#64748B; font-size:10.5px; text-align:center;">{r['Close']}</td>
                 
                 <!-- BID LADDER -->
-                <td style="padding:6px 8px; background-color:#0F172A; color:#38BDF8; font-weight:600; text-align:right; font-size:11px;">{r['Bid Qty (MW)']:.1f}</td>
-                <td style="padding:6px 8px; background-color:#1E293B; color:#FFFFFF; font-weight:700; text-align:right; font-size:11.5px;">€{r['Bid Price (€)']:.2f}</td>
+                <td style="padding:6px 8px; background-color:#0F172A; color:#38BDF8; font-weight:600; text-align:right; font-size:11px;">{_f(r['Bid Qty (MW)'], '{:.1f}')}</td>
+                <td style="padding:6px 8px; background-color:#1E293B; color:#FFFFFF; font-weight:700; text-align:right; font-size:11.5px;">{_f(r['Bid Price (€)'], '€{:.2f}')}</td>
                 
                 <!-- ASK LADDER -->
-                <td style="padding:6px 8px; background-color:#F1F5F9; color:#0F172A; font-weight:700; text-align:right; font-size:11.5px;">€{r['Ask Price (€)']:.2f}</td>
-                <td style="padding:6px 8px; background-color:#F8FAFC; color:#64748B; font-weight:600; text-align:right; font-size:11px;">{r['Ask Qty (MW)']:.1f}</td>
+                <td style="padding:6px 8px; background-color:#F1F5F9; color:#0F172A; font-weight:700; text-align:right; font-size:11.5px;">{_f(r['Ask Price (€)'], '€{:.2f}')}</td>
+                <td style="padding:6px 8px; background-color:#F8FAFC; color:#64748B; font-weight:600; text-align:right; font-size:11px;">{_f(r['Ask Qty (MW)'], '{:.1f}')}</td>
                 
                 <!-- DAM SPOT -->
                 <td style="padding:6px 8px; text-align:right; font-size:11.5px;"><span style="{dam_style}">€{r['DAM Spot (€)']:.2f}</span></td>
                 
                 <!-- VWAP & SPREAD -->
-                <td style="padding:6px 8px; text-align:right; font-weight:600; font-size:11.5px; color:#0284C7;">€{r['VWAP (€)']:.2f}</td>
-                <td style="padding:6px 8px; text-align:right; font-weight:700; font-size:11px; color:{'#DC2626' if r['DAM Spread (€)'] < 0 else '#16A34A'};">{r['DAM Spread (€)']:+.2f} €</td>
+                <td style="padding:6px 8px; text-align:right; font-weight:600; font-size:11.5px; color:#0284C7;">{_f(r['VWAP (€)'], '€{:.2f}')}</td>
+                <td style="padding:6px 8px; text-align:right; font-weight:700; font-size:11px; color:{'#DC2626' if r['DAM Spread (€)'] < 0 else '#16A34A'};">{_f(r['DAM Spread (€)'], '{:+.2f} €')}</td>
                 <td style="padding:6px 8px; text-align:center;">{bias_badge}</td>
                 
                 <!-- CROSS BORDER TRANSMISSION -->
@@ -2453,57 +2482,58 @@ with tab_xbid:
     st.markdown("---")
     st.markdown("### 🔬 Level-2 Order Flow Microstructure & Continuous Queue Dynamics")
 
-    # Order flow engine snapshot
-    of_engine = OrderFlowEngineV41(price_area=selected_area)
-    of_snap = of_engine.generate_live_order_flow_snapshot()
-
-    of_c1, of_c2, of_c3, of_c4 = st.columns(4)
-    with of_c1:
-        st.metric("Total Bid Depth", f"{of_snap['total_bid_volume_mwh']:,.1f} MWh", "Top 5 Book Levels")
-    with of_c2:
-        st.metric("Total Ask Depth", f"{of_snap['total_ask_volume_mwh']:,.1f} MWh", "Top 5 Book Levels")
-    with of_c3:
-        st.metric("Order Flow Skewness", f"{of_snap['order_flow_skew']:+.2f}", f"{of_snap['liquidity_pressure']}")
-    with of_c4:
-        st.metric("Micro-Price Deviation", f"€ {of_snap['micro_price_dev_eur']:+.2f}", f"Mid: €{of_snap['mid_price_eur']:.2f}")
-
-    # Order book depth visualization
-    ob_col1, ob_col2 = st.columns([1.5, 1])
-    with ob_col1:
-        st.markdown("#### Live Level-2 Continuous Order Book Ladder (Top 5 Levels)")
-        bids_list = of_snap.get('bids', [])
-        if not bids_list:
-            bids_list = [{"level": i+1, "orders": 0, "volume_mw": 0.0, "price_eur": 0.0} for i in range(5)]
-        
-        asks_list = of_snap.get('asks', [])
-        if not asks_list:
-            asks_list = [{"level": i+1, "orders": 0, "volume_mw": 0.0, "price_eur": 0.0} for i in range(5)]
-            
-        bids_df = pd.DataFrame(bids_list)
-        asks_df = pd.DataFrame(asks_list)
-        
-        book_display = pd.DataFrame({
-            "Bid Orders": bids_df['orders'],
-            "Bid Vol (MW)": bids_df['volume_mw'],
-            "Bid Price (€)": bids_df['price_eur'].apply(lambda x: f"€ {x:.2f}"),
-            "Ask Price (€)": asks_df['price_eur'].apply(lambda x: f"€ {x:.2f}"),
-            "Ask Vol (MW)": asks_df['volume_mw'],
-            "Ask Orders": asks_df['orders']
-        })
-        st.dataframe(book_display, use_container_width=True, hide_index=True)
-
-    with ob_col2:
-        st.markdown("#### Depth Imbalance Profile")
-        depth_df = pd.DataFrame([
-            {"Side": "Total Bids (Buy Pressure)", "Volume (MW)": of_snap['total_bid_volume_mwh']},
-            {"Side": "Total Asks (Sell Pressure)", "Volume (MW)": of_snap['total_ask_volume_mwh']}
-        ])
-        c_depth = alt.Chart(depth_df).mark_bar().encode(
-            x='Volume (MW):Q',
-            y='Side:N',
-            color=alt.Color('Side:N', scale=alt.Scale(domain=['Total Bids (Buy Pressure)', 'Total Asks (Sell Pressure)'], range=['#00C851', '#ff4444']))
-        ).properties(height=200)
-        st.altair_chart(c_depth, use_container_width=True)
+    # Recorded Nord Pool order book (train_v4_1.py record-intraday). The recorder keeps the best
+    # bid/ask and the total volume on each side of every contract - not the full price ladder.
+    st.caption("Recorded Nord Pool order book: best bid/ask with volume, and the total volume and number of "
+               "orders on each side (up to 100 per side, as delivered by the feed). Individual price levels are not recorded.")
+    _now = pd.Timestamp.now(tz="UTC").tz_localize(None)
+    _open = _idm[(_idm['dlvry_start_utc'] > _now) & (_idm['duration_min'] == 15)
+                 & (_idm['bid'].notna() | _idm['ask'].notna())].head(8) if not _idm.empty else pd.DataFrame()
+    if _open.empty:
+        st.info("No open 15-minute contracts with a recorded order book for this day.")
+    else:
+        _tb, _ta = _open['depth_bid_mw'].sum(), _open['depth_ask_mw'].sum()
+        _nx = _open.iloc[0]
+        of_c1, of_c2, of_c3, of_c4 = st.columns(4)
+        with of_c1:
+            st.metric("Total Bid Depth (next 8 QH)", f"{_tb:,.1f} MW")
+        with of_c2:
+            st.metric("Total Ask Depth (next 8 QH)", f"{_ta:,.1f} MW")
+        with of_c3:
+            _sk = (_tb - _ta) / (_tb + _ta) if (_tb + _ta) > 0 else np.nan
+            st.metric("Depth Imbalance (bid - ask)", f"{_sk:+.2f}" if pd.notna(_sk) else "--",
+                      "more buy interest" if (pd.notna(_sk) and _sk > 0) else ("more sell interest" if pd.notna(_sk) else ""))
+        with of_c4:
+            _mid = (_nx['bid'] + _nx['ask']) / 2 if pd.notna(_nx['bid']) and pd.notna(_nx['ask']) else np.nan
+            st.metric(f"Next contract mid ({_nx['dlvry_start_local']:%H:%M})", f"€ {_mid:.2f}" if pd.notna(_mid) else "--",
+                      f"spread €{_nx['ask'] - _nx['bid']:.2f}" if pd.notna(_mid) else "")
+        ob_col1, ob_col2 = st.columns([1.5, 1])
+        with ob_col1:
+            st.markdown("#### Order Book - Next Open Quarter-Hour Contracts")
+            _fmt = lambda v, f: f.format(v) if pd.notna(v) else "--"
+            st.dataframe(pd.DataFrame({
+                "Delivery": _open['dlvry_start_local'].dt.strftime('%H:%M'),
+                "Bid Vol (MW)": _open['bid_mw'].map(lambda v: _fmt(v, "{:.1f}")),
+                "Bid Price (€)": _open['bid'].map(lambda v: _fmt(v, "€ {:.2f}")),
+                "Ask Price (€)": _open['ask'].map(lambda v: _fmt(v, "€ {:.2f}")),
+                "Ask Vol (MW)": _open['ask_mw'].map(lambda v: _fmt(v, "{:.1f}")),
+                "Total Bid (MW)": _open['depth_bid_mw'].map(lambda v: _fmt(v, "{:.1f}")),
+                "Total Ask (MW)": _open['depth_ask_mw'].map(lambda v: _fmt(v, "{:.1f}")),
+                "VWAP (€)": _open['vwap'].map(lambda v: _fmt(v, "€ {:.2f}")),
+                "DAM (€)": _open['dam'].map(lambda v: _fmt(v, "€ {:.2f}")),
+            }), use_container_width=True, hide_index=True)
+        with ob_col2:
+            st.markdown("#### Depth Imbalance Profile")
+            depth_df = pd.DataFrame([
+                {"Side": "Total Bids (Buy Pressure)", "Volume (MW)": _tb},
+                {"Side": "Total Asks (Sell Pressure)", "Volume (MW)": _ta}
+            ])
+            c_depth = alt.Chart(depth_df).mark_bar().encode(
+                x='Volume (MW):Q',
+                y='Side:N',
+                color=alt.Color('Side:N', scale=alt.Scale(domain=['Total Bids (Buy Pressure)', 'Total Asks (Sell Pressure)'], range=['#00C851', '#ff4444']))
+            ).properties(height=200)
+            st.altair_chart(c_depth, use_container_width=True)
 
 # ----------------------------------------------------------------------
 # TAB 5: GRID SEARCH MODEL TRANSPARENCY

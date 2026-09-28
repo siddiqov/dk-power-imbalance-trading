@@ -44,6 +44,11 @@ class _CorruptedBuilder(IntradayFeatureBuilder):
             f.loc[f.index - self.f1h_before > a] = JUNK
 
 
+    def _mfrr_raw_hook(self, raw) -> None:
+        if raw is not None and len(raw):
+            t = pd.to_datetime(raw["time_utc"])
+            raw.loc[(t + Q + self.lag_fast > self._as_of).values, ["total_up_mw", "total_down_mw"]] = JUNK
+
     def _before_derive(self, raw: dict) -> None:
         a, cfg = self._as_of, self._cfg0
         tz = cfg["local_tz"]
@@ -83,9 +88,10 @@ def run(store, cfg, n_samples: int = 8, seed: int = 7, areas=None) -> list[str]:
         t = target_frame(clean, area, cfg)
         idx = rng.choice(np.arange(5000, len(t)), size=n_samples, replace=False)
         for _, row in t.iloc[idx].iterrows():
-            leads = [cfg["intraday"]["gate_lead_minutes"]] + list(cfg["intraday"].get("train_extra_leads_minutes") or [])
-            for lead in leads:
-                a = row["quarter_utc"] - pd.Timedelta(minutes=int(lead))
+            # the real decision time of this quarter (gate or batch schedule) + the extra training leads
+            as_ofs = [pd.Timestamp(row["as_of_trade"])] + [row["quarter_utc"] - pd.Timedelta(minutes=m)
+                                                          for m in cfg.train_extra_leads]
+            for a in as_ofs:
                 tgt = pd.DataFrame({"quarter_utc": [row["quarter_utc"]], "as_of_utc": [a]})
                 x0 = clean.build(area, tgt)
                 x1 = _CorruptedBuilder(store, cfg, a).build(area, tgt)

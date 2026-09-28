@@ -104,7 +104,7 @@ def day_ledger(area: str, date_str: str, view: str = "locked") -> tuple[pd.DataF
             else:
                 rec = {c: np.nan for c in DEC_COLS}
                 rec["action"] = "HOLD"
-            gate_passed = (q - lead) <= now
+            gate_passed = cfg.deadlines([q]).iloc[0] <= now    # gate (gate mode) / batch deadline
             if view == "locked":
                 rec["source"] = "NO RECORD" if gate_passed else "FORECAST"
                 rec["pnl_eur"] = np.nan        # only locked decisions earn PnL in this view
@@ -123,7 +123,9 @@ def day_ledger(area: str, date_str: str, view: str = "locked") -> tuple[pd.DataF
     out["spread_actual"] = pd.to_numeric(out["spread_actual"], errors="coerce")
     out.loc[out["spread_actual"].isna() & out["source"].isin(["LOCKED", "MISSED", "RECOMPUTED"]),
             "spread_actual"] = store_spread
-    out["pred_imb_eur"] = out["spot_price_eur"] + pd.to_numeric(out["exp_spread"], errors="coerce")
+    # median forecast (q50) where available; the probability-weighted mean otherwise
+    _pred = pd.to_numeric(out["q50"], errors="coerce").fillna(pd.to_numeric(out["exp_spread"], errors="coerce"))
+    out["pred_imb_eur"] = out["spot_price_eur"] + _pred
     return out, info
 
 
