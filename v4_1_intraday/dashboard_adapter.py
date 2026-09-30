@@ -299,6 +299,34 @@ def _pnl(d: pd.DataFrame, cost: float) -> pd.DataFrame:
     return d
 
 
+def _overlay_journal(out: pd.DataFrame, cfg, area: str) -> pd.DataFrame:
+    """Replace recomputed decisions with the locked paper-trading decisions where they exist."""
+    if out.empty:
+        return out
+    try:
+        from . import journal as J
+        j = J.read(cfg, area=area, start=out["quarter_utc"].min(),
+                   end=out["quarter_utc"].max() + pd.Timedelta(minutes=15))
+    except Exception:
+        j = pd.DataFrame()
+    if not len(j):
+        return out
+    j = j.drop_duplicates("quarter_utc", keep="last").set_index("quarter_utc")
+    idx = out["quarter_utc"].isin(j.index)
+    k = out.loc[idx, "quarter_utc"]
+    for col in ("action", "mwh", "edge", "exp_spread", "p_up", "p_flat", "p_down", "q10", "q50", "q90", "reason"):
+        if col in j.columns:
+            vals = k.map(j[col])
+            keep = vals.notna()
+            out.loc[vals[keep].index, col] = vals[keep]
+    out.loc[idx, "source"] = k.map(j["status"]).values
+    out.loc[idx, "decision_final"] = True
+    jp = k.map(j["pnl_eur"])
+    out.loc[jp[jp.notna()].index, "pnl_eur"] = jp[jp.notna()]
+    out["mwh"] = out["mwh"].astype(float)
+    return out
+
+
 def day_decisions_risked(area: str, date_str: str, levels=("validated",), now=None,
                         risk_overrides: dict | None = None) -> dict:
     """Decisions for one local day with the SAME risk overlay the walk-forward replay applies.
@@ -339,6 +367,9 @@ def day_decisions_risked(area: str, date_str: str, levels=("validated",), now=No
         r = r[r["time_dk_str"].str.startswith(date_str)].copy()
         r = _pnl(r, cost)
         r["source"] = "risk-managed"
+        if lvl == "validated":
+            # 2026-09-29: show what was actually LOCKED and traded (journal), not a recomputation
+            r = _overlay_journal(r, cfg, area)
         r["level"] = lvl
         out[lvl] = r.reset_index(drop=True)
     return out

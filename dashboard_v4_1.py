@@ -247,7 +247,7 @@ crash_protection_enabled = True
 threshold_level = st.sidebar.selectbox(
     "V4.1 Signal Thresholds",
     ["Validated (from training)", "Balanced (what-if)", "Aggressive (what-if)"],
-    index=2,  # default: Aggressive (what-if); key= means index is only used on first load
+    index=0,  # default: Validated = the thresholds that actually trade (locked journal); 2026-09-29
     key="threshold_level",  # persists selection across reruns within the same session
     help="Validated uses the margin / probability pair tuned on held-out data. The what-if levels halve or quarter the margin and lower the probability bar, so more quarters qualify - more trades, more exposure, and no validation behind them.")
 # The walk-forward replay has always applied a daily loss stop and drawdown scaling; until now
