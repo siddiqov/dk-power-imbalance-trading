@@ -31,7 +31,7 @@ git read-tree origin/%BRANCH% >> "%LOG%" 2>&1 || goto :fail
 echo Collecting files (this takes a minute) ...
 REM (logs\ and Nurex_V4_2\data\ are already ignored by git, so they are not listed here -
 REM  naming an ignored folder makes "git add" fail)
-git -c core.autocrlf=true -c core.safecrlf=false -c advice.addIgnoredFile=false add -A -- . ":(exclude)results" ":(exclude)backups" ":(exclude)data" ":(exclude)_drive_transfer" ":(exclude)Nurex_V4_2/batches" ":(exclude,glob)models_v*/**" ":(exclude,glob)**/*.pkl" ":(exclude,glob)**/*.db" ":(exclude,glob)**/*.duckdb*" ":(exclude,glob)**/*.sqlite*" ":(exclude,glob)**/*.parquet" ":(exclude,glob)**/.env*" >> "%LOG%" 2>&1 || goto :fail
+git -c core.autocrlf=true -c core.safecrlf=false -c advice.addIgnoredFile=false add -A -- . ":(exclude)results" ":(exclude)backups" ":(exclude,glob)_backup_*/**" ":(exclude)data" ":(exclude)_drive_transfer" ":(exclude)Nurex_V4_2/batches" ":(exclude,glob)models_v*/**" ":(exclude,glob)**/*.pkl" ":(exclude,glob)**/*.db" ":(exclude,glob)**/*.duckdb*" ":(exclude,glob)**/*.sqlite*" ":(exclude,glob)**/*.parquet" ":(exclude,glob)**/.env*" >> "%LOG%" 2>&1 || goto :fail
 
 git diff --cached --quiet origin/%BRANCH% && (
   echo.

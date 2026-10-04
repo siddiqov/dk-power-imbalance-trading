@@ -49,12 +49,21 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
 
 
-def path(cfg) -> Path:
-    return cfg.path("journal_path") if "journal_path" in cfg.raw else cfg.path("models_dir").parent / "data" / "v41_journal.sqlite"
+def path(cfg, shadow: bool = False) -> Path:
+    """Main journal = the decisions sent to the client (each zone's recommended model).
+    shadow=True = the comparison journal: LightGBM in zones whose recommended model is not
+    LightGBM (2026-10-04). It is locked and settled the same way but never reaches the client."""
+    p = cfg.path("journal_path") if "journal_path" in cfg.raw else cfg.path("models_dir").parent / "data" / "v41_journal.sqlite"
+    return p.with_name(p.stem + "_shadow_lgbm" + p.suffix) if shadow else p
 
 
-def connect(cfg) -> sqlite3.Connection:
-    p = path(cfg)
+def shadow_areas(cfg) -> list[str]:
+    """Zones that also run LightGBM in the shadow journal."""
+    return [a for a in cfg["areas"] if P.recommended_family(cfg, a) != "lgbm"]
+
+
+def connect(cfg, shadow: bool = False) -> sqlite3.Connection:
+    p = path(cfg, shadow)
     p.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(str(p), timeout=30)
     con.executescript(SCHEMA)
@@ -76,8 +85,8 @@ def journal_start(con) -> pd.Timestamp | None:
     return pd.Timestamp(r[0]) if r else None
 
 
-def read(cfg, area: str | None = None, start=None, end=None) -> pd.DataFrame:
-    p = path(cfg)
+def read(cfg, area: str | None = None, start=None, end=None, shadow: bool = False) -> pd.DataFrame:
+    p = path(cfg, shadow)
     if not p.exists():
         return pd.DataFrame(columns=COLS)
     con = sqlite3.connect(str(p), timeout=30)
@@ -304,12 +313,18 @@ def _fallback_buy_ok(con, area: str, cfg, now) -> tuple[bool, float]:
     return ok, net
 
 
-def lock(store, cfg, now=None, fb=None, bundles=None) -> dict:
+def lock(store, cfg, now=None, fb=None, bundles=None, shadow: bool = False) -> dict:
+    """shadow=False: lock each zone's recommended model into the main journal (+ client batch
+    files). shadow=True: lock LightGBM for the zones in shadow_areas() into the shadow journal
+    (no batch files)."""
     now = pd.Timestamp(now) if now is not None else pd.Timestamp.now(tz="UTC").tz_localize(None)
     ahead = pd.Timedelta(minutes=int(cfg["intraday"].get("lock_ahead_minutes", 20)))
     # longest distance between a quarter and its deadline (batch: last quarter of the hour)
     span = pd.Timedelta(hours=8)
-    con = connect(cfg)
+    areas = shadow_areas(cfg) if shadow else list(cfg["areas"])
+    if not areas:
+        return {}
+    con = connect(cfg, shadow)
     out = {}
     try:
         start = journal_start(con)
@@ -319,10 +334,19 @@ def lock(store, cfg, now=None, fb=None, bundles=None) -> dict:
             con.execute("INSERT OR REPLACE INTO meta VALUES ('mode', ?)", (cfg.mode,))
             con.commit()
         fb = fb or IntradayFeatureBuilder(store, cfg)
-        for area in cfg["areas"]:
+        for area in areas:
             b = (bundles or {}).get(area)
             if b is None:
-                mp = P.model_path(cfg, area)
+                mp = P.model_path(cfg, area, "lgbm" if shadow else None)
+                if not mp.exists() and not shadow and P.recommended_family(cfg, area) != "lgbm":
+                    # 2026-10-04 safety net: the recommended model is not trained yet on this
+                    # machine (e.g. just after a code update) -> keep trading with LightGBM
+                    # instead of sending nothing, until `train` has produced the new model.
+                    alt = P.model_path(cfg, area, "lgbm")
+                    if alt.exists():
+                        log.warning("[%s] %s model missing (%s) - locking with V4.1 LightGBM until it is trained",
+                                    area, P.recommended_family(cfg, area), mp.name)
+                        mp = alt
                 if not mp.exists():
                     log.warning("[%s] no %s-mode model - run `train_v4_1.py%s train`", area, cfg.mode,
                                 " --mode batch" if cfg.batch_mode else "")
@@ -379,22 +403,24 @@ def lock(store, cfg, now=None, fb=None, bundles=None) -> dict:
                 con.execute(f"INSERT OR IGNORE INTO decisions ({','.join(keys)}) VALUES ({','.join('?' * len(keys))})",
                             [row[k] for k in keys])
             con.commit()
-            if cfg.batch_mode and future:
+            if cfg.batch_mode and future and not shadow:
                 try:
                     write_batch_files(cfg, area, [r for r in rows if r.get("status") == "LOCKED"])
                 except Exception as e:          # a file problem must never undo the lock
                     log.error("[%s] batch file not written: %s", area, e)
             out[area] = {"locked": len(future), "missed": len(missed),
                          "trades": int(sum(1 for r in rows if r["action"] != "HOLD"))}
-            log.info("[%s] journal: %s", area, out[area])
+            log.info("[%s] %sjournal: %s", area, "shadow LightGBM " if shadow else "", out[area])
     finally:
         con.close()
     return out
 
 
-def settle(store, cfg, now=None) -> int:
+def settle(store, cfg, now=None, shadow: bool = False) -> int:
     now = pd.Timestamp(now) if now is not None else pd.Timestamp.now(tz="UTC").tz_localize(None)
-    con = connect(cfg)
+    if shadow and not path(cfg, True).exists():
+        return 0
+    con = connect(cfg, shadow)
     n = 0
     try:
         open_rows = pd.read_sql_query(
@@ -427,8 +453,8 @@ def settle(store, cfg, now=None) -> int:
     return n
 
 
-def summary(cfg, days: int | None = None) -> pd.DataFrame:
-    j = read(cfg)
+def summary(cfg, days: int | None = None, shadow: bool = False) -> pd.DataFrame:
+    j = read(cfg, shadow=shadow)
     if j.empty:
         return pd.DataFrame()
     if days:

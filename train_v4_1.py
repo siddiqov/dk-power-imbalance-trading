@@ -31,6 +31,10 @@ point-in-time store (Nurex_V4_2/data/nurex42.duckdb).
   python train_v4_1.py --mode batch replay    walk-forward replay at the batch schedule
   python train_v4_1.py journal [--days 30]    locked-decision performance per zone
 
+  Models (2026-10-04, config_v41.yaml `models.recommended`): each zone's recommended model is
+  locked and sent to the client; where that is not LightGBM, LightGBM also runs in a shadow
+  journal for comparison. --family lgbm|logreg picks one model for replay / train / predict.
+
 Simulation / research only - no orders are sent.
 """
 from __future__ import annotations
@@ -88,12 +92,13 @@ def cmd_replay(args, cfg):
     out_dir.mkdir(parents=True, exist_ok=True)
     summary = {}
     for a in areas:
-        out = P.walk_forward(st, cfg, a, fb=fb)
-        path = out_dir / f"replay_{a}_{stamp}.md"
+        fam = getattr(args, "family", None) or P.recommended_family(cfg, a)
+        out = P.walk_forward(st, cfg, a, fb=fb, family=fam)
+        path = out_dir / f"replay_{a}{'' if fam == 'lgbm' else '_' + fam}_{stamp}.md"
         rep = R.write(out, cfg, path)
-        summary[a] = {"trading": rep["trading"], "forecast": rep["forecast"], "direction": rep["direction"]}
+        summary[a] = {"family": fam, "trading": rep["trading"], "forecast": rep["forecast"], "direction": rep["direction"]}
         tm = rep["trading"]
-        print(f"[{a}] trades={tm['trades']} MWh={tm['mwh_traded']:.0f} net={tm['net_eur']:,.0f} EUR "
+        print(f"[{a} {fam}] trades={tm['trades']} MWh={tm['mwh_traded']:.0f} net={tm['net_eur']:,.0f} EUR "
               f"({tm['net_eur_per_mwh']:.2f} EUR/MWh), at 2x costs {tm['net_eur_at_stress_costs']:,.0f} EUR, "
               f"max DD {tm['max_drawdown_eur']:,.0f} EUR -> {path}")
     (out_dir / f"replay_summary_{stamp}.json").write_text(
@@ -102,29 +107,54 @@ def cmd_replay(args, cfg):
 
 
 def cmd_train(args, cfg):
+    """Train every model a zone runs: its recommended model (decisions to the client) and, where
+    that is not LightGBM, LightGBM as well (shadow journal + dashboard comparison)."""
     st = _store(cfg)
     fb = IntradayFeatureBuilder(st, cfg)
     for a in [args.area] if args.area else cfg["areas"]:
-        b = P.train_final(st, cfg, a, fb=fb)
-        path = P.model_path(cfg, a)
-        b.save(path)
-        imp = b.model.feature_importance().head(15).round(2)
-        print(f"[{a}] saved {path}  n_train={b.n_train}  trained_until={b.trained_until}")
-        print(f"[{a}] decision params: {b.decision_params}")
-        print(imp.to_string())
-        (path.with_suffix(".json")).write_text(json.dumps({
-            "area": a, "version": b.version, "n_train": b.n_train, "trained_until": str(b.trained_until),
-            "decision_params": b.decision_params, "cost_eur_mwh": cfg.cost_per_mwh,
-            "gate_lead_minutes": cfg["intraday"]["gate_lead_minutes"],
-            "mode": cfg.mode, "schedule": cfg.schedule_text(),
-            "batch_schedule": cfg.bs if cfg.batch_mode else None,
-            "feature_importance_top15": imp.to_dict()}, indent=2, default=str), encoding="utf-8")
+        fams = [args.family] if getattr(args, "family", None) else P.families_for(cfg, a)
+        cache = {}                        # one point-in-time feature build per zone
+        for fam in fams:
+            b = P.train_final(st, cfg, a, fb=fb, family=fam, design_cache=cache)
+            path = P.model_path(cfg, a, fam)
+            b.save(path)
+            imp = b.model.feature_importance().head(15).round(2)
+            role = "recommended (client)" if fam == P.recommended_family(cfg, a) else "comparison (shadow)"
+            print(f"[{a} {fam}] {role}: saved {path}  n_train={b.n_train}  trained_until={b.trained_until}")
+            lr = (b.decision_params or {}).get("logreg")
+            if lr:
+                print(f"[{a} {fam}] chosen C={lr['C']} class_weight={lr['class_weight']}")
+            print(f"[{a} {fam}] decision params: "
+                  f"{ {k: v for k, v in (b.decision_params or {}).items() if k != 'logreg'} }")
+            print(imp.to_string())
+            (path.with_suffix(".json")).write_text(json.dumps({
+                "area": a, "family": fam, "family_label": P.FAMILY_LABEL.get(fam, fam), "role": role,
+                "version": b.version, "n_train": b.n_train, "trained_until": str(b.trained_until),
+                "decision_params": b.decision_params, "cost_eur_mwh": cfg.cost_per_mwh,
+                "gate_lead_minutes": cfg["intraday"]["gate_lead_minutes"],
+                "mode": cfg.mode, "schedule": cfg.schedule_text(),
+                "batch_schedule": cfg.bs if cfg.batch_mode else None,
+                "feature_importance_top15": imp.to_dict()}, indent=2, default=str), encoding="utf-8")
+            if lr:
+                _append_logreg_history(cfg, a, b, lr)
     st.close()
+
+
+def _append_logreg_history(cfg, area, b, lr):
+    """One line per retrain: which C / class weight the logistic model chose (dashboard history)."""
+    p = cfg.path("models_dir") / f"logreg_choices_{area}.csv"
+    row = pd.DataFrame([{"trained_at_utc": pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d %H:%M"),
+                         "trained_until": str(b.trained_until), "C": lr["C"], "class_weight": lr["class_weight"] or "none",
+                         "val_pnl_eur": max((c["val_pnl_eur"] for c in lr.get("candidates", [])), default=None),
+                         "buy": json.dumps(b.decision_params.get("buy")), "sell": json.dumps(b.decision_params.get("sell"))}])
+    row.to_csv(p, mode="a", header=not p.exists(), index=False)
 
 
 def cmd_predict(args, cfg):
     st = _store(cfg)
-    b = P.IntradayBundle.load(P.model_path(cfg, args.area))
+    fam = getattr(args, "family", None) or P.recommended_family(cfg, args.area)
+    b = P.IntradayBundle.load(P.model_path(cfg, args.area, fam))
+    print(f"[{args.area}] model: {P.FAMILY_LABEL.get(fam, fam)} ({b.version})")
     day = args.day or tu.to_local(tu.utcnow(), cfg["local_tz"]).strftime("%Y-%m-%d")
     qs = tu.local_day_quarters(day, cfg["local_tz"])
     out = P.predict_quarters(st, cfg, b, qs)
@@ -135,7 +165,7 @@ def cmd_predict(args, cfg):
             "q10", "q90", "action", "mwh", "edge", "spread_actual"]
     pd.set_option("display.width", 200)
     print(out[cols].round(2).to_string(index=False))
-    path = cfg.path("reports_dir") / f"decisions_{args.area}_{day}.csv"
+    path = cfg.path("reports_dir") / f"decisions_{args.area}{'' if fam == 'lgbm' else '_' + fam}_{day}.csv"
     path.parent.mkdir(parents=True, exist_ok=True)
     out.to_csv(path, index=False)
     print("->", path)
@@ -258,9 +288,18 @@ def cmd_lock(args, cfg):
     try:
         res = J.lock(st, cfg)
         n = J.settle(st, cfg)
+        # comparison model (LightGBM where it is not the recommended model): never blocks the main lock
+        try:
+            res_s = J.lock(st, cfg, shadow=True)
+            n_s = J.settle(st, cfg, shadow=True)
+        except Exception as e:
+            res_s, n_s = f"failed: {e}", 0
+            log.error("shadow LightGBM lock failed: %s", e)
     finally:
         st.close()
     print(f"locked: {res} | settled now: {n}")
+    if res_s:
+        print(f"shadow LightGBM locked: {res_s} | settled now: {n_s}")
 
 
 def cmd_backfill(args, cfg):
@@ -308,6 +347,11 @@ def cmd_journal(args, cfg):
         return
     print(s.to_string(index=False))
     print(f"journal file: {J.path(cfg)}")
+    sh = J.summary(cfg, days=args.days, shadow=True)
+    if not sh.empty:
+        print("\nshadow LightGBM (comparison, not sent to the client):")
+        print(sh.to_string(index=False))
+        print(f"journal file: {J.path(cfg, shadow=True)}")
 
 
 def cmd_all(args, cfg):
@@ -333,9 +377,12 @@ def main():
     sub.add_parser("update")
     sp = sub.add_parser("leaktest"); sp.add_argument("--samples", type=int, default=5)
     sp = sub.add_parser("replay"); sp.add_argument("--area")
+    sp.add_argument("--family", choices=list(P.FAMILIES), help="model to replay (default: the zone's recommended model)")
     sp.add_argument("--out", help="write the replay reports here instead of reports_dir (evaluation runs)")
     sp = sub.add_parser("train"); sp.add_argument("--area")
+    sp.add_argument("--family", choices=list(P.FAMILIES), help="train only this model (default: all the zone runs)")
     sp = sub.add_parser("predict"); sp.add_argument("--area", required=True); sp.add_argument("--day")
+    sp.add_argument("--family", choices=list(P.FAMILIES), help="default: the zone's recommended model")
     sp = sub.add_parser("all"); sp.add_argument("--area"); sp.add_argument("--samples", type=int, default=5)
     sp = sub.add_parser("collect"); sp.add_argument("--source"); sp.add_argument("--start")
     sub.add_parser("sources")

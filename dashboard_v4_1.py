@@ -11,8 +11,9 @@ load_dotenv()
 # 2. European Balancing Platforms: MARI (mFRR) & PICASSO (aFRR) Merit Order Energy Activation
 # 3. SMARD.de (Bundesnetzagentur): German Grid Imbalance & Residual Load Integration
 # 4. Nord Pool XBID: Level-2 Continuous Order Flow Microstructure & Volume Skewness Meter
-# 5. Side-by-Side Unified Comparative Ledger (V4.0 vs V4.1)
-# 6. Quantitative Tournament Backtest (V4.0 vs V4.1)
+# 5. Side-by-Side Unified Comparative Ledger (V4.1 recommended model vs V4.1 LightGBM)
+# 6. Model Tournament (current V4.1 LightGBM vs V4.1 recommended model)
+#    2026-10-04: the legacy V4.0 model was removed from this dashboard.
 # ==============================================================================
 
 import os
@@ -43,7 +44,7 @@ FLOW_STATUS = {}
 # ENTSO-E series (the ledger's per-quarter columns) already follow it.
 # Energinet's live Exchange_* series are the exact mirror - verified against
 # ENTSO-E phys:DK1>X on 2026-09-18 (correlation -1.000) - so they are negated
-# for display only. The V4.0 model keeps the raw sign it was trained on.
+# for display only.
 FLOW_CONVENTION_NOTE = ("Flow sign convention: **positive = export out of "
                         "the zone**, negative = import into it (ENTSO-E convention).")
 
@@ -192,7 +193,7 @@ st.markdown("""
 
 # --- SIDEBAR CONTROLLER ---
 st.sidebar.title("⚡ Nurex Trading Command Center")
-st.sidebar.caption("Legacy V2/V3 tournament models + V4.1 Intraday (rebuilt) | Port 5005")
+st.sidebar.caption("V4.1 Intraday: current LightGBM + recommended model | Port 5005")
 
 # --- AUTO-REFRESH: current trade status every 15 min, matching the scheduled trading
 # cycle - or refresh immediately any time with the button below.
@@ -218,15 +219,6 @@ with st.sidebar:
 # 1. Market Bidding Zone & Strategy
 selected_area = st.sidebar.radio("Bidding Zone", ["DK1", "DK2"], index=0)
 
-strategy_mode = st.sidebar.selectbox(
-    "Trading Strategy Engine",
-    [
-        "V4.1 Institutional High-Alpha (Balancing + SMARD + XBID)",
-        "V4.0 Full-Grid Champion (Grid Search Tuned)"
-    ],
-    index=0
-)
-
 # 2. Trading Date
 dk_now = pd.Timestamp.now(tz="Europe/Copenhagen")
 default_date = dk_now.date()
@@ -234,21 +226,65 @@ selected_date = st.sidebar.date_input("Trading Date", value=default_date)
 date_str_selected = selected_date.strftime("%Y-%m-%d")
 
 # 3. Risk & Execution Parameters
-# Circuit breaker, crash protection, and evening ramping guard checkboxes removed 2026-09-19:
-# all three only ever adjusted the legacy V4.0 comparison column's simulated decisions, never
-# V4.1's real trading decisions. Circuit breaker and crash protection now always apply (their
-# previous default), matching what the legacy column always showed.
-use_circuit_breaker = True
-crash_protection_enabled = True
-
 # V4.1 decides a quarter only when expected edge clears a margin AND the direction probability
 # clears a minimum. Those two numbers were chosen on the validation window during training.
 # The looser levels are a what-if view of the SAME forecasts at a lower bar - not validated.
+# 2026-10-04: default = Aggressive (what-if). The last manual choice is remembered across browser
+# refreshes and new tabs: kept in the page URL (?thr=...) and in a small file on this machine.
+THRESHOLD_OPTIONS = ["Validated (from training)", "Balanced (what-if)", "Aggressive (what-if)"]
+THRESHOLD_DEFAULT = "Aggressive (what-if)"
+_THR_CODE = {"Validated (from training)": "validated", "Balanced (what-if)": "balanced",
+             "Aggressive (what-if)": "aggressive"}
+UI_PREFS_PATH = os.path.join("results", "v4_1_intraday", "dashboard_prefs.json")
+
+
+def _load_ui_prefs() -> dict:
+    try:
+        with open(UI_PREFS_PATH, "r", encoding="utf-8") as _f:
+            return json.load(_f)
+    except Exception:
+        return {}
+
+
+def _save_threshold_choice():
+    lvl = st.session_state.get("threshold_level", THRESHOLD_DEFAULT)
+    code = _THR_CODE.get(lvl, "aggressive")
+    try:
+        st.query_params["thr"] = code
+    except Exception:
+        pass
+    try:
+        prefs = _load_ui_prefs()
+        prefs["threshold_level"] = code
+        os.makedirs(os.path.dirname(UI_PREFS_PATH), exist_ok=True)
+        with open(UI_PREFS_PATH, "w", encoding="utf-8") as _f:
+            json.dump(prefs, _f, indent=2)
+    except Exception as _e:
+        try:
+            _log_startup_error("saving dashboard threshold choice", _e)
+        except Exception:
+            pass
+
+
+if "threshold_level" not in st.session_state:          # first run of this browser session
+    _code_to_label = {v: k for k, v in _THR_CODE.items()}
+    try:
+        _url_code = st.query_params.get("thr")
+    except Exception:
+        _url_code = None
+    _saved = _code_to_label.get(_url_code) or _code_to_label.get(_load_ui_prefs().get("threshold_level"))
+    st.session_state["threshold_level"] = _saved or THRESHOLD_DEFAULT
+try:
+    if st.query_params.get("thr") != _THR_CODE.get(st.session_state["threshold_level"]):
+        st.query_params["thr"] = _THR_CODE.get(st.session_state["threshold_level"], "aggressive")
+except Exception:
+    pass
+
 threshold_level = st.sidebar.selectbox(
     "V4.1 Signal Thresholds",
-    ["Validated (from training)", "Balanced (what-if)", "Aggressive (what-if)"],
-    index=0,  # default: Validated = the thresholds that actually trade (locked journal); 2026-09-29
-    key="threshold_level",  # persists selection across reruns within the same session
+    THRESHOLD_OPTIONS,
+    key="threshold_level",  # value set above: URL -> saved choice -> default Aggressive
+    on_change=_save_threshold_choice,
     help="Validated uses the margin / probability pair tuned on held-out data. The what-if levels halve or quarter the margin and lower the probability bar, so more quarters qualify - more trades, more exposure, and no validation behind them.")
 # The walk-forward replay has always applied a daily loss stop and drawdown scaling; until now
 # the live view did not, so backtest and live were not the same system. With this on, they are.
@@ -270,8 +306,6 @@ if bigger_size_on:
 
 THRESHOLD_KEY = {"Validated (from training)": "validated", "Balanced (what-if)": "balanced",
                  "Aggressive (what-if)": "aggressive"}[threshold_level]
-high_conviction_vol = st.sidebar.slider("High-Conviction Trade Size (MW)", 10, 50, 25)
-standard_vol = st.sidebar.slider("Standard Trade Size (MW)", 5, 20, 10)
 
 # --- Interconnector rule: options to test -------------------------------------
 # Selection only. Nothing here changes a decision: an option is applied to trading
@@ -339,41 +373,44 @@ def _log_startup_error(where, exc):
         pass
 
 
-# Load V4.0 and V4.1 Models & Logs
+# Load the V4.1 models (2026-10-04): the zone's RECOMMENDED model (its decisions are locked and
+# sent to the client) and, where that is not LightGBM, the current V4.1 LightGBM for comparison.
+_MODEL_TEXT = {"lgbm": "LightGBM direction + regime size + quantiles",
+               "logreg": "Logistic regression direction (C / class weight chosen each retrain) + ridge size + LightGBM quantiles"}
+REC_FAMILY = v41id.recommended_family(selected_area) if hasattr(v41id, 'recommended_family') else 'lgbm'
+CMP_FAMILY = v41id.compare_family(selected_area) if hasattr(v41id, 'compare_family') else None
+REC_LABEL = v41id.family_label(REC_FAMILY) if hasattr(v41id, 'family_label') else 'V4.1 LightGBM'
+CMP_LABEL = v41id.family_label(CMP_FAMILY) if (CMP_FAMILY and hasattr(v41id, 'family_label')) else None
+REC_SHORT = {"lgbm": "LGBM", "logreg": "LogReg"}.get(REC_FAMILY, REC_FAMILY)
+
+
 @st.cache_resource(ttl=300)
-def load_models_and_logs(area):
-    # Load V4.0 Model
-    m4_path = f"models_v4/v4_champion_model_{area}.pkl"
-    m4_feat_path = f"models_v4/v4_features_{area}.pkl"
-    bundle_v4 = None
-    if os.path.exists(m4_path):
-        raw = joblib.load(m4_path)
-        if isinstance(raw, dict) and "model" in raw:
-            bundle_v4 = raw
-        else:
-            cols = joblib.load(m4_feat_path) if os.path.exists(m4_feat_path) else []
-            bundle_v4 = {"model": raw, "feature_cols": cols}
+def load_models_and_logs(area, rec_family, cmp_family):
+    # A failure here used to take the whole page down; the ledger still works without it, so
+    # log the traceback to logs/ and carry on with the model absent.
+    out = {}
+    for role, fam in (("rec", rec_family), ("cmp", cmp_family)):
+        if fam is None:
+            out[role] = (None, None)
+            continue
+        try:
+            out[role] = (v41id.load_bundle(area, fam), v41id.model_info(area, fam))
+        except Exception as _e:
+            out[role] = (None, None)
+            _log_startup_error(f'load_models_and_logs({area}, {fam})', _e)
+            st.sidebar.error(f'V4.1 {fam} model unavailable: {type(_e).__name__}: {_e}')
+    return out["rec"][0], out["rec"][1], out["cmp"][0], out["cmp"][1]
 
-    # Load V4.1 Intraday Model (trained by: python train_v4_1.py train)
-    # A failure here used to take the whole page down; the V4.0 side and the ledger still work
-    # without it, so log the traceback to logs/ and carry on with the V4.1 model absent.
-    try:
-        bundle_v41 = v41id.load_bundle(area)
-        log_v41 = v41id.model_info(area)
-    except Exception as _e:
-        bundle_v41, log_v41 = None, None
-        _log_startup_error(f'load_models_and_logs({area})', _e)
-        st.sidebar.error(f'V4.1 intraday model unavailable: {type(_e).__name__}: {_e}')
+bundle_v41, log_v41, bundle_cmp, log_cmp = load_models_and_logs(selected_area, REC_FAMILY, CMP_FAMILY)
 
-    return bundle_v4, bundle_v41, log_v41
-
-bundle_v4, bundle_v41, log_v41 = load_models_and_logs(selected_area)
-
-# 4. Champion Model Specifications Sidebar Box
+# 4. Model Specifications Sidebar Box
 if log_v41:
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### 🏆 V4.1 Intraday Model")
-    st.sidebar.markdown(f"**Model:** `LightGBM direction + regime size + quantiles`")
+    st.sidebar.markdown(f"### 🏆 {REC_LABEL} (recommended, sent to client)")
+    st.sidebar.markdown(f"**Model:** `{_MODEL_TEXT.get(REC_FAMILY, REC_FAMILY)}`")
+    _lr = (log_v41.get('decision_params') or {}).get('logreg') if isinstance(log_v41.get('decision_params'), dict) else None
+    if _lr:
+        st.sidebar.markdown(f"**Chosen this retrain:** `C = {_lr.get('C')}, class weight = {_lr.get('class_weight') or 'none'}`")
     st.sidebar.markdown(f"**Decision time:** `{log_v41.get('schedule') or ('delivery − ' + str(log_v41.get('gate_lead_minutes', 60)) + ' min')}`")
     st.sidebar.markdown(f"**Trained on:** `{log_v41.get('n_train', 0):,} quarters until {str(log_v41.get('trained_until', ''))[:16]} UTC`")
     st.sidebar.markdown(f"**Cost model:** `{log_v41.get('cost_eur_mwh', 0):.2f} EUR/MWh`")
@@ -386,8 +423,16 @@ if log_v41:
     st.sidebar.caption("Walk-forward replay, point-in-time features, leakage-tested. Simulation only. "
                        "Past days shown in the ledger use the CURRENT model (in-sample); the honest out-of-sample "
                        "history is the replay report in results/v4_1_intraday/.")
+    if CMP_FAMILY:
+        if log_cmp:
+            _dpc = log_cmp.get('decision_params', {}) or {}
+            st.sidebar.markdown(f"**Comparison:** {CMP_LABEL} (current model, shadow journal - not sent to client)  \n"
+                                f"BUY `{_dpc.get('buy') or 'off'}` / SELL `{_dpc.get('sell') or 'off'}`, "
+                                f"trained until `{str(log_cmp.get('trained_until', ''))[:16]}`")
+        else:
+            st.sidebar.caption(f"Comparison model {CMP_LABEL} not trained yet.")
 elif bundle_v41 is None:
-    st.sidebar.warning("V4.1 intraday model not trained yet: run `python train_v4_1.py all`")
+    st.sidebar.warning(f"{REC_LABEL} not trained yet: run `python train_v4_1.py --mode batch train --area {selected_area}`")
 
 with st.sidebar.expander("🔒 V4.1 paper-trading journal (locked decisions)", expanded=False):
     try:
@@ -400,6 +445,11 @@ with st.sidebar.expander("🔒 V4.1 paper-trading journal (locked decisions)", e
             st.dataframe(_js[["area", "trades", "mwh", "net_eur", "eur_per_mwh", "win_rate_pct", "missed_gates"]],
                          hide_index=True, use_container_width=True)
             st.caption("Only these locked decisions count as honest live performance.")
+        _jsh = _J.summary(v41id.config(), shadow=True) if 'shadow' in _J.summary.__code__.co_varnames else pd.DataFrame()
+        if not _jsh.empty:
+            st.markdown("**Shadow V4.1 LightGBM** (comparison, not sent to the client)")
+            st.dataframe(_jsh[["area", "trades", "mwh", "net_eur", "eur_per_mwh", "win_rate_pct"]],
+                         hide_index=True, use_container_width=True)
     except Exception as e:
         st.caption(f"journal unavailable: {e}")
 
@@ -491,7 +541,7 @@ def _by_local_minute(df):
     k = df['time_dk_str'].astype(str).str.slice(0, 16)
     return df.assign(_k=k.values).drop_duplicates('_k', keep='first').set_index('_k')
 
-# --- LOAD TRADING DAY DATA MATRIX (V4.0 and V4.1) ---
+# --- LOAD TRADING DAY DATA MATRIX (V4.1 recommended + V4.1 LightGBM comparison) ---
 @st.cache_data(ttl=180)
 def _diag_log(msg):
     try:
@@ -656,8 +706,8 @@ def get_v4_1_trading_day_data(area, date_str, threshold_key='validated', risk_li
     df_trades['de_spot_real'] = de_real.values
     df_trades['_de_src'] = de_src
 
-    # Scheduled DE flow for the legacy V4.0 features (kept separate so a failure here can no
-    # longer wipe out the DE price as it did when both lived in one try block)
+    # Scheduled DE flow (display fallback for the DE flow cells; kept separate so a failure here
+    # can no longer wipe out the DE price as it did when both lived in one try block)
     try:
         if client is None:
             raise RuntimeError('ENTSO-E client unavailable')
@@ -669,8 +719,8 @@ def get_v4_1_trading_day_data(area, date_str, threshold_key='validated', risk_li
         _log_startup_error(f'ENTSO-E DE scheduled flow ({date_str})', _e)
         df_trades['scheduled_flow_mw'] = 0.0
 
-    # Legacy V4.0 feature input only (dk_de_price_spread): its models cannot take NaN, so a
-    # missing DE price enters as "coupled" (spread 0). The ledger displays de_spot_real.
+    # Feature-matrix input (dk_de_price_spread) cannot take NaN, so a missing DE price enters as
+    # "coupled" (spread 0). The ledger displays de_spot_real.
     df_trades['de_spot_eur'] = df_trades['de_spot_real'].fillna(df_trades['spot_price_eur'])
 
     # Build High-Alpha Matrix (V4.1 Engine)
@@ -711,60 +761,6 @@ def get_v4_1_trading_day_data(area, date_str, threshold_key='validated', risk_li
     if 'V4_Spread_Volatility' not in df_matrix.columns:
         df_matrix['V4_Spread_Volatility'] = df_matrix['spot_price_eur'].rolling(12, min_periods=1).std().fillna(0)
 
-    # --- MODEL 1: V4.0 Full-Grid Model ---
-    if bundle_v4 and "model" in bundle_v4:
-        m4 = bundle_v4["model"]
-        cols4 = bundle_v4.get("feature_cols", [])
-        for c in cols4:
-            if c not in df_matrix.columns: df_matrix[c] = 0.0
-        X4 = df_matrix[cols4].ffill().bfill().fillna(0)
-        df_matrix['V4_Predicted_Spread_EUR'] = m4.predict(X4)
-    else:
-        df_matrix['V4_Predicted_Spread_EUR'] = df_matrix['V3_1_BiLSTM_Score']
-
-    df_matrix['V4_Pred_Imb_EUR'] = df_matrix['spot_price_eur'] + df_matrix['V4_Predicted_Spread_EUR']
-
-    v4_decisions, v4_vols, v4_pnls = [], [], []
-    for _, row in df_matrix.iterrows():
-        v4_score = row['V4_Predicted_Spread_EUR']
-        v31_score = row['V3_1_BiLSTM_Score']
-        spot = row['spot_price_eur']
-        cap = row['Dynamic_Cap_EUR']
-        surplus_mw = row.get('net_system_surplus_mw', 0.0)
-        if v4_score > 2.0:
-            base_decision, act = "🟢 BUY", "BUY"
-            vol = high_conviction_vol if (v4_score > 10.0 or v31_score > 8.0) else standard_vol
-        elif v4_score < -2.0:
-            base_decision, act = "🔴 SELL", "SELL"
-            vol = high_conviction_vol if (v4_score < -10.0 or v31_score < -8.0) else standard_vol
-        else:
-            base_decision, act, vol = "⚪ HOLD", "HOLD", 0.0
-
-        if surplus_mw > 400.0 and act == "BUY":
-            base_decision, act, vol = "⚪ SURPLUS DEFENSE (HOLD)", "HOLD", 0.0
-
-        if crash_protection_enabled and v4_score < -2.5 and v31_score > 1.5:
-            base_decision, act = "🔥 CRASH PRED (SELL)", "SELL"
-            vol = high_conviction_vol
-
-        if use_circuit_breaker and spot > cap and act == "BUY":
-            base_decision, act, vol = "🛑 C.BREAKER (HOLD)", "HOLD", 0.0
-
-        if row['is_settled']:
-            spread = row['actual_spread_eur']
-            mwh_q = vol * 0.25  # quarterly product: MW / 4 = MWh
-            fees = mwh_q * COST_EUR_MWH
-            pnl4 = (spread * mwh_q - fees) if act == "BUY" else (-spread * mwh_q - fees) if act == "SELL" else 0.0
-        else:
-            pnl4 = np.nan
-
-        v4_decisions.append(base_decision)
-        v4_vols.append(vol)
-        v4_pnls.append(pnl4)
-
-    df_matrix['V4_Decision'] = v4_decisions
-    df_matrix['V4_Volume_MW'] = v4_vols
-    df_matrix['PnL_V4_0'] = v4_pnls
 
     # --- MODEL 4: V4.1 Intraday (gate-closure, point-in-time) ---
     # Decisions come from v4_1_intraday: each quarter is decided with the information published
@@ -860,8 +856,42 @@ def get_v4_1_trading_day_data(area, date_str, threshold_key='validated', risk_li
     df_matrix['V4_1_Volume_MW'] = v41_vols
     df_matrix['PnL_V4_1'] = v41_pnls
 
-    # Comparative Alpha Metrics (Settled Intervals)
-    df_matrix['Alpha_V41_vs_V40'] = df_matrix['PnL_V4_1'] - df_matrix['PnL_V4_0']
+    # --- Comparison model: the current V4.1 LightGBM (zones whose recommended model is not
+    # LightGBM). Same day, same risk overlay and threshold level; locked rows come from the
+    # shadow journal. 2026-10-04 - replaces the legacy V4.0 comparison column.
+    df_matrix['CMP_Predicted_Spread_EUR'] = np.nan
+    df_matrix['CMP_Decision'] = ''
+    df_matrix['CMP_Volume_MW'] = np.nan
+    df_matrix['PnL_CMP'] = np.nan
+    if CMP_FAMILY and bundle_cmp is not None and key is not None:
+        try:
+            _risk_overrides = {"batch_risk_fraction": 0.2} if size_boost else None
+            if risk_limits and hasattr(v41id, 'day_decisions_risked'):
+                cmp = v41id.day_decisions_risked(area, date_str, levels=(threshold_key,), risk_overrides=_risk_overrides,
+                                                 family=CMP_FAMILY).get(threshold_key, pd.DataFrame())
+            else:
+                cmp = v41id.day_decisions(area, date_str, params=v41id.decision_params(area, threshold_key, CMP_FAMILY),
+                                          risk_overrides=_risk_overrides, family=CMP_FAMILY)
+        except Exception as e:
+            cmp = pd.DataFrame()
+            _log_startup_error(f'comparison day_decisions({area}, {date_str}, {CMP_FAMILY})', e)
+        if not cmp.empty:
+            mc = _by_local_minute(cmp)
+            pc = lambda c, d=np.nan: key.map(mc[c]).fillna(d) if c in mc.columns else pd.Series(d, index=key.index)
+            df_matrix['CMP_Predicted_Spread_EUR'] = pc('q50').fillna(pc('exp_spread', 0.0)).astype(float)
+            c_acts = key.map(mc['action']).fillna('HOLD')
+            c_src = key.map(mc['source']).fillna('recomputed') if 'source' in mc.columns else pd.Series('recomputed', index=key.index)
+            c_fin = key.map(mc['decision_final']).fillna(False)
+            df_matrix['CMP_Decision'] = [
+                ("🟢 BUY" if a_ == "BUY" else "🔴 SELL" if a_ == "SELL" else "⚪ HOLD")
+                + (" 🔒" if s_ == "LOCKED" else (" (missed gate)" if s_ == "MISSED" else ("" if f_ else " (provisional)")))
+                for a_, s_, f_ in zip(c_acts, c_src, c_fin)]
+            df_matrix['CMP_Volume_MW'] = pc('mwh', 0.0).astype(float) * 4.0
+            df_matrix['PnL_CMP'] = key.map(mc['pnl_eur']).astype(float).values
+    df_matrix['CMP_Pred_Imb_EUR'] = df_matrix['spot_price_eur'] + df_matrix['CMP_Predicted_Spread_EUR']
+
+    # Recommended vs comparison (settled quarters)
+    df_matrix['Alpha_Rec_vs_LGBM'] = df_matrix['PnL_V4_1'] - df_matrix['PnL_CMP']
 
     return df_matrix
 
@@ -893,17 +923,20 @@ st.markdown("### Real-Time MARI/PICASSO Balancing • SMARD German Grid • XBID
 
 settled_mask = df_day['is_settled'] if ('is_settled' in df_day.columns) else pd.Series([False]*len(df_day))
 v41_realized = float(np.nansum(df_day['PnL_V4_1'])) if not df_day.empty else 0.0
-v40_realized = df_day.loc[settled_mask, 'PnL_V4_0'].sum() if not df_day.empty else 0.0
-alpha_41_v40 = v41_realized - v40_realized
+cmp_realized = float(np.nansum(df_day['PnL_CMP'])) if (not df_day.empty and 'PnL_CMP' in df_day.columns) else 0.0
 open_vol_41 = df_day.loc[~settled_mask, 'V4_1_Volume_MW'].sum() if not df_day.empty else 0.0
 
 m1, m2, m3 = st.columns(3)
 with m1:
-    st.metric("V4.1 Realized PnL (Settled)", f"€ {v41_realized:,.2f}", f"{alpha_41_v40:+,.2f} vs V4.0")
+    st.metric(f"{REC_LABEL} Realized PnL (Settled)", f"€ {v41_realized:,.2f}",
+              f"{v41_realized - cmp_realized:+,.2f} vs {CMP_LABEL}" if CMP_FAMILY else "recommended = current model")
 with m2:
-    st.metric("V4.0 Realized PnL (Settled)", f"€ {v40_realized:,.2f}", "Full-Grid Champion")
+    if CMP_FAMILY:
+        st.metric(f"{CMP_LABEL} Realized PnL (Settled)", f"€ {cmp_realized:,.2f}", "current model (shadow)")
+    else:
+        st.metric("Recommended model", REC_LABEL, "same as the current model")
 with m3:
-    st.metric("Pending Exposure (V4.1)", f"{open_vol_41:.0f} MW", f"{len(df_day) - settled_mask.sum()} Quarters Pending")
+    st.metric(f"Pending Exposure ({REC_SHORT})", f"{open_vol_41:.0f} MW", f"{len(df_day) - settled_mask.sum()} Quarters Pending")
 
 # --- MAIN NAVIGATION TABS ---
 tab_cables, tab_balancing, tab_unified_ledger, tab_xbid, tab_gridsearch, tab_tournament = st.tabs([
@@ -911,8 +944,8 @@ tab_cables, tab_balancing, tab_unified_ledger, tab_xbid, tab_gridsearch, tab_tou
     "⚡ European Balancing & SMARD.de Telemetry",
     "🎯 96-Quarter Multi-Model Unified Comparative Ledger",
     f"📈 Nord Pool Continuous Intraday (XBID) Terminal — ID-{selected_area}-Nurex",
-    "🔬 Grid Search Model Transparency",
-    "🏆 Multi-Generation Quantitative Tournament"
+    "🔬 Model Details (LightGBM + recommended)",
+    "🏆 Model Tournament (LightGBM vs recommended)"
 ])
 
 # ----------------------------------------------------------------------
@@ -1040,11 +1073,12 @@ with tab_balancing:
 # TAB 3: 96-QUARTER MULTI-MODEL UNIFIED COMPARATIVE LEDGER
 # ----------------------------------------------------------------------
 with tab_unified_ledger:
-    st.subheader("96-Quarter Intraday Trading Ledger: V4.0 vs V4.1 Side-by-Side")
-    st.markdown("""
-    **Authentic Multi-Generation Audit:** Side-by-side comparison across **V4.0 (legacy, pre-rebuild)** and **V4.1 Intraday (rebuilt, point-in-time engine)**.
-    Click on any row to open the full interactive breakdown drawer.
-    """)
+    st.subheader(f"96-Quarter Intraday Trading Ledger: {REC_LABEL}" + (f" vs {CMP_LABEL}" if CMP_FAMILY else ""))
+    st.markdown(
+        f"**Recommended model ({REC_LABEL})** - its decisions are locked and sent to the client - "
+        + (f"shown beside the **current {CMP_LABEL}** (shadow journal, not sent to the client). "
+           if CMP_FAMILY else f"(in {selected_area} the recommended model is the current LightGBM). ")
+        + "Click on any row to open the full interactive breakdown drawer.")
     st.warning(
         "The **V4.1 Intraday** cells below are computed live by this page for whichever date you pick, using "
         "today's trained model run against the stored history - they are **not** read from the locked "
@@ -1061,9 +1095,9 @@ with tab_unified_ledger:
         # getattr: a Streamlit rerun keeps the module imported at startup, so after an
         # upgrade of v4_1_intraday the new names may not exist until the app is restarted.
         st.caption(FLOW_CONVENTION_NOTE)
-        show_v40 = st.checkbox(
-            'Show V4.0 comparison columns', value=False, key='ledger_show_v40',
-            help='Off: V4.1 columns only. On: the V4.0 champion is shown beside it for comparison.')
+        show_v40 = bool(CMP_FAMILY) and st.checkbox(
+            f'Show {CMP_LABEL} (current model) columns', value=True, key='ledger_show_cmp',
+            help=f'On: the current {CMP_LABEL} is shown beside the recommended {REC_LABEL}. Off: recommended model only.')
 
         _fb = getattr(v41id, 'FLOW_BORDERS', {})
         ic_labels = [lbl for _b, lbl in _fb.get(selected_area, [])
@@ -1158,12 +1192,13 @@ with tab_unified_ledger:
             else:
                 ic_tds = '<td style="color:#94A3B8;">--</td>'
 
-            # V4.0
-            v4_dec = str(row.get('V4_Decision', '⚪ HOLD'))
-            v4_spread = row.get('V4_Predicted_Spread_EUR', 0.0)
+            # Comparison model (current V4.1 LightGBM)
+            v4_dec = str(row.get('CMP_Decision', '') or '⚪ HOLD')
+            v4_spread = row.get('CMP_Predicted_Spread_EUR', np.nan)
+            v4_spread = 0.0 if pd.isna(v4_spread) else v4_spread
             v4_imb = spot_val + v4_spread
-            v4_vol = row.get('V4_Volume_MW', 0.0)
-            v4_pnl = row.get('PnL_V4_0', np.nan)
+            v4_vol = row.get('CMP_Volume_MW', 0.0)
+            v4_pnl = row.get('PnL_CMP', np.nan)
             
             # V4.1
             v41_dec = str(row.get('V4_1_Decision', '⚪ HOLD'))
@@ -1205,10 +1240,10 @@ with tab_unified_ledger:
             else:
                 da_outlay, settle_cf, gross, fees, net_cf = "€0.00", "€0.00", "€0.00", "€0.00", "€0.00 (Capital Protected)"
 
-            v40_audit_row = (f'<tr><td><b>V4.0 Full-Grid</b></td><td style="text-align:right;">\u20ac{v4_imb:.2f}</td>'
+            v40_audit_row = (f'<tr><td><b>{CMP_LABEL} (current)</b></td><td style="text-align:right;">\u20ac{v4_imb:.2f}</td>'
                              f'<td style="text-align:center;">{v4_dec}</td>'
                              f'<td style="text-align:right;">{pnl4_text}</td></tr>') if show_v40 else ''
-            alpha_notice = ('<div class="audit-notice"><b>Alpha Outperformance:</b> vs V4.0: <b>'
+            alpha_notice = (f'<div class="audit-notice"><b>{REC_SHORT} vs current {CMP_LABEL}:</b> <b>'
                             + (f'\u20ac{v41_pnl - v4_pnl:+,.2f}' if pd.notna(v41_pnl) and pd.notna(v4_pnl) else '--')
                             + '</b></div>') if show_v40 else ''
 
@@ -1245,7 +1280,7 @@ with tab_unified_ledger:
             <tr class="drawer-row" id="drawer-{row_idx}" style="display: none;">
                 <td colspan="{(14 if show_v40 else 11) + 1}" class="drawer-cell">
                     <div class="drawer-banner">
-                        <span>⚡ <b>AUDIT BREAKDOWN:</b> {q_label} &mdash; V4.1 Intraday Engine</span>
+                        <span>⚡ <b>AUDIT BREAKDOWN:</b> {q_label} &mdash; {REC_LABEL}</span>
                         <span><b>Delivery:</b> {time_val} CEST &bull; <b>MARI / PICASSO / SMARD / XBID Grounded</b></span>
                     </div>
                     <div class="drawer-cards-grid">
@@ -1267,14 +1302,14 @@ with tab_unified_ledger:
                         </div>
                         <!-- Card 2: 🧠 Comparative Signals -->
                         <div class="drawer-card">
-                            <h5>🧠 Comparative Model Audit (V4.0 vs V4.1)</h5>
+                            <h5>🧠 Comparative Model Audit ({REC_LABEL}{(' vs ' + CMP_LABEL) if show_v40 else ''})</h5>
                             <table class="sub-table">
                                 <thead>
                                     <tr><th>Model</th><th style="text-align:right;">Pred Imb</th><th style="text-align:center;">Decision</th><th style="text-align:right;">PnL (€)</th></tr>
                                 </thead>
                                 <tbody>
                                     {v40_audit_row}
-                                    <tr class="highlight-champ"><td><b>V4.1 Intraday</b></td><td style="text-align:right;">€{v41_imb:.2f}</td><td style="text-align:center;">{v41_dec}</td><td style="text-align:right;">{pnl41_text}</td></tr>
+                                    <tr class="highlight-champ"><td><b>{REC_LABEL} (recommended)</b></td><td style="text-align:right;">€{v41_imb:.2f}</td><td style="text-align:center;">{v41_dec}</td><td style="text-align:right;">{pnl41_text}</td></tr>
                                 </tbody>
                             </table>
                             {alpha_notice}
@@ -1293,9 +1328,11 @@ with tab_unified_ledger:
             </tr>
             """)
 
-        v40_ths = ('<th draggable="true" title="V4.0 Predicted Imbalance Price (EUR) [Spot + Spread]" style="background-color:#0284C7;"><div class="col-header-wrap"><span class="col-title">V4.0 Pred</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">\U0001f4cb</button></div></th>'
-                   '<th draggable="true" title="V4.0 Champion Trading Decision" style="background-color:#0284C7;"><div class="col-header-wrap"><span class="col-title">V4.0 Pos</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">\U0001f4cb</button></div></th>'
-                   '<th draggable="true" title="V4.0 Realized Trading PnL (EUR)" style="background-color:#0284C7;"><div class="col-header-wrap"><span class="col-title">V4.0 PnL</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">\U0001f4cb</button></div></th>') if show_v40 else ''
+        _cmp_short = 'LGBM'
+        v40_ths = ((f'<th draggable="true" title="{CMP_LABEL} (current model) predicted imbalance price (EUR) [Spot + Spread]" style="background-color:#0284C7;"><div class="col-header-wrap"><span class="col-title">{_cmp_short} Pred</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">\U0001f4cb</button></div></th>'
+                    f'<th draggable="true" title="{CMP_LABEL} (current model) trading decision - shadow journal, not sent to the client" style="background-color:#0284C7;"><div class="col-header-wrap"><span class="col-title">{_cmp_short} Pos</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">\U0001f4cb</button></div></th>'
+                    f'<th draggable="true" title="{CMP_LABEL} (current model) realized trading PnL (EUR)" style="background-color:#0284C7;"><div class="col-header-wrap"><span class="col-title">{_cmp_short} PnL</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">\U0001f4cb</button></div></th>')
+                   if show_v40 else '')
 
         table_body = "\n".join(rows_html)
 
@@ -1729,11 +1766,11 @@ with tab_unified_ledger:
                   <th draggable="true" title="German (DE-LU) Day-Ahead Spot Price - source: {_de_src_txt}"><div class="col-header-wrap"><span class="col-title">DE Spot</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   {ic_ths}
                   {v40_ths}
-                  <th draggable="true" title="V4.1 Predicted Imbalance Price (€) [Spot + Spread]" style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">V4.1 Pred</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
-                  <th draggable="true" title="V4.1 Predicted Spread (€/MWh) [median forecast of imbalance minus DA spot]. BUY/SELL come from the model's up/down probabilities and expected edge, so the sign can differ from the position." style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">V4.1 Spread</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
-                  <th draggable="true" title="V4.1 Intraday Trading Decision" style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">V4.1 Pos</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
-                  <th draggable="true" title="V4.1 Position Size with Conviction Scaling" style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">V4.1 Vol</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
-                  <th draggable="true" title="V4.1 Realized Trading PnL (€)" style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">V4.1 PnL</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
+                  <th draggable="true" title="V4.1 Predicted Imbalance Price (€) [Spot + Spread]" style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">{REC_SHORT} Pred</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
+                  <th draggable="true" title="V4.1 Predicted Spread (€/MWh) [median forecast of imbalance minus DA spot]. BUY/SELL come from the model's up/down probabilities and expected edge, so the sign can differ from the position." style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">{REC_SHORT} Spread</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
+                  <th draggable="true" title="{REC_LABEL} trading decision (recommended model - locked and sent to the client)" style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">{REC_SHORT} Pos</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
+                  <th draggable="true" title="V4.1 Position Size with Conviction Scaling" style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">{REC_SHORT} Vol</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
+                  <th draggable="true" title="V4.1 Realized Trading PnL (€)" style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">{REC_SHORT} PnL</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   <th draggable="true" title="Authentic Energinet Settled Price (€)"><div class="col-header-wrap"><span class="col-title">Settled Imb</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   <th draggable="true" title="Settlement Status"><div class="col-header-wrap"><span class="col-title">Status</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                 </tr>
@@ -2185,8 +2222,8 @@ with tab_xbid:
                 gate_close = f"{(h-2)%24:02d}:00"
                 
                 dam_spot = sub['spot_price_eur'].mean()
-                v41_spread = sub['V4_1_Predicted_Spread_EUR'].mean() if 'V4_1_Predicted_Spread_EUR' in sub.columns else sub.get('V4_Predicted_Spread_EUR', pd.Series(0.0)).mean()
-                v41_vol = sub['V4_1_Volume_MW'].mean() if 'V4_1_Volume_MW' in sub.columns else sub.get('V4_Volume_MW', pd.Series(10.0)).mean()
+                v41_spread = sub['V4_1_Predicted_Spread_EUR'].mean() if 'V4_1_Predicted_Spread_EUR' in sub.columns else 0.0
+                v41_vol = sub['V4_1_Volume_MW'].mean() if 'V4_1_Volume_MW' in sub.columns else 0.0
                 
                 # Real Nord Pool intraday data from the recorder (hourly PH contract); empty if not recorded
                 _m = _id_row(60, h, 0)
@@ -2211,7 +2248,7 @@ with tab_xbid:
                 
                 settled_price = sub.loc[settled_mask_sub, 'actual_settled_val'].mean() if any_settled else np.nan
                 pnl_hourly_41 = sub.loc[settled_mask_sub, 'PnL_V4_1'].sum() if (any_settled and 'PnL_V4_1' in sub.columns) else np.nan
-                pnl_hourly_40 = sub.loc[settled_mask_sub, 'PnL_V4_0'].sum() if (any_settled and 'PnL_V4_0' in sub.columns) else np.nan
+                pnl_hourly_40 = sub.loc[settled_mask_sub, 'PnL_CMP'].sum() if (any_settled and CMP_FAMILY and 'PnL_CMP' in sub.columns) else np.nan
 
                 # Bias Signal
                 if pd.isna(dam_diff):
@@ -2242,8 +2279,8 @@ with tab_xbid:
                     f"{selected_area}\u2192NL (MW)": f_nl,
                     f"{selected_area}\u2192{'DK2' if selected_area == 'DK1' else 'DK1'} (MW)": f_sb,
                     "Settled Imb (€)": settled_price,
-                    "V4.1 PnL (€)": pnl_hourly_41,
-                    "V4.0 PnL (€)": pnl_hourly_40,
+                    f"{REC_SHORT} PnL (€)": pnl_hourly_41,
+                    "LGBM PnL (€)": pnl_hourly_40,
                     "Status": "Settled" if all_settled else ("Partial" if any_settled else "Pending")
                 })
         else:
@@ -2257,8 +2294,8 @@ with tab_xbid:
                 gate_close = f"{(h_val-1)%24:02d}:{m_val:02d}"
                 
                 dam_spot = row.get('spot_price_eur', 0.0)
-                v41_spread = row.get('V4_1_Predicted_Spread_EUR', row.get('V4_Predicted_Spread_EUR', 0.0))
-                v41_vol = row.get('V4_1_Volume_MW', row.get('V4_Volume_MW', 10.0))
+                v41_spread = row.get('V4_1_Predicted_Spread_EUR', 0.0)
+                v41_vol = row.get('V4_1_Volume_MW', 0.0)
                 
                 # Real Nord Pool intraday data from the recorder (15-min QH contract); empty if not recorded
                 _m = _id_row(15, h_val, m_val)
@@ -2278,7 +2315,7 @@ with tab_xbid:
                 is_settled = row.get('is_settled', False)
                 settled_price = row.get('actual_settled_val', np.nan) if is_settled else np.nan
                 pnl_quarter_41 = row.get('PnL_V4_1', np.nan) if is_settled else np.nan
-                pnl_quarter_40 = row.get('PnL_V4_0', np.nan) if is_settled else np.nan
+                pnl_quarter_40 = row.get('PnL_CMP', np.nan) if (is_settled and CMP_FAMILY) else np.nan
 
                 if pd.isna(dam_diff):
                     bias = "⚪ NO TRADES RECORDED"
@@ -2308,8 +2345,8 @@ with tab_xbid:
                     f"{selected_area}\u2192NL (MW)": f_nl,
                     f"{selected_area}\u2192{'DK2' if selected_area == 'DK1' else 'DK1'} (MW)": f_sb,
                     "Settled Imb (€)": settled_price,
-                    "V4.1 PnL (€)": pnl_quarter_41,
-                    "V4.0 PnL (€)": pnl_quarter_40,
+                    f"{REC_SHORT} PnL (€)": pnl_quarter_41,
+                    "LGBM PnL (€)": pnl_quarter_40,
                     "Status": "Settled" if is_settled else "Pending"
                 })
 
@@ -2359,7 +2396,7 @@ with tab_xbid:
             
             bias_badge = f'<span style="background-color:#FEE2E2; color:#991B1B; border:1px solid #FECACA; padding:2px 5px; border-radius:3px; font-weight:600; font-size:10px;">{r["Imbalance Bias"]}</span>' if is_decoupled_crash else (f'<span style="background-color:#DCFCE7; color:#166534; border:1px solid #BBF7D0; padding:2px 5px; border-radius:3px; font-weight:600; font-size:10px;">{r["Imbalance Bias"]}</span>' if is_decoupled_spike else f'<span style="background-color:#F1F5F9; color:#475569; border:1px solid #E2E8F0; padding:2px 5px; border-radius:3px; font-weight:500; font-size:10px;">{r["Imbalance Bias"]}</span>')
 
-            pnl_val = r['V4.1 PnL (€)']
+            pnl_val = r[f'{REC_SHORT} PnL (€)']
             if pd.notna(pnl_val):
                 pnl_color = "#16A34A" if pnl_val > 0 else ("#DC2626" if pnl_val < 0 else "#64748B")
                 pnl_str = f"€{pnl_val:+,.2f}"
@@ -2457,7 +2494,7 @@ with tab_xbid:
                   <th style="background-color:#1E293B; color:#F8FAFC; padding:8px 8px; text-align:center; font-size:10px; font-weight:600;">Imbalance Bias</th>
                   {cable_headers_html}
                   <th style="background-color:#1E293B; color:#F8FAFC; padding:8px 8px; text-align:right; font-size:10.5px; font-weight:600;">Settled Imb</th>
-                  <th style="background-color:#1E293B; color:#F8FAFC; padding:8px 8px; text-align:right; font-size:10.5px; font-weight:600;">V4.1 PnL</th>
+                  <th style="background-color:#1E293B; color:#F8FAFC; padding:8px 8px; text-align:right; font-size:10.5px; font-weight:600;">{REC_SHORT} PnL</th>
                 </tr>
               </thead>
               <tbody>
@@ -2536,170 +2573,223 @@ with tab_xbid:
             st.altair_chart(c_depth, use_container_width=True)
 
 # ----------------------------------------------------------------------
-# TAB 5: GRID SEARCH MODEL TRANSPARENCY
+# TAB 5: MODEL DETAILS (recommended model + current V4.1 LightGBM)  - 2026-10-04
 # ----------------------------------------------------------------------
 with tab_gridsearch:
-    st.subheader("V4.1 Intraday Model Details")
-    st.markdown("""
-    The V4.1 Intraday model (LightGBM direction classifier + regime magnitude + quantiles) is retrained on a rolling
-    walk-forward basis, with decision thresholds tuned on the trailing 60 days and checked for stability. This section reads
-    the trained model's own metadata file - if it looks empty below, run `train_v4_1.py train` (or `scripts_v41\run_train_v41.bat`)
-    to regenerate it.
-    """)
-
-    if log_v41:
-        c1, c2 = st.columns([1, 1])
-        with c1:
-            st.markdown("#### V4.1 Intraday Model Specifications")
-            st.json(log_v41.get("champion", {}))
-            
-            st.markdown("#### Top 5 Cross-Validation Ranked Configurations")
-            top_df = pd.DataFrame(log_v41.get("top_10_configs", [])[:5])
-            if not top_df.empty:
-                st.dataframe(top_df[['config_id', 'family', 'cv_mae', 'cv_rmse', 'cv_directional_accuracy_pct']], use_container_width=True)
-
-        with c2:
-            st.markdown("#### Top 15 Feature Importances (V4.1 Intraday)")
-            fi = log_v41.get("feature_importance_ranking", {})
-            if fi:
-                fi_df = pd.DataFrame(list(fi.items())[:15], columns=['Feature', 'Importance (%)'])
-                c_fi = alt.Chart(fi_df).mark_bar(color='#0284C7').encode(
-                    x='Importance (%):Q',
-                    y=alt.Y('Feature:N', sort='-x')
-                ).properties(height=400)
-                st.altair_chart(c_fi, use_container_width=True)
-    else:
-        st.info("Grid search results are being loaded from models_v4_1...")
-
-# ----------------------------------------------------------------------
-# TAB 6: MULTI-GENERATION QUANTITATIVE TOURNAMENT BACKTEST
-# ----------------------------------------------------------------------
-with tab_tournament:
-    st.subheader("V4.1 Signal Threshold Tournament")
+    st.subheader("V4.1 Model Details")
     st.markdown(
-        "The **same V4.1 forecasts** scored under each threshold level. Only the bar a quarter must "
-        "clear to be traded changes: **Validated** is the margin / probability pair tuned on held-out "
-        "data during training, **Balanced** halves the margin, **Aggressive** quarters it. "
-        "The model runs once per day and is scored three ways, so this is a like-for-like comparison."
-    )
+        f"**{selected_area}** runs **{REC_LABEL}** as the recommended model (locked and sent to the client)"
+        + (f" and the **current {CMP_LABEL}** beside it in a shadow journal for comparison." if CMP_FAMILY
+           else " - here that is the current LightGBM, so there is no separate comparison model.")
+        + " Both are retrained on the same schedule with the same point-in-time features (all inputs), "
+          "and both get their BUY / SELL thresholds tuned on the 90-day validation window.")
 
-    _tu = v41id.trained_until(selected_area) if hasattr(v41id, 'trained_until') else None
+    _fams = [(REC_FAMILY, "Recommended (client)", log_v41)] + ([(CMP_FAMILY, "Current model (shadow)", log_cmp)] if CMP_FAMILY else [])
+    _cols = st.columns(len(_fams))
+    for _col, (_fam, _role, _info) in zip(_cols, _fams):
+        with _col:
+            st.markdown(f"#### {v41id.family_label(_fam)} - {_role}")
+            st.caption(_MODEL_TEXT.get(_fam, _fam))
+            if not _info:
+                st.info(f"Not trained yet: `python train_v4_1.py --mode batch train --area {selected_area} --family {_fam}`")
+                continue
+            _dp = _info.get('decision_params') or {}
+            _spec = {"version": _info.get('version'), "trained until (UTC)": str(_info.get('trained_until', ''))[:16],
+                     "training quarters": _info.get('n_train'), "BUY rule": _dp.get('buy') or 'off',
+                     "SELL rule": _dp.get('sell') or 'off'}
+            _lr = _dp.get('logreg') if isinstance(_dp, dict) else None
+            if _lr:
+                _spec["chosen C"] = _lr.get('C')
+                _spec["chosen class weight"] = _lr.get('class_weight') or 'none'
+            st.json(_spec)
+            if _lr and _lr.get('candidates'):
+                st.markdown("**Settings tried at the last retrain** (validation PnL, EUR)")
+                _cd = pd.DataFrame(_lr['candidates'])
+                _cd['class_weight'] = _cd['class_weight'].fillna('none')
+                st.dataframe(_cd[['C', 'class_weight', 'val_pnl_eur']].sort_values('val_pnl_eur', ascending=False),
+                             hide_index=True, use_container_width=True)
+            try:
+                _ex = v41id.model_explanation(selected_area, _fam) if hasattr(v41id, 'model_explanation') else pd.DataFrame()
+            except Exception as _e:
+                _ex = pd.DataFrame()
+                _log_startup_error(f'model_explanation({selected_area}, {_fam})', _e)
+            if not _ex.empty:
+                st.markdown("**Top 15 inputs** " + ("(share of absolute standardised coefficients; "
+                            "columns = coefficient per class)" if _fam == 'logreg' else "(share of LightGBM gain)"))
+                _ch = alt.Chart(_ex).mark_bar(color='#0F766E' if _fam == REC_FAMILY else '#0284C7').encode(
+                    x=alt.X('share_%:Q', title='Share (%)'), y=alt.Y('feature:N', sort='-x', title=None)
+                ).properties(height=380)
+                st.altair_chart(_ch, use_container_width=True)
+                if _fam == 'logreg':
+                    with st.expander("Coefficients per class"):
+                        st.dataframe(_ex, hide_index=True, use_container_width=True)
+    if REC_FAMILY == 'logreg' or CMP_FAMILY == 'logreg':
+        try:
+            _hist = v41id.logreg_choices(selected_area) if hasattr(v41id, 'logreg_choices') else pd.DataFrame()
+        except Exception:
+            _hist = pd.DataFrame()
+        if not _hist.empty:
+            st.markdown("#### Logistic regression - settings chosen at each retrain")
+            st.dataframe(_hist, hide_index=True, use_container_width=True)
+
+# ----------------------------------------------------------------------
+# TAB 6: MODEL TOURNAMENT - current V4.1 LightGBM vs V4.1 recommended model (2026-10-04)
+# ----------------------------------------------------------------------
+# Walk-forward backtest reference (Stage 4 research, Jul 2025 - Sep 2026, settings chosen per
+# 30-day period on validation data only). A backtest, never mixed with the live numbers below.
+BACKTEST_REF = {
+    "DK1": [{"Model": "V4.1 LightGBM (current)", "Net PnL (EUR)": 25249, "1st half": 12101, "2nd half": 13148,
+             "Profitable months": "11/15", "Max drawdown (EUR)": -3910, "EUR per MWh": 12.55},
+            {"Model": "V4.1 Logistic regression (recommended)", "Net PnL (EUR)": 69086, "1st half": 36147,
+             "2nd half": 32939, "Profitable months": "11/15", "Max drawdown (EUR)": -3536, "EUR per MWh": 25.93}],
+    "DK2": [{"Model": "V4.1 LightGBM (current = recommended)", "Net PnL (EUR)": 24739, "1st half": 13233,
+             "2nd half": 11507, "Profitable months": "12/15", "Max drawdown (EUR)": -3383, "EUR per MWh": 9.68}],
+}
+
+with tab_tournament:
+    st.subheader(f"Model Tournament: V4.1 LightGBM (current) vs {REC_LABEL} (recommended)" if CMP_FAMILY
+                 else f"Model Tournament: {selected_area} - V4.1 LightGBM (current = recommended)")
+    st.markdown(
+        "Both models scored on the **same days, the same risk limits and the same threshold level**. "
+        "Validated = the BUY/SELL thresholds each model tuned on its own held-out data; Balanced / Aggressive "
+        "lower the bar (what-if, not validated). Where a quarter was locked by the paper-trading cycle, the "
+        "locked decision is used (recommended model: main journal; LightGBM: shadow journal).")
+    if not CMP_FAMILY:
+        st.info(f"In {selected_area} the recommended model **is** the current V4.1 LightGBM (the logistic model "
+                "was not reliably better in the backtest), so this tournament shows one model.")
+
+    with st.expander("Backtest reference (walk-forward, Jul 2025 - Sep 2026)", expanded=False):
+        st.dataframe(pd.DataFrame(BACKTEST_REF.get(selected_area, [])), hide_index=True, use_container_width=True)
+        st.caption("Settings re-chosen every 30 days on the 90-day validation window only (honest). A backtest, "
+                   "not live results - see project doc nurex_v4_1_research_results.md.")
+
+    _models = [("lgbm", "V4.1 LightGBM (current)")] + ([(REC_FAMILY, f"{REC_LABEL} (recommended)")] if CMP_FAMILY else [])
+    _tus = {f: (v41id.trained_until(selected_area, f) if hasattr(v41id, 'trained_until') else None) for f, _ in _models}
     _today = pd.Timestamp(date_str_selected)
 
-    tcol1, tcol2 = st.columns([1.4, 1])
+    tcol1, tcol2, tcol3 = st.columns([1.4, 0.8, 1.2])
     with tcol1:
         scope = st.radio(
             "Evaluation window",
             ["Out-of-sample only (after training)", "Last N days (includes in-sample)"],
             index=0, horizontal=False,
-            help="The model was trained on data up to its training cut-off. Days before that cut-off were seen during training, so results there flatter whichever level trades most and are not evidence of anything.")
+            help="Days before a model's training cut-off were seen during training and flatter it. "
+                 "Out-of-sample uses the later of the two models' cut-offs, so no model is scored on days it learned from.")
     with tcol2:
         n_days = st.number_input("Days to evaluate", min_value=1, max_value=60, value=7, step=1)
+    with tcol3:
+        _lv_label = {'validated': 'Validated', 'balanced': 'Balanced (what-if)', 'aggressive': 'Aggressive (what-if)'}
+        # default: the sidebar's V4.1 Signal Thresholds level (Aggressive by default) plus Validated
+        levels_sel = st.multiselect("Threshold levels", list(_lv_label),
+                                    default=list(dict.fromkeys([THRESHOLD_KEY, 'validated'])),
+                                    format_func=lambda x: _lv_label[x])
 
-    if _tu is None:
-        st.warning("V4.1 model not loaded - no tournament to run.")
+    if any(v is None for v in _tus.values()):
+        st.warning("A model is not trained yet - no tournament to run: "
+                   + ", ".join(lbl for f, lbl in _models if _tus.get(f) is None))
+    elif not levels_sel:
+        st.info("Pick at least one threshold level.")
     else:
-        _cut = pd.Timestamp(_tu).normalize()
-        st.caption(f"Model trained on data up to **{pd.Timestamp(_tu):%Y-%m-%d %H:%M} UTC**. "
-                   f"Days after that are out of sample.")
-
+        _cut = max(pd.Timestamp(v) for v in _tus.values()).normalize()
+        st.caption("Trained up to: " + " | ".join(f"{lbl}: **{pd.Timestamp(_tus[f]):%Y-%m-%d %H:%M} UTC**" for f, lbl in _models)
+                   + ". Days after the later cut-off are out of sample for both.")
         if scope.startswith('Out-of-sample'):
-            days = [d for d in pd.date_range(_cut + pd.Timedelta(days=1), _today, freq='D')]
-            days = days[-int(n_days):]
+            days = [d for d in pd.date_range(_cut + pd.Timedelta(days=1), _today, freq='D')][-int(n_days):]
         else:
             days = list(pd.date_range(_today - pd.Timedelta(days=int(n_days) - 1), _today, freq='D'))
 
         if not days:
-            st.info("No out-of-sample days yet - the model was trained up to today. Retrain earlier, or switch the window to include in-sample days (and read them with caution).")
+            st.info("No out-of-sample days yet - the models were trained up to today. Switch the window to "
+                    "include in-sample days (and read them with caution), or come back after a few settled days.")
         else:
             @st.cache_data(ttl=900, show_spinner=False)
-            def _tournament(area, day_strs, risk_on=True):
-                """Per-level totals for each day. One model pass per day, scored three ways."""
+            def _tournament(area, day_strs, families, levels, risk_on=True):
+                """Per model x level x day totals of settled quarters."""
                 rows = []
-                for ds in day_strs:
-                    try:
-                        res = (v41id.day_decisions_risked(
-                                   area, ds, levels=('validated', 'balanced', 'aggressive'))
-                               if risk_on and hasattr(v41id, 'day_decisions_risked')
-                               else v41id.day_decisions_multi(area, ds))
-                    except Exception as exc:
-                        _log_startup_error(f'day_decisions_multi({area}, {ds})', exc)
-                        continue
-                    for lvl, d in res.items():
-                        st_rows = d[d['settled']]
-                        traded = st_rows[st_rows['action'] != 'HOLD']
-                        rows.append({
-                            'Day': ds, 'Level': lvl,
-                            'Trades': int(len(traded)),
-                            'MWh': float(traded['mwh'].sum()),
-                            'Net PnL': float(np.nansum(st_rows['pnl_eur'])),
-                            'Wins': int((traded['pnl_eur'] > 0).sum()),
-                            'Settled quarters': int(len(st_rows)),
-                        })
+                for fam in families:
+                    for ds in day_strs:
+                        try:
+                            res = (v41id.day_decisions_risked(area, ds, levels=tuple(levels), family=fam)
+                                   if risk_on else v41id.day_decisions_multi(area, ds, levels=tuple(levels), family=fam))
+                        except Exception as exc:
+                            _log_startup_error(f'tournament({area}, {ds}, {fam})', exc)
+                            continue
+                        for lvl, d in res.items():
+                            st_rows = d[d['settled']]
+                            traded = st_rows[st_rows['action'] != 'HOLD']
+                            rows.append({'Model': fam, 'Level': lvl, 'Day': ds,
+                                         'Trades': int(len(traded)), 'MWh': float(traded['mwh'].sum()),
+                                         'Net PnL': float(np.nansum(st_rows['pnl_eur'])),
+                                         'Wins': int((traded['pnl_eur'] > 0).sum()),
+                                         'Settled quarters': int(len(st_rows))})
                 return pd.DataFrame(rows)
 
             day_strs = [d.strftime('%Y-%m-%d') for d in days]
-            with st.spinner(f'Scoring {len(day_strs)} day(s) under 3 threshold levels...'):
-                tdf = _tournament(selected_area, day_strs, risk_limits_on)
+            with st.spinner(f'Scoring {len(day_strs)} day(s) x {len(_models)} model(s) x {len(levels_sel)} level(s)...'):
+                tdf = _tournament(selected_area, day_strs, tuple(f for f, _ in _models), tuple(levels_sel), risk_limits_on)
 
             if tdf.empty:
                 st.warning("No settled results in this window yet.")
             else:
-                label = {'validated': 'Validated (tuned on held-out data)',
-                         'balanced': 'Balanced (what-if, margin halved)',
-                         'aggressive': 'Aggressive (what-if, margin quartered)'}
+                mlabel = dict(_models)
+                tdf['Model name'] = tdf['Model'].map(mlabel)
                 summary = []
-                for lvl in ('validated', 'balanced', 'aggressive'):
-                    sub = tdf[tdf['Level'] == lvl]
-                    if sub.empty:
-                        continue
-                    trades = int(sub['Trades'].sum()); mwh = float(sub['MWh'].sum())
-                    net = float(sub['Net PnL'].sum()); wins = int(sub['Wins'].sum())
-                    daily = sub.groupby('Day')['Net PnL'].sum()
-                    summary.append({
-                        'Threshold level': label[lvl],
-                        'Trades': trades,
-                        'MWh traded': round(mwh, 1),
-                        'Net PnL (EUR)': round(net, 2),
-                        'EUR per MWh': round(net / mwh, 2) if mwh > 0 else None,
-                        'Win rate': f'{wins / trades * 100:.1f}%' if trades else '--',
-                        'Profitable days': f'{int((daily > 0).sum())} / {len(daily)}',
-                        'Worst day (EUR)': round(float(daily.min()), 2) if len(daily) else None,
-                    })
-                sum_df = pd.DataFrame(summary)
-                st.dataframe(sum_df, use_container_width=True, hide_index=True)
+                for f, lbl in _models:
+                    for lvl in levels_sel:
+                        sub = tdf[(tdf['Model'] == f) & (tdf['Level'] == lvl)]
+                        if sub.empty:
+                            continue
+                        trades = int(sub['Trades'].sum()); mwh = float(sub['MWh'].sum())
+                        net = float(sub['Net PnL'].sum()); wins = int(sub['Wins'].sum())
+                        daily = sub.groupby('Day')['Net PnL'].sum().sort_index()
+                        eq = daily.cumsum()
+                        summary.append({
+                            'Model': lbl, 'Threshold level': _lv_label[lvl], 'Trades': trades,
+                            'MWh traded': round(mwh, 1), 'Net PnL (EUR)': round(net, 2),
+                            'EUR per MWh': round(net / mwh, 2) if mwh > 0 else None,
+                            'Win rate': f'{wins / trades * 100:.1f}%' if trades else '--',
+                            'Profitable days': f'{int((daily > 0).sum())} / {len(daily)}',
+                            'Worst day (EUR)': round(float(daily.min()), 2) if len(daily) else None,
+                            'Max drawdown (EUR)': round(float((eq - eq.cummax()).min()), 2) if len(eq) else None,
+                        })
+                st.dataframe(pd.DataFrame(summary), use_container_width=True, hide_index=True)
 
-                # Cumulative net PnL by level
-                cum = tdf.pivot_table(index='Day', columns='Level', values='Net PnL', aggfunc='sum').fillna(0.0).sort_index()
-                cum = cum.cumsum().reset_index().melt('Day', var_name='Level', value_name='Cumulative Net PnL (EUR)')
-                cum['Level'] = cum['Level'].map(label).fillna(cum['Level'])
+                cum = tdf.assign(Series=tdf['Model name'] + ' - ' + tdf['Level'].map(_lv_label))
+                cum = cum.pivot_table(index='Day', columns='Series', values='Net PnL', aggfunc='sum').fillna(0.0).sort_index()
+                cum = cum.cumsum().reset_index().melt('Day', var_name='Model / level', value_name='Cumulative Net PnL (EUR)')
                 chart = alt.Chart(cum).mark_line(point=True).encode(
                     x=alt.X('Day:N', title='Delivery day'),
                     y=alt.Y('Cumulative Net PnL (EUR):Q'),
-                    color=alt.Color('Level:N', scale=alt.Scale(
-                        domain=[label['validated'], label['balanced'], label['aggressive']],
-                        range=['#0F766E', '#0284C7', '#B45309'])),
-                    tooltip=['Day', 'Level', 'Cumulative Net PnL (EUR)']
-                ).properties(height=340, title='Cumulative net PnL after costs, by threshold level')
+                    color=alt.Color('Model / level:N'),
+                    tooltip=['Day', 'Model / level', 'Cumulative Net PnL (EUR)']
+                ).properties(height=340, title='Cumulative net PnL after costs')
                 st.altair_chart(chart, use_container_width=True)
 
+                if CMP_FAMILY:
+                    for lvl in levels_sel:
+                        a_ = tdf[(tdf['Model'] == REC_FAMILY) & (tdf['Level'] == lvl)].groupby('Day')['Net PnL'].sum()
+                        b_ = tdf[(tdf['Model'] == 'lgbm') & (tdf['Level'] == lvl)].groupby('Day')['Net PnL'].sum()
+                        diff = (a_.sub(b_, fill_value=0.0)).rename('Difference (EUR)').reset_index()
+                        if diff.empty:
+                            continue
+                        bar = alt.Chart(diff).mark_bar().encode(
+                            x=alt.X('Day:N', title='Delivery day'), y=alt.Y('Difference (EUR):Q'),
+                            color=alt.condition(alt.datum['Difference (EUR)'] > 0, alt.value('#0F766E'), alt.value('#DC2626')),
+                            tooltip=['Day', 'Difference (EUR)']
+                        ).properties(height=220, title=f'Daily net PnL: {REC_LABEL} minus V4.1 LightGBM ({_lv_label[lvl]})')
+                        st.altair_chart(bar, use_container_width=True)
+
                 with st.expander('Per-day detail'):
-                    det = tdf.copy()
-                    det['Level'] = det['Level'].map(label).fillna(det['Level'])
-                    st.dataframe(det.sort_values(['Day', 'Level']), use_container_width=True, hide_index=True)
+                    det = tdf.drop(columns=['Model']).rename(columns={'Model name': 'Model'})
+                    det['Level'] = det['Level'].map(_lv_label)
+                    st.dataframe(det.sort_values(['Day', 'Model', 'Level']), use_container_width=True, hide_index=True)
 
                 in_sample = [d for d in day_strs if pd.Timestamp(d) <= _cut]
                 if in_sample:
                     st.warning(
-                        f"{len(in_sample)} of these {len(day_strs)} days fall inside the training "
-                        "window. The model saw them while learning, so every level looks better than "
-                        "it would live, and the loosest level benefits most. Treat this as a sanity "
-                        "check, not as evidence."
-                    )
+                        f"{len(in_sample)} of these {len(day_strs)} days fall inside a model's training window. "
+                        "Scores there flatter that model and are not evidence. Use the out-of-sample window to compare.")
                 st.caption(
-                    "Balanced and Aggressive were **not** validated on held-out data - only the "
-                    "Validated pair passed the stability test during training. Every level here is "
-                    "recomputed on the same basis, so locked paper-trading decisions are not mixed in. "
-                    "PnL is net of costs at the configured rate and counts settled quarters only."
-                )
+                    "Balanced and Aggressive were **not** validated on held-out data. PnL is net of costs at the "
+                    "configured rate and counts settled quarters only.")
 # HOT_RELOAD: 1790105935.6781862

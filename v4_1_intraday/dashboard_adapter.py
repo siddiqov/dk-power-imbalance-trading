@@ -53,22 +53,45 @@ def cost_per_mwh() -> float:
     return config().cost_per_mwh
 
 
-def load_bundle(area: str):
-    path = P.model_path(config(), area)
+# --- Models (2026-10-04) ----------------------------------------------------------------
+# family=None everywhere means the zone's recommended model (the one locked and sent to the
+# client); family="lgbm" is the current V4.1 LightGBM, family="logreg" the logistic model.
+def recommended_family(area: str) -> str:
+    return P.recommended_family(config(), area)
+
+
+def compare_family(area: str) -> str | None:
+    """The comparison model shown beside the recommended one (LightGBM), or None when the
+    recommended model already is LightGBM."""
+    return None if recommended_family(area) == "lgbm" else "lgbm"
+
+
+def family_label(family: str | None, area: str | None = None) -> str:
+    f = family or (recommended_family(area) if area else "lgbm")
+    return P.FAMILY_LABEL.get(f, f)
+
+
+def _fam(area: str, family: str | None) -> str:
+    return family or recommended_family(area)
+
+
+def load_bundle(area: str, family: str | None = None):
+    path = P.model_path(config(), area, _fam(area, family))
     if not path.exists():
         return None
     return P.IntradayBundle.load(path)
 
 
-def model_info(area: str) -> dict | None:
+def model_info(area: str, family: str | None = None) -> dict | None:
     cfg = config()
-    p = P.model_path(cfg, area).with_suffix(".json")
+    family = _fam(area, family)
+    p = P.model_path(cfg, area, family).with_suffix(".json")
     info = json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
     rep_dir = cfg.path("reports_dir")
     sums = sorted(rep_dir.glob("replay_summary_*.json")) if rep_dir.exists() else []
     if info is not None and sums:
         s = json.loads(sums[-1].read_text(encoding="utf-8")).get(area)
-        if s:
+        if s and s.get("family", "lgbm") == family:
             info["replay"] = {k: s["trading"].get(k) for k in
                               ("trades", "mwh_traded", "net_eur", "net_eur_per_mwh", "net_eur_at_stress_costs",
                                "max_drawdown_eur", "sharpe_daily_ann")}
@@ -167,7 +190,7 @@ THRESHOLD_LEVELS = {
 PMIN_FLOOR = 0.35
 
 
-def decision_params(area: str, level: str = "validated") -> dict | None:
+def decision_params(area: str, level: str = "validated", family: str | None = None) -> dict | None:
     """Trading thresholds for `level`, or None to use the model's own validated ones.
 
     A side the training switched off stays off: turning it back on would trade on a signal that
@@ -176,7 +199,7 @@ def decision_params(area: str, level: str = "validated") -> dict | None:
     factors = THRESHOLD_LEVELS.get(level)
     if factors is None:
         return None
-    b = load_bundle(area)
+    b = load_bundle(area, family)
     if b is None or not b.decision_params:
         return None
     base = b.decision_params
@@ -193,7 +216,7 @@ def decision_params(area: str, level: str = "validated") -> dict | None:
 
 
 def day_decisions(area: str, date_str: str, now=None, params: dict | None = None,
-                  risk_overrides: dict | None = None) -> pd.DataFrame:
+                  risk_overrides: dict | None = None, family: str | None = None) -> pd.DataFrame:
     """One row per local delivery quarter of `date_str`, keyed by local 'YYYY-MM-DD HH:MM'.
 
     `params` overrides the model's validated thresholds (a what-if view). `risk_overrides`
@@ -203,7 +226,7 @@ def day_decisions(area: str, date_str: str, now=None, params: dict | None = None
     would mix the two.
     """
     cfg = _cfg_with_risk_override(risk_overrides)
-    b = load_bundle(area)
+    b = load_bundle(area, family)
     if b is None:
         return pd.DataFrame()
     qs = tu.local_day_quarters(date_str, cfg["local_tz"])
@@ -227,8 +250,7 @@ def day_decisions(area: str, date_str: str, now=None, params: dict | None = None
         return out
     # locked paper-trading decisions override the recomputed ones
     try:
-        from . import journal as J
-        j = J.read(cfg, area=area, start=qs.min(), end=qs.max() + pd.Timedelta(minutes=15))
+        j = journal_rows(cfg, area, family, qs.min(), qs.max() + pd.Timedelta(minutes=15))
     except Exception:
         j = pd.DataFrame()
     if len(j):
@@ -248,7 +270,7 @@ def day_decisions(area: str, date_str: str, now=None, params: dict | None = None
     return out
 
 
-def _predictions(area: str, date_str: str, now=None, max_age_s: int = 900, cfg=None):
+def _predictions(area: str, date_str: str, now=None, max_age_s: int = 900, cfg=None, family: str | None = None):
     """Point-in-time forecasts for one local day, cached briefly.
 
     Forecasts do not depend on the threshold level, so every level and the risk overlay reuse
@@ -258,12 +280,13 @@ def _predictions(area: str, date_str: str, now=None, max_age_s: int = 900, cfg=N
     """
     override = cfg is not None
     cfg = cfg or config()
-    key = ("pred", area, date_str)
+    family = _fam(area, family)
+    key = ("pred", area, date_str, family)
     if now is None and not override:
         hit = _CACHE.get(key)
         if hit is not None and (pd.Timestamp.now() - hit[0]).total_seconds() <= max_age_s:
             return hit[1].copy()
-    b = load_bundle(area)
+    b = load_bundle(area, family)
     if b is None:
         return pd.DataFrame()
     qs = tu.local_day_quarters(date_str, cfg["local_tz"])
@@ -275,13 +298,13 @@ def _predictions(area: str, date_str: str, now=None, max_age_s: int = 900, cfg=N
     return out
 
 
-def _score(d: pd.DataFrame, area: str, level: str, cfg=None):
+def _score(d: pd.DataFrame, area: str, level: str, cfg=None, family: str | None = None):
     """Apply one threshold level's decisions to a copy of the forecasts."""
     from nurex42 import decision as dec
     cfg = cfg or config()
-    b = load_bundle(area)
+    b = load_bundle(area, family)
     d = d.copy()
-    params = decision_params(area, level)
+    params = decision_params(area, level, family)
     if params is not None:                      # 'validated' keeps the model's own decisions
         dd = dec.decide(d, d["quarter_utc"], b.model.stress, cfg, params)
         for col in ("action", "mwh", "edge", "reason"):
@@ -299,14 +322,32 @@ def _pnl(d: pd.DataFrame, cost: float) -> pd.DataFrame:
     return d
 
 
-def _overlay_journal(out: pd.DataFrame, cfg, area: str) -> pd.DataFrame:
+def journal_rows(cfg, area: str, family: str | None, start, end) -> pd.DataFrame:
+    """Locked decisions of one model. The main journal holds the recommended model (rows of a
+    non-LightGBM model carry '+<family>' in model_version; earlier rows are LightGBM). LightGBM
+    rows in zones where it is not recommended come from the shadow journal."""
+    from . import journal as J
+    family = _fam(area, family)
+    j = J.read(cfg, area=area, start=start, end=end)
+    is_other = j["model_version"].astype(str).str.contains("+", regex=False) if len(j) else pd.Series(dtype=bool)
+    if family == "lgbm":
+        j = j[~is_other] if len(j) else j
+        if P.recommended_family(cfg, area) != "lgbm":
+            sh = J.read(cfg, area=area, start=start, end=end, shadow=True)
+            if len(sh):
+                j = pd.concat([j, sh], ignore_index=True)
+    else:
+        j = j[j["model_version"].astype(str).str.endswith("+" + family)] if len(j) else j
+    return j.sort_values("quarter_utc").reset_index(drop=True) if len(j) else j
+
+
+def _overlay_journal(out: pd.DataFrame, cfg, area: str, family: str | None = None) -> pd.DataFrame:
     """Replace recomputed decisions with the locked paper-trading decisions where they exist."""
     if out.empty:
         return out
     try:
-        from . import journal as J
-        j = J.read(cfg, area=area, start=out["quarter_utc"].min(),
-                   end=out["quarter_utc"].max() + pd.Timedelta(minutes=15))
+        j = journal_rows(cfg, area, family, out["quarter_utc"].min(),
+                         out["quarter_utc"].max() + pd.Timedelta(minutes=15))
     except Exception:
         j = pd.DataFrame()
     if not len(j):
@@ -328,7 +369,7 @@ def _overlay_journal(out: pd.DataFrame, cfg, area: str) -> pd.DataFrame:
 
 
 def day_decisions_risked(area: str, date_str: str, levels=("validated",), now=None,
-                        risk_overrides: dict | None = None) -> dict:
+                        risk_overrides: dict | None = None, family: str | None = None) -> dict:
     """Decisions for one local day with the SAME risk overlay the walk-forward replay applies.
 
     Until this existed, `apply_risk_overlays` ran only inside the replay: the backtest stopped
@@ -342,14 +383,14 @@ def day_decisions_risked(area: str, date_str: str, levels=("validated",), now=No
     equity path (its costs still count). Run backfill_imbalance to keep those gaps rare.
     """
     cfg = _cfg_with_risk_override(risk_overrides)
-    if load_bundle(area) is None:
+    if load_bundle(area, family) is None:
         return {}
     win = int(float(cfg["risk"].get("drawdown_window_days", 7)))
     lag = pd.Timedelta(minutes=float(cfg["availability"]["imbalance_lag_minutes"]))
     target = pd.Timestamp(date_str).normalize()
     days = [(target - pd.Timedelta(days=k)).strftime("%Y-%m-%d") for k in range(win, -1, -1)]
 
-    base = [_predictions(area, d, now=now, cfg=cfg) for d in days]
+    base = [_predictions(area, d, now=now, cfg=cfg, family=family) for d in days]
     base = [b for b in base if not b.empty]
     if not base:
         return {}
@@ -358,7 +399,7 @@ def day_decisions_risked(area: str, date_str: str, levels=("validated",), now=No
     cost = cfg.cost_per_mwh
     out = {}
     for lvl in levels:
-        d = _score(base, area, lvl, cfg=cfg)
+        d = _score(base, area, lvl, cfg=cfg, family=family)
         d["as_of_trade"] = d["as_of_utc"]
         d["label_known_at"] = d["quarter_utc"] + pd.Timedelta(minutes=15) + lag
         # A missing label must not poison the equity path with NaN; it contributes no PnL.
@@ -369,14 +410,14 @@ def day_decisions_risked(area: str, date_str: str, levels=("validated",), now=No
         r["source"] = "risk-managed"
         if lvl == "validated":
             # 2026-09-29: show what was actually LOCKED and traded (journal), not a recomputation
-            r = _overlay_journal(r, cfg, area)
+            r = _overlay_journal(r, cfg, area, family)
         r["level"] = lvl
         out[lvl] = r.reset_index(drop=True)
     return out
 
 
 def day_decisions_multi(area: str, date_str: str, levels=("validated", "balanced", "aggressive"),
-                       now=None) -> dict:
+                       now=None, family: str | None = None) -> dict:
     """The same forecasts for one local day, scored under several threshold levels.
 
     The model runs once: every level shares identical predictions and differs only in the bar a
@@ -389,7 +430,7 @@ def day_decisions_multi(area: str, date_str: str, levels=("validated", "balanced
     from nurex42 import decision as dec
 
     cfg = config()
-    b = load_bundle(area)
+    b = load_bundle(area, family)
     if b is None:
         return {}
     qs = tu.local_day_quarters(date_str, cfg["local_tz"])
@@ -401,7 +442,7 @@ def day_decisions_multi(area: str, date_str: str, levels=("validated", "balanced
     out = {}
     for lvl in levels:
         d = base.copy()
-        params = decision_params(area, lvl)
+        params = decision_params(area, lvl, family)
         if params is not None:                      # 'validated' keeps the model's own decisions
             dd = dec.decide(d, d["quarter_utc"], b.model.stress, cfg, params)
             for col in ("action", "mwh", "edge", "reason"):
@@ -418,9 +459,9 @@ def day_decisions_multi(area: str, date_str: str, levels=("validated", "balanced
     return out
 
 
-def trained_until(area: str):
+def trained_until(area: str, family: str | None = None):
     """When the model's training data ends - days after this are out of sample."""
-    b = load_bundle(area)
+    b = load_bundle(area, family)
     return None if b is None else pd.Timestamp(b.trained_until)
 
 
@@ -608,3 +649,25 @@ def day_scaffold(area: str, date_str: str) -> pd.DataFrame:
     out["status"] = np.where(out["actual_settled_imbalance_eur"].notna(), "Settled", "Pending")
     out.insert(0, "quarter", [f"Q{i + 1}" for i in range(len(out))])
     return out
+
+
+def logreg_choices(area: str) -> pd.DataFrame:
+    """History of the logistic model's monthly settings (C, class weight) for the dashboard."""
+    p = config().path("models_dir") / f"logreg_choices_{area}.csv"
+    return pd.read_csv(p) if p.exists() else pd.DataFrame()
+
+
+def model_explanation(area: str, family: str | None = None, top: int = 15) -> pd.DataFrame:
+    """Top inputs: LightGBM gain share, or the logistic model's largest standardised coefficients."""
+    b = load_bundle(area, family)
+    if b is None:
+        return pd.DataFrame()
+    m = b.model
+    if getattr(b, "family", "lgbm") == "logreg" and hasattr(m, "coefficients"):
+        co = m.coefficients()
+        imp = m.feature_importance().head(top)
+        out = co.loc[imp.index].round(3)
+        out.insert(0, "share_%", imp.round(2))
+        return out.reset_index().rename(columns={"index": "feature"})
+    imp = m.feature_importance().head(top)
+    return pd.DataFrame({"feature": imp.index, "share_%": imp.round(2).values})

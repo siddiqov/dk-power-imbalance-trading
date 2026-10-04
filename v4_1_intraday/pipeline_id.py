@@ -25,12 +25,41 @@ from .features_id import IntradayFeatureBuilder
 from nurex42 import decision as dec
 from nurex42.models import SpreadModel
 from .model_v41 import SpreadModelV41, recency_weights
+from .model_logreg import SpreadModelLogReg
 from nurex42.storage import Store
 
 log = logging.getLogger("nurex41id")
 Q = pd.Timedelta(minutes=15)
 VERSION = "4.1-intraday-2026-09-17"
 VERSION_BATCH = "4.1-batch-2026-09-27"      # hourly client batches, locked 2h15 ahead
+
+# ----------------------------------------------------------------------------- model families
+# 2026-10-04: two V4.1 models per zone.
+#   "lgbm"   = the current V4.1 LightGBM model (unchanged)
+#   "logreg" = logistic regression, all features, C / class weight chosen every retrain on the
+#              validation window (model_logreg.py)
+# config `models.recommended` decides, per zone, whose decisions are LOCKED and sent to the
+# client. Zones whose recommended model is not LightGBM also run LightGBM in a shadow journal,
+# so the dashboard tournament compares real locked decisions of both.
+FAMILIES = ("lgbm", "logreg")
+FAMILY_LABEL = {"lgbm": "V4.1 LightGBM", "logreg": "V4.1 Logistic regression"}
+
+
+def recommended_family(cfg, area: str) -> str:
+    rec = ((cfg.raw.get("models") or {}).get("recommended") or {})
+    f = str(rec.get(area, "lgbm")).lower()
+    return f if f in FAMILIES else "lgbm"
+
+
+def families_for(cfg, area: str) -> list[str]:
+    """Models trained / run for a zone: the recommended one first, plus LightGBM for comparison."""
+    rec = recommended_family(cfg, area)
+    return [rec] if rec == "lgbm" else [rec, "lgbm"]
+
+
+def family_version(cfg, family: str) -> str:
+    v = VERSION_BATCH if cfg.batch_mode else VERSION
+    return v if family == "lgbm" else f"{v}+{family}"
 
 
 # ----------------------------------------------------------------------------- data
@@ -101,6 +130,48 @@ def fit_model(Xt, extras, y, rows, cfg, times=None) -> SpreadModel:
                        size_objective=mc.get("size_objective", "huber"), huber_delta=float(mc.get("huber_delta", 40.0)),
                        spike_level=float(mc.get("spike_level_eur", 150.0)))
     return m.fit(X[cols], yy, stress_q=cfg["risk"]["stress_quantile"], sample_weight=w)
+
+
+def _design_rows(Xt, extras, y, rows, cfg):
+    """Training matrix exactly as fit_model builds it (same rows, same usable columns)."""
+    X = pd.concat([Xt.loc[rows]] + [e.loc[rows] for e in extras], ignore_index=True)
+    yy = pd.concat([y.loc[rows]] * (1 + len(extras)), ignore_index=True)
+    allowed = set(intraday_market_allowed(Xt.loc[rows], cfg))
+    cols = [c for c in usable_columns(X) if not c.startswith(ID_MARKET_PREFIXES) or c in allowed]
+    return X[cols], yy
+
+
+def logreg_candidates(cfg, area: str | None = None) -> list[dict]:
+    """Settings tried every retrain, in a fixed order (ties keep the first).
+    config logreg.C_grid x logreg.class_weight_grid (a list, or a dict per zone)."""
+    lc = cfg.raw.get("logreg") or {}
+    cs = [float(c) for c in (lc.get("C_grid") or [0.003, 0.01, 0.03, 0.1, 0.3, 1.0])]
+    cw = lc.get("class_weight_grid", ["balanced", None])
+    if isinstance(cw, dict):
+        cw = cw.get(area, ["balanced", None])
+    cw = [None if (w is None or str(w).lower() in ("none", "null")) else str(w) for w in cw]
+    return [{"C": c, "class_weight": w} for c in sorted(cs) for w in cw]
+
+
+def fit_logreg(Xt, extras, y, rows, cfg, C, class_weight, with_quantiles=True) -> SpreadModelLogReg:
+    X, yy = _design_rows(Xt, extras, y, rows, cfg)
+    lc = cfg.raw.get("logreg") or {}
+    mc = cfg["model"]
+    m = SpreadModelLogReg(C=float(C), class_weight=class_weight, deadband=mc["direction_deadband_eur"],
+                          lgbm_params=dict(mc["lgbm"]), quantiles=tuple(mc["quantiles"]),
+                          with_quantiles=with_quantiles, ridge_alpha=float(lc.get("ridge_alpha", 10.0)),
+                          max_iter=int(lc.get("max_iter", 1000)))
+    return m.fit(X, yy, stress_q=cfg["risk"]["stress_quantile"])
+
+
+def validation_pnl(pred, spread, quarters, params, area, cfg, stress) -> float:
+    """Raw validation PnL of a tuned rule (decide + fallback BUY, no risk overlay) - the score
+    used to pick the logistic settings each retrain (identical to the Stage 4 research)."""
+    d = dec.decide(pred, quarters, stress, cfg, params)
+    d = apply_fallback_buy(d, pred, params, area, cfg)
+    s = np.where(d["action"] == dec.BUY, 1.0, np.where(d["action"] == dec.SELL, -1.0, 0.0))
+    mwh = d["mwh"].to_numpy(float)
+    return float(np.sum(s * mwh * spread.to_numpy(float) - np.where(s != 0, mwh * cfg.cost_per_mwh, 0.0)))
 
 
 # ----------------------------------------------------------------------------- guards (2026-09-28)
@@ -185,7 +256,7 @@ def apply_fallback_buy(out: pd.DataFrame, pred: pd.DataFrame, decision_params: d
     return out
 
 
-def train_with_validation(Xt, extras, t, cfg, cut: pd.Timestamp):
+def train_with_validation(Xt, extras, t, cfg, cut: pd.Timestamp, family: str = "lgbm", area: str | None = None):
     """Fit on labels known before `cut`; tune BUY/SELL thresholds on the last validation_days
     (profitable in both halves, >= 1x costs per MWh, else that side is switched off)."""
     known = t["label_known_at"] <= cut
@@ -194,6 +265,8 @@ def train_with_validation(Xt, extras, t, cfg, cut: pd.Timestamp):
     val_rows = t.index[known & (t["as_of_trade"] >= val_start)]
     all_rows = t.index[known]
     times = t["quarter_utc"]
+    if family == "logreg":
+        return _train_logreg_with_validation(Xt, extras, t, cfg, fit_rows, val_rows, all_rows, area)
     if len(fit_rows) < 3000 or len(val_rows) < 1000:
         params = {"no_trade": True, "val_net_eur": 0.0, "val_trades": 0,
                   "note": f"insufficient history (fit={len(fit_rows)}, val={len(val_rows)})"}
@@ -209,6 +282,41 @@ def train_with_validation(Xt, extras, t, cfg, cut: pd.Timestamp):
     if len(all_rows) < 3000:
         raise RuntimeError(f"only {len(all_rows)} labelled quarters before {cut}")
     m = fit_model(Xt, extras, t["spread"], all_rows, cfg, times=times)
+    return m, params, len(all_rows)
+
+
+def _train_logreg_with_validation(Xt, extras, t, cfg, fit_rows, val_rows, all_rows, area):
+    """Logistic regression with its settings chosen on the validation window.
+
+    Every candidate (C x class weight) is fitted on the rows before the validation window,
+    its BUY/SELL thresholds are tuned on the validation window with dec.tune, and it is scored
+    by the validation PnL of that tuned rule. The best candidate is refitted on all labelled
+    rows and keeps its own tuned thresholds. Only data known before the cut is used."""
+    cands = logreg_candidates(cfg, area)
+    tried = []
+    if len(fit_rows) < 3000 or len(val_rows) < 1000:
+        params = {"no_trade": True, "val_net_eur": 0.0, "val_trades": 0,
+                  "note": f"insufficient history (fit={len(fit_rows)}, val={len(val_rows)})"}
+        best = cands[0]
+    else:
+        spread_v, q_v = t.loc[val_rows, "spread"], t.loc[val_rows, "quarter_utc"]
+        best, params, best_pnl = None, None, None
+        for cand in cands:
+            mv = fit_logreg(Xt, extras, t["spread"], fit_rows, cfg, cand["C"], cand["class_weight"],
+                            with_quantiles=False)
+            vp = mv.predict(Xt.loc[val_rows])
+            p = dec.tune(vp, spread_v, q_v, mv.stress, cfg)
+            pnl = validation_pnl(vp, spread_v, q_v, p, area, cfg, mv.stress)
+            tried.append({**cand, "val_pnl_eur": round(pnl, 2), "buy": p.get("buy"), "sell": p.get("sell")})
+            log.info("[%s] logreg C=%s class_weight=%s val_pnl=%.0f buy=%s sell=%s", area, cand["C"],
+                     cand["class_weight"], pnl, p.get("buy"), p.get("sell"))
+            if best_pnl is None or pnl > best_pnl:
+                best, params, best_pnl = cand, p, pnl
+    if len(all_rows) < 3000:
+        raise RuntimeError(f"only {len(all_rows)} labelled quarters")
+    m = fit_logreg(Xt, extras, t["spread"], all_rows, cfg, best["C"], best["class_weight"], with_quantiles=True)
+    params = dict(params)
+    params["logreg"] = {"C": best["C"], "class_weight": best["class_weight"], "candidates": tried}
     return m, params, len(all_rows)
 
 
@@ -286,7 +394,8 @@ def apply_risk_overlays(df: pd.DataFrame, cfg) -> pd.DataFrame:
 
 
 # ----------------------------------------------------------------------------- replay
-def walk_forward(store: Store, cfg, area: str, start=None, end=None, fb=None) -> dict:
+def walk_forward(store: Store, cfg, area: str, start=None, end=None, fb=None, family: str | None = None) -> dict:
+    family = family or recommended_family(cfg, area)
     fb = fb or IntradayFeatureBuilder(store, cfg)
     t = target_frame(fb, area, cfg, end=end)
     log.info("[%s] building point-in-time features for %d quarters", area, len(t))
@@ -304,7 +413,7 @@ def walk_forward(store: Store, cfg, area: str, start=None, end=None, fb=None) ->
             p0 = p1
             continue
         cut = t.loc[rows, "as_of_trade"].min()
-        m, params, n_train = train_with_validation(Xt, extras, t, cfg, cut)
+        m, params, n_train = train_with_validation(Xt, extras, t, cfg, cut, family=family, area=area)
         pt = m.predict(Xt.loc[rows])
         d = dec.decide(pt, t.loc[rows, "quarter_utc"], m.stress, cfg, params)
         d = apply_guards(pt, d, params.get("guards"))
@@ -317,8 +426,10 @@ def walk_forward(store: Store, cfg, area: str, start=None, end=None, fb=None) ->
             r[col] = Xt.loc[rows, col].values if col in Xt.columns else np.nan
         r[["action", "mwh", "edge", "reason"]] = d[["action", "mwh", "edge", "reason"]]
         results.append(r)
+        lr = params.get("logreg") or {}
         periods.append({"period_start": p0, "cut": cut, "n_train": n_train,
-                        **{k: v for k, v in params.items() if k != "note"}})
+                        **{k: v for k, v in params.items() if k not in ("note", "logreg")},
+                        **({"logreg_C": lr.get("C"), "logreg_class_weight": lr.get("class_weight")} if lr else {})})
         log.info("[%s] %s train=%d buy=%s sell=%s trades=%d", area, p0.date(), n_train, params.get("buy"),
                  params.get("sell"), int((d["action"] != dec.HOLD).sum()))
         p0 = p1
@@ -326,7 +437,7 @@ def walk_forward(store: Store, cfg, area: str, start=None, end=None, fb=None) ->
     res["area"] = area
     imp = m.feature_importance() if m is not None else pd.Series(dtype=float)
     return {"area": area, "results": res, "periods": pd.DataFrame(periods), "feature_importance": imp,
-            "book": f"v41id-replay:{area}"}
+            "book": f"v41id-replay:{area}" + ("" if family == "lgbm" else f":{family}"), "family": family}
 
 
 # ----------------------------------------------------------------------------- live model
@@ -339,6 +450,7 @@ class IntradayBundle:
     n_train: int
     version: str = VERSION
     config: dict = field(default_factory=dict)
+    family: str = "lgbm"            # 2026-10-04; bundles saved before then are LightGBM
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -351,20 +463,35 @@ class IntradayBundle:
             return pickle.load(f)
 
 
-def model_path(cfg, area: str) -> Path:
+def model_path(cfg, area: str, family: str | None = None) -> Path:
+    """LightGBM keeps its original file name (v4_1_batch_DK1.pkl); other families get a suffix
+    (v4_1_batch_logreg_DK1.pkl). family=None -> the zone's recommended model."""
+    family = family or recommended_family(cfg, area)
     name = "v4_1_batch" if cfg.batch_mode else "v4_1_intraday"
+    if family != "lgbm":
+        name = f"{name}_{family}"
     return cfg.path("models_dir") / f"{name}_{area}.pkl"
 
 
-def train_final(store: Store, cfg, area: str, fb=None, now=None) -> IntradayBundle:
+def train_final(store: Store, cfg, area: str, fb=None, now=None, family: str | None = None,
+                design_cache: dict | None = None) -> IntradayBundle:
+    """Train one model family for the live system. `design_cache` (a dict) lets several
+    families share one point-in-time feature build."""
+    family = family or recommended_family(cfg, area)
     fb = fb or IntradayFeatureBuilder(store, cfg)
-    t = target_frame(fb, area, cfg)
-    Xt, extras = design(fb, area, t, cfg)
+    if design_cache is not None and design_cache.get("area") == area:
+        t, Xt, extras = design_cache["t"], design_cache["Xt"], design_cache["extras"]
+    else:
+        t = target_frame(fb, area, cfg)
+        Xt, extras = design(fb, area, t, cfg)
+        if design_cache is not None:
+            design_cache.clear()
+            design_cache.update({"area": area, "t": t, "Xt": Xt, "extras": extras})
     cut = pd.Timestamp(now) if now is not None else pd.Timestamp.now(tz="UTC").tz_localize(None)
-    m, params, n = train_with_validation(Xt, extras, t, cfg, cut)
+    m, params, n = train_with_validation(Xt, extras, t, cfg, cut, family=family, area=area)
     return IntradayBundle(area=area, model=m, decision_params=params,
                           trained_until=t.loc[t["label_known_at"] <= cut, "quarter_utc"].max(),
-                          n_train=n, version=VERSION_BATCH if cfg.batch_mode else VERSION, config=cfg.raw)
+                          n_train=n, version=family_version(cfg, family), config=cfg.raw, family=family)
 
 
 def predict_quarters(store: Store, cfg, bundle: IntradayBundle, quarters, now=None, fb=None,

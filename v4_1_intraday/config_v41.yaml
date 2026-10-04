@@ -97,6 +97,28 @@ decision:
     kill_loss_eur: 300.0     # switch off when fallback BUYs lost more than this ...
     kill_window_days: 30     # ... over the last N days of settled quarters
 
+# --- Models per zone (2026-10-04) --------------------------------------------------
+# recommended = the model whose decisions are LOCKED and sent to the client (lgbm | logreg).
+# A zone whose recommended model is not lgbm also runs LightGBM in a shadow journal
+# (data/v41_batch_journal_shadow_lgbm.sqlite) so the dashboard tournament compares both.
+# Stage 4 research (walk-forward Jul 2025 - Sep 2026, settings chosen on validation only):
+#   DK1 all features: logistic EUR 69.1k (36.1k / 32.9k halves, DD -3.5k) vs LightGBM 25.2k
+#   DK2: LightGBM 24.7k stays (logistic not reliably better).
+# Switching back: set the zone to lgbm and restart the cycle (both models are always trained).
+models:
+  recommended:
+    DK1: logreg
+    DK2: lgbm
+
+# Logistic regression (v4_1_intraday/model_logreg.py): every retrain tries C_grid x
+# class_weight_grid, tunes BUY/SELL thresholds on the 90-day validation window for each,
+# and keeps the one with the best validation PnL. All features (same columns as LightGBM).
+logreg:
+  C_grid: [0.003, 0.01, 0.03, 0.1, 0.3, 1.0]
+  class_weight_grid: [balanced, null]     # balanced = up / down / flat weighted equally
+  ridge_alpha: 10.0                        # expected-size regressors (up / down quarters)
+  max_iter: 1000
+
 model:
   direction_deadband_eur: 0.5
   # --- 2026-09-28 upgrade (model_v41.SpreadModelV41). false = the original two-part model ---
