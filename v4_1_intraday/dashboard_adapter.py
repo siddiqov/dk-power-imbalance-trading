@@ -264,7 +264,7 @@ def day_decisions(area: str, date_str: str, now=None, params: dict | None = None
                 out.loc[vals[keep].index, col] = vals[keep]
         out.loc[idx, "source"] = k.map(j["status"]).values
         out.loc[idx, "decision_final"] = True
-        jp = k.map(j["pnl_eur"])
+        jp = pd.to_numeric(k.map(j["pnl_eur"]), errors="coerce").astype(float)
         out.loc[jp[jp.notna()].index, "pnl_eur"] = jp[jp.notna()]
         out["mwh"] = out["mwh"].astype(float)
     return out
@@ -338,6 +338,13 @@ def journal_rows(cfg, area: str, family: str | None, start, end) -> pd.DataFrame
                 j = pd.concat([j, sh], ignore_index=True)
     else:
         j = j[j["model_version"].astype(str).str.endswith("+" + family)] if len(j) else j
+    if len(j):
+        # main + shadow rows concatenated can leave numeric columns as object dtype; pandas 3
+        # refuses to write those into float columns (2026-10-04 fix)
+        for c in ("mwh", "edge", "exp_spread", "p_up", "p_flat", "p_down", "q10", "q50", "q90", "pnl_eur",
+                  "spread_actual", "imbalance_eur", "dayahead_eur"):
+            if c in j.columns:
+                j[c] = pd.to_numeric(j[c], errors="coerce")
     return j.sort_values("quarter_utc").reset_index(drop=True) if len(j) else j
 
 
@@ -362,7 +369,7 @@ def _overlay_journal(out: pd.DataFrame, cfg, area: str, family: str | None = Non
             out.loc[vals[keep].index, col] = vals[keep]
     out.loc[idx, "source"] = k.map(j["status"]).values
     out.loc[idx, "decision_final"] = True
-    jp = k.map(j["pnl_eur"])
+    jp = pd.to_numeric(k.map(j["pnl_eur"]), errors="coerce").astype(float)
     out.loc[jp[jp.notna()].index, "pnl_eur"] = jp[jp.notna()]
     out["mwh"] = out["mwh"].astype(float)
     return out
