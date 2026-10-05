@@ -12,7 +12,9 @@ Trading model (simulation):
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
 import pickle
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,6 +43,52 @@ VERSION_BATCH = "4.1-batch-2026-09-27"      # hourly client batches, locked 2h15
 # config `models.recommended` decides, per zone, whose decisions are LOCKED and sent to the
 # client. Zones whose recommended model is not LightGBM also run LightGBM in a shadow journal,
 # so the dashboard tournament compares real locked decisions of both.
+# ----------------------------------------------------------------------------- BUY crash guard switch
+# 2026-10-05: the BUY crash guard (BUY -> HOLD when q10 < threshold) is OFF by default.
+# Crash-guard test (research_v41/rs_guard.py, Jul 2025 - Sep 2026 walk-forward): with the guard at
+# -30 EUR/MWh, DK1 logistic made 27.5k instead of 69.1k and DK1 LightGBM 14.4k instead of 25.2k;
+# DK2 unchanged. Default: config `decision.buy_crash_guard.enabled`. The dashboard checkbox writes
+# results/v4_1_intraday/live_controls.json on this machine, which overrides the config; the cycle
+# reads it at every lock, so a change applies from the next cycle run (<= 15 min).
+LIVE_CONTROLS_PATH = S.BASE / "results" / "v4_1_intraday" / "live_controls.json"
+
+
+def _live_controls() -> dict:
+    try:
+        with open(LIVE_CONTROLS_PATH, "r", encoding="utf-8") as f:
+            c = json.load(f)
+        return c if isinstance(c, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except Exception as e:                                   # unreadable file: fall back to config
+        log.warning("live_controls.json unreadable (%s) - using config defaults", e)
+        return {}
+
+
+def buy_crash_guard(cfg) -> tuple[bool, float, str]:
+    """(on, q10 threshold EUR/MWh, source) of the BUY crash guard."""
+    g = cfg["decision"].get("buy_crash_guard") or {}
+    on, src = bool(g.get("enabled", False)), "config"
+    thr = float(g.get("q10_eur", -30.0))
+    c = _live_controls()
+    if "buy_crash_guard_on" in c:
+        on, src = bool(c["buy_crash_guard_on"]), "dashboard switch"
+    return on, thr, src
+
+
+def set_buy_crash_guard(on: bool, by: str = "dashboard") -> None:
+    """Write the switch (atomic replace, so a running cycle never reads half a file)."""
+    c = _live_controls()
+    c.update({"buy_crash_guard_on": bool(on), "buy_crash_guard_changed_utc":
+              pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d %H:%M:%S"), "buy_crash_guard_changed_by": by})
+    LIVE_CONTROLS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = LIVE_CONTROLS_PATH.with_suffix(".json.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(c, f, indent=2)
+    os.replace(tmp, LIVE_CONTROLS_PATH)
+    log.warning("BUY crash guard switched %s (%s)", "ON" if on else "OFF", by)
+
+
 FAMILIES = ("lgbm", "logreg")
 FAMILY_LABEL = {"lgbm": "V4.1 LightGBM", "logreg": "V4.1 Logistic regression"}
 
@@ -549,13 +597,15 @@ def predict_quarters(store: Store, cfg, bundle: IntradayBundle, quarters, now=No
             out.loc[stale, "reason"] = "stale data"
 
     # --- BUY-FIX [Change 3]: crash guard — suppress BUY when q10 signals deep downside risk
+    # 2026-10-05: switchable, OFF by default (see buy_crash_guard above)
+    cg_on, cg_thr, cg_src = buy_crash_guard(cfg)
     buy_mask = out["action"] == "BUY"
-    if buy_mask.any() and "q10" in out.columns:
-        crash_risk = out["q10"] < -30.0
+    if cg_on and buy_mask.any() and "q10" in out.columns:
+        crash_risk = out["q10"] < cg_thr
         suppressed = buy_mask & crash_risk
         if suppressed.any():
-            log.warning("[%s] BUY crash guard: %d quarter(s) suppressed to HOLD "
-                        "(q10 < -30 EUR/MWh)", bundle.area, int(suppressed.sum()))
+            log.warning("[%s] BUY crash guard (%s): %d quarter(s) suppressed to HOLD "
+                        "(q10 < %.0f EUR/MWh)", bundle.area, cg_src, int(suppressed.sum()), cg_thr)
             out.loc[suppressed, "action"] = "HOLD"
             out.loc[suppressed, "mwh"] = 0.0
             out.loc[suppressed, "reason"] = "buy suppressed: q10 crash risk"

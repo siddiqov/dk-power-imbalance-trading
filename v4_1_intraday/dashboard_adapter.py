@@ -281,7 +281,7 @@ def _predictions(area: str, date_str: str, now=None, max_age_s: int = 900, cfg=N
     override = cfg is not None
     cfg = cfg or config()
     family = _fam(area, family)
-    key = ("pred", area, date_str, family)
+    key = ("pred", area, date_str, family, P.buy_crash_guard(cfg)[:2])   # guard switch changes decisions
     if now is None and not override:
         hit = _CACHE.get(key)
         if hit is not None and (pd.Timestamp.now() - hit[0]).total_seconds() <= max_age_s:

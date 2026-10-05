@@ -80,6 +80,13 @@ decision:
   #   DK2   607 trades +25,558 EUR (42.1 EUR/MWh, last 90 days -200)
   # Profit comes from rare up-spikes (win rate ~33%, median trade -2.4 EUR/MWh), hence a small
   # fixed size. The q10 crash guard does not apply to fallback BUYs; all other risk limits do.
+  # BUY crash guard (BUY -> HOLD when the model's q10 < q10_eur). 2026-10-05: OFF by default.
+  # Walk-forward test Jul 2025 - Sep 2026: guard at -30 cut DK1 logistic 69.1k -> 27.5k and DK1
+  # LightGBM 25.2k -> 14.4k (DK2 unchanged). The dashboard checkbox "BUY crash guard" overrides
+  # `enabled` on this machine (results/v4_1_intraday/live_controls.json) from the next cycle.
+  buy_crash_guard:
+    enabled: false
+    q10_eur: -30.0
   # Decision guards, tuned per retrain on the validation window (kept only if they improve
   # validation net and stay positive in both halves; otherwise no guard):
   #   SELL -> HOLD when P(up-spike) is high; BUY -> HOLD when P(down-spike) is high;

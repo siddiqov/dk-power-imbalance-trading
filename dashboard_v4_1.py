@@ -217,7 +217,56 @@ with st.sidebar:
     _auto_refresh_heartbeat()
 
 # 1. Market Bidding Zone & Strategy
-selected_area = st.sidebar.radio("Bidding Zone", ["DK1", "DK2"], index=0)
+# 2026-10-05: the zone choice is kept across the 15-min auto-refresh, browser refreshes and
+# dashboard restarts until changed by hand: page URL (?zone=...) + dashboard_prefs.json.
+ZONES = ["DK1", "DK2"]
+UI_PREFS_PATH = os.path.join("results", "v4_1_intraday", "dashboard_prefs.json")
+
+
+def _load_ui_prefs() -> dict:
+    try:
+        with open(UI_PREFS_PATH, "r", encoding="utf-8") as _f:
+            return json.load(_f)
+    except Exception:
+        return {}
+
+
+def _save_ui_pref(name: str, value) -> None:
+    try:
+        prefs = _load_ui_prefs()
+        prefs[name] = value
+        os.makedirs(os.path.dirname(UI_PREFS_PATH), exist_ok=True)
+        with open(UI_PREFS_PATH, "w", encoding="utf-8") as _f:
+            json.dump(prefs, _f, indent=2)
+    except Exception as _e:
+        try:
+            _log_startup_error(f"saving dashboard preference {name}", _e)
+        except Exception:
+            pass
+
+
+def _save_zone_choice():
+    z = st.session_state.get("selected_area", "DK1")
+    try:
+        st.query_params["zone"] = z
+    except Exception:
+        pass
+    _save_ui_pref("selected_area", z)
+
+
+if "selected_area" not in st.session_state:            # first run of this browser session
+    try:
+        _url_zone = st.query_params.get("zone")
+    except Exception:
+        _url_zone = None
+    _z = _url_zone if _url_zone in ZONES else _load_ui_prefs().get("selected_area")
+    st.session_state["selected_area"] = _z if _z in ZONES else "DK1"
+try:
+    if st.query_params.get("zone") != st.session_state["selected_area"]:
+        st.query_params["zone"] = st.session_state["selected_area"]
+except Exception:
+    pass
+selected_area = st.sidebar.radio("Bidding Zone", ZONES, key="selected_area", on_change=_save_zone_choice)
 
 # 2. Trading Date
 dk_now = pd.Timestamp.now(tz="Europe/Copenhagen")
@@ -235,15 +284,6 @@ THRESHOLD_OPTIONS = ["Validated (from training)", "Balanced (what-if)", "Aggress
 THRESHOLD_DEFAULT = "Aggressive (what-if)"
 _THR_CODE = {"Validated (from training)": "validated", "Balanced (what-if)": "balanced",
              "Aggressive (what-if)": "aggressive"}
-UI_PREFS_PATH = os.path.join("results", "v4_1_intraday", "dashboard_prefs.json")
-
-
-def _load_ui_prefs() -> dict:
-    try:
-        with open(UI_PREFS_PATH, "r", encoding="utf-8") as _f:
-            return json.load(_f)
-    except Exception:
-        return {}
 
 
 def _save_threshold_choice():
@@ -253,17 +293,7 @@ def _save_threshold_choice():
         st.query_params["thr"] = code
     except Exception:
         pass
-    try:
-        prefs = _load_ui_prefs()
-        prefs["threshold_level"] = code
-        os.makedirs(os.path.dirname(UI_PREFS_PATH), exist_ok=True)
-        with open(UI_PREFS_PATH, "w", encoding="utf-8") as _f:
-            json.dump(prefs, _f, indent=2)
-    except Exception as _e:
-        try:
-            _log_startup_error("saving dashboard threshold choice", _e)
-        except Exception:
-            pass
+    _save_ui_pref("threshold_level", code)
 
 
 if "threshold_level" not in st.session_state:          # first run of this browser session
@@ -292,6 +322,35 @@ risk_limits_on = st.sidebar.checkbox(
     "Apply risk limits (daily loss stop + drawdown)", value=True,
     key="risk_limits_on",  # persists across reruns
     help="Stops trading for the rest of the day once the daily loss limit is hit, and halves or halts size on drawdown - the same overlay the replay uses. Off shows raw signal decisions, which will NOT match backtest results.")
+
+# 2026-10-05: BUY crash guard switch. This one is LIVE: it changes what the cycle locks on THIS
+# machine from its next run (<= 15 min), for both zones and both models. Off by default (the
+# walk-forward test showed the guard halves DK1 profit). Stored in live_controls.json, not in
+# the browser, so every tab and the cycle see the same value.
+def _save_crash_guard():
+    try:
+        P41.set_buy_crash_guard(bool(st.session_state.get("crash_guard_on", False)), by="dashboard")
+    except Exception as _e:
+        _log_startup_error("saving BUY crash guard switch", _e)
+        st.sidebar.error(f"Could not save the crash guard switch: {_e}")
+
+
+try:
+    from v4_1_intraday import pipeline_id as P41
+    _cg_on, _cg_thr, _cg_src = P41.buy_crash_guard(v41id.config())
+    st.session_state["crash_guard_on"] = _cg_on          # always show the live value
+    st.sidebar.checkbox(
+        f"BUY crash guard (q10 < {_cg_thr:.0f} €/MWh) - LIVE", key="crash_guard_on",
+        on_change=_save_crash_guard,
+        help="LIVE setting for this machine: when on, a model BUY is cancelled (HOLD) whenever its "
+             "10% worst-case forecast q10 is below the threshold. Applies to new locks from the next "
+             "cycle run (within 15 min); already locked quarters keep their decision. Off by default: "
+             "in the Jul 2025 - Sep 2026 walk-forward the guard cut DK1 logistic from EUR 69.1k to "
+             "27.5k and DK1 LightGBM from 25.2k to 14.4k, DK2 unchanged.")
+    st.sidebar.caption(("🛡️ Crash guard ON" if _cg_on else "Crash guard OFF (recommended)")
+                       + f" - set by {_cg_src}; applies to new locks within 15 min.")
+except Exception as _e:
+    st.sidebar.warning(f"BUY crash guard switch unavailable: {type(_e).__name__}: {_e}")
 
 # Trade size scales with how much of the account's collateral a batch of quarters may risk
 # (batch_risk_fraction in config.yaml). Default is now the bigger 0.2 budget for new,
