@@ -64,6 +64,36 @@ def _clock(cx, cy, pd_, pf, pu, direction, cert):
     return "".join(out)
 
 
+LADDER_JS = r"""
+function ladder(d){
+  const W=250,H=196,top=16,bot=H-16,bx0=46,bx1=78,lx=112;
+  const it=[['90%',d.hi,'#1f2a3a'],['Expected (point)',d.pt,'#e63946'],['50% (median)',d.mid,'#1f2a3a'],
+            ['10%',d.lo,'#1f2a3a'],[d.refl,d.ref,'#b8860b'],['Settled actual',d.act,'#008f6b']]
+           .filter(x=>x[1]!==null&&x[1]!==undefined);
+  if(!it.length) return '';
+  let vs=it.map(x=>x[1]), mn=Math.min(...vs), mx=Math.max(...vs); const pad=Math.max(5,(mx-mn)*0.08); mn-=pad; mx+=pad;
+  const y=v=>top+(bot-top)*(mx-v)/(mx-mn);
+  let s=`<svg width="${W}" height="${H}" style="display:block;margin:4px 0">`;
+  const st=[5,10,20,25,50,100,200,250,500].find(k=>(mx-mn)/k<=6)||1000;
+  for(let v=Math.ceil(mn/st)*st; v<=mx; v+=st){ s+=`<line x1="${bx0-6}" x2="${bx0-2}" y1="${y(v)}" y2="${y(v)}" stroke="#555"/>`+
+     `<text x="${bx0-8}" y="${y(v)+3}" font-size="9" fill="#555" text-anchor="end">${v}</text>`; }
+  s+=`<line x1="${bx0-2}" x2="${bx0-2}" y1="${top}" y2="${bot}" stroke="#555"/>`;
+  if(d.hi!==null&&d.lo!==null) s+=`<rect x="${bx0}" y="${y(d.hi)}" width="${bx1-bx0}" height="${Math.max(2,y(d.lo)-y(d.hi))}" rx="3" fill="#5b8fc0"/>`;
+  if(d.mid!==null) s+=`<line x1="${bx0}" x2="${bx1}" y1="${y(d.mid)}" y2="${y(d.mid)}" stroke="#ffffff" stroke-width="2"/>`;
+  if(d.ref!==null) s+=`<line x1="${bx0-4}" x2="${bx1+4}" y1="${y(d.ref)}" y2="${y(d.ref)}" stroke="#e0a800" stroke-width="2" stroke-dasharray="4,2"/>`;
+  if(d.pt!==null) s+=`<circle cx="${(bx0+bx1)/2}" cy="${y(d.pt)}" r="4" fill="#e63946" stroke="#fff"/>`;
+  if(d.act!==null){const a=y(d.act),c=(bx0+bx1)/2; s+=`<path d="M${c},${a-6} L${c+6},${a} L${c},${a+6} L${c-6},${a} Z" fill="#00c08b" stroke="#0b0d14"/>`;}
+  // labels: sorted by value, spread so they never overlap, each joined to its point by a line
+  const L=it.map(x=>({lbl:x[0],v:x[1],col:x[2],yv:y(x[1])})).sort((a,b)=>a.yv-b.yv);
+  const gap=14; L.forEach((o,i)=>{o.ly=Math.max(o.yv, i?L[i-1].ly+gap:top);});
+  const over=L.length?L[L.length-1].ly-bot:0; if(over>0){L.forEach(o=>o.ly-=over); for(let i=1;i<L.length;i++) L[i].ly=Math.max(L[i].ly,L[i-1].ly+gap);}
+  L.forEach(o=>{ s+=`<polyline points="${bx1+2},${o.yv} ${bx1+14},${o.yv} ${lx-4},${o.ly}" fill="none" stroke="#666" stroke-width="1"/>`+
+     `<text x="${lx}" y="${o.ly+3.5}" font-size="11" fill="${o.col}">${o.lbl}: <tspan font-weight="700">€${o.v.toFixed(1)}</tspan></text>`; });
+  return s+'</svg>';
+}
+"""
+
+
 def build_html(f: pd.DataFrame, view: str = "Price", now_utc=None, scroll_to_now: bool = True) -> tuple[str, int]:
     """Returns (html, height). `f` columns: quarter_utc, t, lo/mid/hi/point/actual/ref (in the chosen
     view), spot_eur, q10/q50/q90/exp_spread/spread_actual (spread), p_down/p_flat/p_up, direction,
@@ -159,6 +189,8 @@ def build_html(f: pd.DataFrame, view: str = "Price", now_utc=None, scroll_to_now
         data.append({"t": r.t, "status": r.status, "dir": r.direction, "cert": r.certainty, "dec": r.decision,
                      "pd": _f(r.p_down, 3), "pf": _f(r.p_flat, 3), "pu": _f(r.p_up, 3),
                      "hi": hi, "mid": mid, "lo": lo, "pt": pt, "spot": _f(r.spot_eur), "act": act,
+                     "ref": ref if view == "Price" else 0.0,
+                     "refl": "Spot (day-ahead)" if view == "Price" else "Zero (no spread)",
                      "pnl": pnl if r.action in ("BUY", "SELL") else None})
     if now_x is not None:
         s.append(f'<line x1="{now_x}" x2="{now_x}" y1="{top-6}" y2="{rows["Settled P&L"]+12}" stroke="{C["now"]}" '
@@ -180,11 +212,12 @@ body{{margin:0;background:{C['bg']};font-family:Inter,Segoe UI,Arial,sans-serif;
 .sc{{overflow-x:auto;overflow-y:hidden}}
 .q:hover>rect:first-child{{fill:rgba(255,255,255,0.06)}}
 #tip{{position:fixed;display:none;pointer-events:none;background:#ffffff;color:#14161f;border-radius:6px;
- box-shadow:0 4px 16px rgba(0,0,0,.45);padding:10px 12px;font-size:12px;min-width:210px;z-index:9}}
+ box-shadow:0 4px 16px rgba(0,0,0,.45);padding:10px 12px;font-size:12px;min-width:250px;z-index:9}}
 #tip h4{{margin:0 0 6px;font-size:13px}} #tip td{{padding:1px 6px 1px 0}} .bar{{height:10px;border-radius:2px}}
 </style></head><body><div class="wrap"><div class="leg">{legend}</div>
 <div style="display:flex"><div style="flex:0 0 {lw}px">{''.join(lab)}</div><div class="sc" id="sc" style="flex:1">{''.join(s)}</div></div></div><div id="tip"></div>
 <script>
+{LADDER_JS}
 const D={json.dumps(data)}; const tip=document.getElementById('tip');
 const f=(v)=>v===null?'-':'€'+v.toFixed(1); const p=(v)=>v===null?'-':Math.round(v*100)+'%';
 function bar(lbl,v,c){{return `<tr><td>${{lbl}}</td><td style="width:110px"><div class="bar" style="width:${{Math.round((v||0)*100)}}%;background:${{c}}"></div></td><td>${{p(v)}}</td></tr>`}}
@@ -193,9 +226,7 @@ document.querySelectorAll('.q').forEach(g=>{{
   tip.innerHTML=`<h4>${{d.t}} &middot; ${{d.status}}</h4>
   <b>Most likely direction: <span style="color:${{({json.dumps(DIR_COL)})[d.dir]}}">${{d.dir}}</span></b><br>Certainty: <b>${{d.cert}}</b>
   <table style="margin:6px 0">${{bar('Down',d.pd,'{C['down']}')}}${{bar('None',d.pf,'{C['none']}')}}${{bar('Up',d.pu,'{C['up']}')}}</table>
-  <table><tr><td>90%</td><td>${{f(d.hi)}}</td></tr><tr><td>Expected (point)</td><td style="color:{C['point']}"><b>${{f(d.pt)}}</b></td></tr>
-  <tr><td>50% (median)</td><td>${{f(d.mid)}}</td></tr><tr><td>10%</td><td>${{f(d.lo)}}</td></tr>
-  <tr><td>Day-ahead (spot)</td><td>${{f(d.spot)}}</td></tr><tr><td>Settled actual</td><td><b>${{f(d.act)}}</b></td></tr></table>
+  ${{ladder(d)}}${{d.spot===null?'<div style="color:#888;font-size:11px">Day-ahead price not yet set</div>':''}}
   <div style="margin-top:6px">Decision: <b>${{d.dec}}</b>${{d.pnl===null?'':' &middot; P&amp;L <b>'+(d.pnl>=0?'+':'')+'€'+d.pnl+'</b>'}}</div>
   <div style="color:#666;margin-top:4px;font-size:11px">{view} view, {unit}</div>`;
   tip.style.display='block'; let x=e.clientX+14, yv=e.clientY+10;

@@ -504,7 +504,7 @@ with st.sidebar.expander("ℹ️ Data Source Architecture Details", expanded=Fal
     
     ---
     ### 3. Nord Pool Continuous Intraday (XBID) Microstructure
-    * **Engine:** Real-time Level-2 order book depth & Volume Skewness index $\in [-1.0, +1.0]$.
+    * **Engine:** Real-time Level-2 order book depth & Volume Skewness index $\\in [-1.0, +1.0]$.
     * **Data:** Best Bid/Ask volume dynamics, micro-price deviation, and liquidity pressure.
     
     ---
