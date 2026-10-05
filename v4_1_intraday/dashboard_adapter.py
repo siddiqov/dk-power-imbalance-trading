@@ -678,3 +678,28 @@ def model_explanation(area: str, family: str | None = None, top: int = 15) -> pd
         return out.reset_index().rename(columns={"index": "feature"})
     imp = m.feature_importance().head(top)
     return pd.DataFrame({"feature": imp.index, "share_%": imp.round(2).values})
+
+
+def forecast_view(area: str, date_str: str, family: str | None = None) -> pd.DataFrame:
+    """Per-quarter forecast picture for one local day (2026-10-05, 'Imbalance forecast' tab).
+
+    Model output (spread quantiles q10/q50/q90, expected spread, P(down/flat/up)) at the model's
+    own validated thresholds; locked quarters show what was actually locked (journal). Adds the
+    published day-ahead price (`spot_eur`) so the view can be drawn as price = spot + spread, and
+    the settled spread where it is known. Authentic data only - missing values stay NaN.
+    """
+    cfg = config()
+    family = _fam(area, family)
+    d = _predictions(area, date_str, family=family)
+    if d.empty:
+        return d
+    d = d.copy()
+    d["source"] = "forecast"
+    d = _overlay_journal(d, cfg, area, family)
+    try:
+        da = day_dayahead([area], date_str)
+        spot = da.set_index("time_dk_str")[area] if len(da) and area in da.columns else None
+    except Exception:
+        spot = None
+    d["spot_eur"] = d["time_dk_str"].map(spot).astype(float) if spot is not None else np.nan
+    return d

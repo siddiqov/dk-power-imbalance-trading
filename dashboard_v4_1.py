@@ -280,42 +280,12 @@ date_str_selected = selected_date.strftime("%Y-%m-%d")
 # The looser levels are a what-if view of the SAME forecasts at a lower bar - not validated.
 # 2026-10-04: default = Aggressive (what-if). The last manual choice is remembered across browser
 # refreshes and new tabs: kept in the page URL (?thr=...) and in a small file on this machine.
-THRESHOLD_OPTIONS = ["Validated (from training)", "Balanced (what-if)", "Aggressive (what-if)"]
-THRESHOLD_DEFAULT = "Aggressive (what-if)"
-_THR_CODE = {"Validated (from training)": "validated", "Balanced (what-if)": "balanced",
-             "Aggressive (what-if)": "aggressive"}
-
-
-def _save_threshold_choice():
-    lvl = st.session_state.get("threshold_level", THRESHOLD_DEFAULT)
-    code = _THR_CODE.get(lvl, "aggressive")
-    try:
-        st.query_params["thr"] = code
-    except Exception:
-        pass
-    _save_ui_pref("threshold_level", code)
-
-
-if "threshold_level" not in st.session_state:          # first run of this browser session
-    _code_to_label = {v: k for k, v in _THR_CODE.items()}
-    try:
-        _url_code = st.query_params.get("thr")
-    except Exception:
-        _url_code = None
-    _saved = _code_to_label.get(_url_code) or _code_to_label.get(_load_ui_prefs().get("threshold_level"))
-    st.session_state["threshold_level"] = _saved or THRESHOLD_DEFAULT
-try:
-    if st.query_params.get("thr") != _THR_CODE.get(st.session_state["threshold_level"]):
-        st.query_params["thr"] = _THR_CODE.get(st.session_state["threshold_level"], "aggressive")
-except Exception:
-    pass
-
-threshold_level = st.sidebar.selectbox(
-    "V4.1 Signal Thresholds",
-    THRESHOLD_OPTIONS,
-    key="threshold_level",  # value set above: URL -> saved choice -> default Aggressive
-    on_change=_save_threshold_choice,
-    help="Validated uses the margin / probability pair tuned on held-out data. The what-if levels halve or quarter the margin and lower the probability bar, so more quarters qualify - more trades, more exposure, and no validation behind them.")
+# 2026-10-05: Validated only. The dashboard shows exactly what the cycle locks and sends. The
+# what-if levels (Balanced / Aggressive) were removed: they recomputed decisions over quarters that
+# were already locked, skipped live rules (stale-data guard, fallback BUY), and could mislead
+# (e.g. 0 trades for the logistic model at "Aggressive").
+threshold_level = "Validated (from training)"
+st.sidebar.caption("Signal thresholds: **Validated** (tuned in training) - exactly what is locked and sent.")
 # The walk-forward replay has always applied a daily loss stop and drawdown scaling; until now
 # the live view did not, so backtest and live were not the same system. With this on, they are.
 risk_limits_on = st.sidebar.checkbox(
@@ -604,7 +574,7 @@ def _by_local_minute(df):
 @st.cache_data(ttl=180)
 def _diag_log(msg):
     try:
-        with open(r'C:\Users\Hafeez\Documents\Nurex_Trading\Basic_Approach\logs\diag_trading_day.log', 'a', encoding='utf-8') as _df:
+        with open(os.path.join('logs', 'diag_trading_day.log'), 'a', encoding='utf-8') as _df:
             from datetime import datetime as _dt
             _df.write(f"{_dt.now()} | {msg}\n")
     except Exception:
@@ -853,11 +823,12 @@ def get_v4_1_trading_day_data(area, date_str, threshold_key='validated', risk_li
             st.warning(f"\u26a0\ufe0f V4.1 decisions could not be matched to the ledger quarters "
                        f"({len(v41)} decisions, 0 matched) - the table shows no V4.1 signal.")
         pick = lambda c, d=np.nan: key.map(m[c]).fillna(d) if c in m.columns else d
-        # 2026-09-28: show the median forecast (q50) - ~15% lower error than the probability-weighted
-        # mean, which rare spikes pull around. Positions are still decided by probabilities + edge.
-        _q50 = pick('q50')
-        df_matrix['V4_1_Predicted_Spread_EUR'] = (_q50 if not np.isscalar(_q50) else pd.Series(np.nan, index=key.index)) \
-            .fillna(pick('exp_spread', 0.0)).astype(float)
+        # 2026-10-05: show the model's EXPECTED spread (what drives its BUY/SELL decision). The median
+        # (q50) came from LightGBM quantile models that the logistic bundle shares, so both models'
+        # "Pred" columns were identical. q50 stays as a fallback only.
+        _exp = pick('exp_spread')
+        df_matrix['V4_1_Predicted_Spread_EUR'] = (_exp if not np.isscalar(_exp) else pd.Series(np.nan, index=key.index)) \
+            .fillna(pick('q50', 0.0)).astype(float)
         df_matrix['p_down'] = pick('p_down')
         df_matrix['p_none'] = pick('p_flat')
         df_matrix['p_up'] = pick('p_up')
@@ -937,7 +908,7 @@ def get_v4_1_trading_day_data(area, date_str, threshold_key='validated', risk_li
         if not cmp.empty:
             mc = _by_local_minute(cmp)
             pc = lambda c, d=np.nan: key.map(mc[c]).fillna(d) if c in mc.columns else pd.Series(d, index=key.index)
-            df_matrix['CMP_Predicted_Spread_EUR'] = pc('q50').fillna(pc('exp_spread', 0.0)).astype(float)
+            df_matrix['CMP_Predicted_Spread_EUR'] = pc('exp_spread').fillna(pc('q50', 0.0)).astype(float)  # expected, not shared q50
             c_acts = key.map(mc['action']).fillna('HOLD')
             c_src = key.map(mc['source']).fillna('recomputed') if 'source' in mc.columns else pd.Series('recomputed', index=key.index)
             c_fin = key.map(mc['decision_final']).fillna(False)
@@ -959,7 +930,7 @@ try:
 except Exception as _e:
     import traceback as _tb_mod; _tb_str = _tb_mod.format_exc()
     try:
-        with open(r'C:\Users\Hafeez\Documents\Nurex_Trading\Basic_Approach\logs\dashboard_v4_1_errors.log', 'a', encoding='utf-8') as _ef:
+        with open(os.path.join('logs', 'dashboard_v4_1_errors.log'), 'a', encoding='utf-8') as _ef:
             _ef.write(f'\n======\n{datetime.now()} MAIN_EXCEPT\n{_tb_str}\n')
     except Exception:
         pass
@@ -998,10 +969,11 @@ with m3:
     st.metric(f"Pending Exposure ({REC_SHORT})", f"{open_vol_41:.0f} MW", f"{len(df_day) - settled_mask.sum()} Quarters Pending")
 
 # --- MAIN NAVIGATION TABS ---
-tab_cables, tab_balancing, tab_unified_ledger, tab_xbid, tab_gridsearch, tab_tournament = st.tabs([
+tab_cables, tab_balancing, tab_unified_ledger, tab_forecast, tab_xbid, tab_gridsearch, tab_tournament = st.tabs([
     "🌐 8-Cable Interconnector Radar",
     "⚡ European Balancing & SMARD.de Telemetry",
     "🎯 96-Quarter Multi-Model Unified Comparative Ledger",
+    "📊 Imbalance Forecast",
     f"📈 Nord Pool Continuous Intraday (XBID) Terminal — ID-{selected_area}-Nurex",
     "🔬 Model Details (LightGBM + recommended)",
     "🏆 Model Tournament (LightGBM vs recommended)"
@@ -1826,7 +1798,7 @@ with tab_unified_ledger:
                   {ic_ths}
                   {v40_ths}
                   <th draggable="true" title="V4.1 Predicted Imbalance Price (€) [Spot + Spread]" style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">{REC_SHORT} Pred</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
-                  <th draggable="true" title="V4.1 Predicted Spread (€/MWh) [median forecast of imbalance minus DA spot]. BUY/SELL come from the model's up/down probabilities and expected edge, so the sign can differ from the position." style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">{REC_SHORT} Spread</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
+                  <th draggable="true" title="V4.1 Predicted Spread (€/MWh) [the model's expected imbalance minus DA spot - the value its BUY/SELL decision is based on]." style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">{REC_SHORT} Spread</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   <th draggable="true" title="{REC_LABEL} trading decision (recommended model - locked and sent to the client)" style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">{REC_SHORT} Pos</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   <th draggable="true" title="V4.1 Position Size with Conviction Scaling" style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">{REC_SHORT} Vol</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
                   <th draggable="true" title="V4.1 Realized Trading PnL (€)" style="background-color:#0F766E;"><div class="col-header-wrap"><span class="col-title">{REC_SHORT} PnL</span><button type="button" class="btn-col-copy" title="Copy Column" onclick="copySingleColumn(this, event)">📋</button></div></th>
@@ -2201,6 +2173,114 @@ with tab_unified_ledger:
         </html>
         """
         components.html(accordion_html, height=800, scrolling=True)
+
+# ----------------------------------------------------------------------
+# TAB: IMBALANCE FORECAST (2026-10-05)
+# One bar per quarter: the model's 10-90% range of the imbalance spread (or price = day-ahead +
+# spread), its median and expected value, the direction probabilities, how certain the model is,
+# what was decided (BUY / SELL / HOLD) and, once settled, what actually happened.
+# Display only - nothing here changes a decision.
+# ----------------------------------------------------------------------
+with tab_forecast:
+    st.subheader(f"Imbalance Forecast - {selected_area}, {date_str_selected}")
+    _fc_models = [REC_FAMILY] + (["lgbm"] if CMP_FAMILY else [])
+    fc1, fc2, fc3 = st.columns([1.4, 0.8, 1.2])
+    with fc1:
+        _fc_fam = st.radio("Model", _fc_models, horizontal=True, key="fc_model",
+                           format_func=lambda f: (f"{v41id.family_label(f)} (sent to client)" if f == REC_FAMILY
+                                                  else f"{v41id.family_label(f)} (comparison)"))
+    with fc2:
+        _fc_view = st.radio("Show", ["Price", "Spread"], horizontal=True, key="fc_view",
+                            help="Price = day-ahead price + forecast spread (imbalance price). "
+                                 "Spread = imbalance price minus day-ahead price, what the model predicts.")
+    with fc3:
+        _fc_win = st.radio("Quarters", ["From now (next 6 h)", "Whole day"], horizontal=True, key="fc_window")
+
+    try:
+        _fv = v41id.forecast_view(selected_area, date_str_selected, family=_fc_fam)
+    except Exception as _e:
+        _log_startup_error(f"forecast_view({selected_area}, {date_str_selected})", _e)
+        st.warning(f"Forecast unavailable: {type(_e).__name__}: {_e}")
+        _fv = pd.DataFrame()
+
+    if _fv.empty:
+        st.info("No forecast for this day yet (model not loaded, or no data for the day).")
+    else:
+        f = pd.DataFrame({"quarter_utc": _fv["quarter_utc"], "t": _fv["time_dk_str"].str[11:16]})
+        for c in ("q10", "q50", "q90", "exp_spread", "p_down", "p_flat", "p_up", "spot_eur", "spread_actual", "mwh",
+                  "pnl_eur"):
+            f[c] = pd.to_numeric(_fv[c], errors="coerce") if c in _fv.columns else np.nan
+        f["action"] = _fv["action"].astype(str).values
+        f["status"] = _fv.get("source", pd.Series("forecast", index=_fv.index)).astype(str).values
+        f.loc[f["spread_actual"].notna() & (f["status"] != "forecast"), "status"] = "SETTLED"
+        _probs = f[["p_down", "p_flat", "p_up"]].fillna(0.0).values
+        _dir_lbl = np.array(["Down", "None", "Up"])
+        f["direction"] = np.where(f[["p_down", "p_flat", "p_up"]].notna().all(axis=1),
+                                  _dir_lbl[_probs.argmax(axis=1)], "-")
+        _pmax = _probs.max(axis=1)
+        # Certainty = how strongly the model prefers its most likely direction (3 classes: 33% = no idea)
+        # no class above 40% = no clear direction ("-", drawn as ~)
+        f.loc[(_pmax < 0.40) & (f["direction"] != "-"), "direction"] = "-"
+        f["certainty"] = np.where(f["direction"] == "-", "-",
+                                  np.where(_pmax >= 0.60, "High", np.where(_pmax >= 0.45, "Medium", "Low")))
+        f["arrow"] = f["direction"].map({"Down": "▼", "Up": "▲", "None": "■"}).fillna("·")
+        f["decision"] = np.where(f["action"].isin(["BUY", "SELL"]),
+                                 f["action"] + " " + f["mwh"].round(1).astype(str), "HOLD")
+        _price = _fc_view == "Price"
+        _base = f["spot_eur"] if _price else 0.0
+        f["lo"], f["mid"], f["hi"] = _base + f["q10"], _base + f["q50"], _base + f["q90"]
+        f["point"] = _base + f["exp_spread"]
+        f["actual"] = _base + f["spread_actual"]
+        f["ref"] = f["spot_eur"] if _price else 0.0
+        for c in ("lo", "mid", "hi", "point", "actual", "ref", "spot_eur", "q10", "q50", "q90", "exp_spread"):
+            f[c] = f[c].astype(float).round(1)
+        for c in ("p_down", "p_flat", "p_up"):
+            f[c + "_pct"] = (f[c] * 100).round(0)
+
+        if _fc_win.startswith("From now"):
+            _now = pd.Timestamp.now(tz="UTC").tz_localize(None)
+            _fut = f[f["quarter_utc"] >= _now - pd.Timedelta(minutes=15)]
+            if len(_fut):
+                f = _fut.head(24)
+            else:
+                st.caption("All quarters of this day are in the past - showing the whole day.")
+        if _price and f["spot_eur"].isna().all():
+            st.info("Day-ahead price not yet published for these quarters - switch to **Spread** to see the forecast.")
+
+        from v4_1_intraday import forecast_chart as _FC
+        _html, _h = _FC.build_html(f, view=_fc_view)
+        components.html(_html, height=_h, scrolling=False)
+        st.caption("Hover a quarter for its full numbers. Shaded = quarter already delivered. Certainty: High = most "
+                   "likely direction ≥ 60%, Medium ≥ 45%, Low below; '-' / ~ = no direction above 40%. Locked quarters "
+                   "show what was locked and sent; later ones are provisional until their batch locks (2h15 ahead). "
+                   "Settled P&L = our locked trade's result after costs.")
+
+        # quarter detail - like a tooltip you can keep open
+        _sel = st.selectbox("Quarter detail", f["t"].tolist(), key="fc_quarter")
+        r = f[f["t"] == _sel].iloc[0]
+        d1, d2 = st.columns([1, 1.3])
+        with d1:
+            st.markdown(f"**{_sel} - most likely direction: {r['direction']}** (certainty {r['certainty']})  \n"
+                        f"Status: {r['status']} · Decision: **{r['decision']}**")
+            pdf = pd.DataFrame({"Direction": ["Down", "None", "Up"],
+                                "Probability": [r["p_down"], r["p_flat"], r["p_up"]]})
+            st.altair_chart(alt.Chart(pdf).mark_bar().encode(
+                y=alt.Y("Direction:N", sort=None, title=None),
+                x=alt.X("Probability:Q", axis=alt.Axis(format="%"), scale=alt.Scale(domain=[0, 1])),
+                color=alt.Color("Direction:N", scale=alt.Scale(domain=["Down", "None", "Up"],
+                                range=["#e8743b", "#54a24b", "#4c78a8"]), legend=None),
+                tooltip=[alt.Tooltip("Probability:Q", format=".0%")]).properties(height=110),
+                use_container_width=True)
+        with d2:
+            qt = pd.DataFrame({"": ["90%", "50% (median)", "10%", "Expected (point)", "Day-ahead price",
+                                    "Settled (actual)"],
+                               "Spread (EUR/MWh)": [r["q90"], r["q50"], r["q10"], r["exp_spread"], None,
+                                                    r["spread_actual"]],
+                               "Price (EUR/MWh)": [r["q90"] + r["spot_eur"], r["q50"] + r["spot_eur"],
+                                                   r["q10"] + r["spot_eur"], r["exp_spread"] + r["spot_eur"],
+                                                   r["spot_eur"], r["spread_actual"] + r["spot_eur"]]})
+            st.dataframe(qt.round(1), hide_index=True, use_container_width=True)
+
 
 # ----------------------------------------------------------------------
 # TAB 4: NORD POOL CONTINUOUS INTRADAY (XBID) TERMINAL & DAM DECOUPLING
@@ -2737,11 +2817,9 @@ with tab_tournament:
     with tcol2:
         n_days = st.number_input("Days to evaluate", min_value=1, max_value=60, value=7, step=1)
     with tcol3:
-        _lv_label = {'validated': 'Validated', 'balanced': 'Balanced (what-if)', 'aggressive': 'Aggressive (what-if)'}
-        # default: the sidebar's V4.1 Signal Thresholds level (Aggressive by default) plus Validated
-        levels_sel = st.multiselect("Threshold levels", list(_lv_label),
-                                    default=list(dict.fromkeys([THRESHOLD_KEY, 'validated'])),
-                                    format_func=lambda x: _lv_label[x])
+        _lv_label = {'validated': 'Validated'}
+        levels_sel = ['validated']           # 2026-10-05: what-if levels removed - locked decisions only
+        st.caption("Thresholds: **Validated** - the decisions each model actually locked.")
 
     if any(v is None for v in _tus.values()):
         st.warning("A model is not trained yet - no tournament to run: "
