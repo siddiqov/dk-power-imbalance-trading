@@ -308,17 +308,54 @@ def cmd_backfill(args, cfg):
     return B.main(["--hours", str(getattr(args, "hours", 48) or 48)])
 
 
+# 2026-10-06 lock-first: a batch must be locked by its deadline (:45), and only the :19/:34 runs can lock it
+# (lock_ahead_minutes = 20). The slow collectors (ENTSO-E, UMM, weather, frequency; up to 60 s x 5 retries per
+# request) ran BEFORE the lock, so one slow ENTSO-E run made the system miss a whole hour (5 Oct 17:00 and
+# 6 Oct 15:00 batches on Denmark). Now: fast Energinet update -> lock -> slow collectors in a child process
+# with a hard time limit -> backfill -> lock again (locks only what became due meanwhile; already-locked
+# quarters are skipped) -> compact.
+COLLECT_TIMEOUT_S = 480
+UPDATE_TIMEOUT_S = 240     # Energinet update incl. its built-in ENTSO-E step (normally 20-70 s)
+
+
 def cmd_cycle(args, cfg):
     """One paper-trading cycle. Data problems never stop the locking of the next gates."""
-    r = subprocess.run([sys.executable, "run.py", "update"], cwd=str(S.V42_ROOT))
-    if r.returncode != 0:
-        print("WARNING: EDS update failed - locking with the data already stored")
-    args.source = args.source if getattr(args, "source", None) else "entsoe,umm,weather,frequency"
-    args.start = None
+    # the V4.2 update also fetches some ENTSO-E data, which can hang (6 Oct 12:34 run on Denmark):
+    # give it a hard time limit too, so the lock below always runs before the deadline
     try:
-        cmd_collect(args, cfg)
+        r = subprocess.run([sys.executable, "run.py", "update"], cwd=str(S.V42_ROOT), timeout=UPDATE_TIMEOUT_S)
+        if r.returncode != 0:
+            print("WARNING: EDS update failed - locking with the data already stored", flush=True)
+    except subprocess.TimeoutExpired:
+        print(f"WARNING: EDS update stopped after {UPDATE_TIMEOUT_S // 60} min - locking with the data already stored",
+              flush=True)
+    # 1) lock whatever is already due, before any slow download (fresh Energinet prices, other sources <=15 min old)
+    try:
+        cmd_lock(args, cfg)
     except Exception as e:
-        print(f"WARNING: collect failed: {e}")
+        print(f"WARNING: early lock failed: {e} - collecting data and retrying the lock", flush=True)
+    sys.stdout.flush()
+    # 2) slow collectors in a child process with a hard time limit (same global options as this run)
+    sources = args.source if getattr(args, "source", None) else "entsoe,umm,weather,frequency"
+    child = [sys.executable, str(Path(__file__).resolve())]
+    if getattr(args, "config", None):
+        child += ["--config", args.config]
+    if getattr(args, "db", None):
+        child += ["--db", args.db]
+    if getattr(args, "mode", None):
+        child += ["--mode", args.mode]
+    for kv in getattr(args, "set", None) or []:
+        child += ["--set", kv]
+    child += ["collect", "--source", sources]
+    try:
+        rc = subprocess.run(child, cwd=str(Path(__file__).resolve().parent), timeout=COLLECT_TIMEOUT_S).returncode
+        if rc != 0:
+            print(f"WARNING: collect exited with code {rc} - continuing", flush=True)
+    except subprocess.TimeoutExpired:
+        print(f"WARNING: collect stopped after {COLLECT_TIMEOUT_S // 60} min - continuing", flush=True)
+    except Exception as e:
+        print(f"WARNING: collect failed: {e}", flush=True)
+    args.start = None
     # Settlement prices appear ~20 min after a quarter and the collector stores the row earlier
     # with an empty price, so re-read the recent window before settling the journal.
     try:
