@@ -191,3 +191,6 @@ Nurex_V4_2/models/*.pkl
 
 # Nurex V4.1 paper-trading journal
 data/v41_journal.sqlite
+# machine-specific runtime state and manual backups (2026-10-12)
+Nurex_V4_2/runtime/
+*.bak-*

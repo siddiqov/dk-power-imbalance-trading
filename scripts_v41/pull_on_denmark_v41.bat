@@ -93,7 +93,7 @@ for /f "usebackq delims=" %%f in ("%ROOT%\.git\pull_keep.txt") do (
 )
 set CHANGED=1
 set NBK=0
-for /f "usebackq delims=" %%f in (`findstr /x /l /g:"%ROOT%\.git\pull_incoming.txt" "%ROOT%\.git\pull_local.txt"`) do (
+for /f "usebackq delims=" %%f in (`findstr /x /l /i /g:"%ROOT%\.git\pull_incoming.txt" "%ROOT%\.git\pull_local.txt"`) do (
   set "P=%%f" & set "P=!P:/=\!"
   if exist "!P!" (
     for %%d in ("%BK%\code\!P!") do if not exist "%%~dpd" mkdir "%%~dpd"
@@ -103,7 +103,7 @@ for /f "usebackq delims=" %%f in (`findstr /x /l /g:"%ROOT%\.git\pull_incoming.t
   echo backed up and reset local change: %%f >> "%LOG%"
   set /a NBK+=1
 )
-for /f "usebackq delims=" %%f in (`findstr /x /l /g:"%ROOT%\.git\pull_incoming.txt" "%ROOT%\.git\pull_untracked.txt"`) do (
+for /f "usebackq delims=" %%f in (`findstr /x /l /i /g:"%ROOT%\.git\pull_incoming.txt" "%ROOT%\.git\pull_untracked.txt"`) do (
   set "P=%%f" & set "P=!P:/=\!"
   for %%d in ("%BK%\code\!P!") do if not exist "%%~dpd" mkdir "%%~dpd"
   move /y "!P!" "%BK%\code\!P!" > nul

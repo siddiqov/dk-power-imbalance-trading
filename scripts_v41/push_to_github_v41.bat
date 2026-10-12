@@ -32,6 +32,9 @@ echo Collecting files (this takes a minute) ...
 REM (logs\ and Nurex_V4_2\data\ are already ignored by git, so they are not listed here -
 REM  naming an ignored folder makes "git add" fail)
 git -c core.autocrlf=true -c core.safecrlf=false -c advice.addIgnoredFile=false add -A -- . ":(exclude)results" ":(exclude)backups" ":(exclude,glob)_backup_*/**" ":(exclude)data" ":(exclude)_drive_transfer" ":(exclude)Nurex_V4_2/batches" ":(exclude,glob)models_v*/**" ":(exclude,glob)**/*.pkl" ":(exclude,glob)**/*.db" ":(exclude,glob)**/*.duckdb*" ":(exclude,glob)**/*.sqlite*" ":(exclude,glob)**/*.parquet" ":(exclude,glob)**/.env*" >> "%LOG%" 2>&1 || goto :fail
+REM 2026-10-12: machine-specific runtime files and *.bak-* copies never belong on GitHub
+REM (they blocked the Denmark pull). Remove them from the pushed tree if an earlier push added them.
+git rm -r -q --cached --ignore-unmatch -- Nurex_V4_2/runtime "*.bak-*" >> "%LOG%" 2>&1
 
 git diff --cached --quiet origin/%BRANCH% && (
   echo.
