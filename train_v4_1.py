@@ -278,8 +278,8 @@ def cmd_probe_nordpool(args, cfg):
 
 def cmd_record(args, cfg):
     from v4_1_intraday.collectors import nordpool_id as npid
-    print("Recording Nord Pool intraday market data - leave this window open (Ctrl+C to stop).")
-    npid.record(stop_after=None, subscribe_localview=not args.no_book)
+    print("Recording Nord Pool intraday market data (guarded mode) - leave this window open (Ctrl+C to stop).")
+    npid.record_guarded(stop_after=None, subscribe_localview=not args.no_book)
 
 
 def cmd_lock(args, cfg):

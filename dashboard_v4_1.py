@@ -191,8 +191,196 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# NORD POOL API STATUS BAR  (Part 3 — auto-refreshing, not the whole dashboard)
+# ═══════════════════════════════════════════════════════════════════════════════
+import json as _json_sb
+import os as _os_sb
+import subprocess as _subp_sb
+import sys as _sys_sb
+import time as _time_sb
+from pathlib import Path as _Path_sb
+
+try:
+    import psutil as _psutil
+    _PSUTIL_OK = True
+except ImportError:
+    _PSUTIL_OK = False
+
+_PROJECT_DIR = _Path_sb(__file__).parent
+_STATUS_FILE  = _PROJECT_DIR / "Nurex_V4_2" / "runtime" / "nordpool_status.json"
+_LOG_FILE     = _PROJECT_DIR / "logs" / "nordpool_recorder.log"
+_RECORDER_SCRIPT = str(_PROJECT_DIR / "train_v4_1.py")
+_VENV_PY = str(_PROJECT_DIR / "Nurex_V4_2" / ".venv" / "Scripts" / "python.exe")
+
+def _sb_read_status() -> dict | None:
+    try:
+        return _json_sb.loads(_STATUS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+def _sb_pid_alive(pid) -> bool:
+    if not _PSUTIL_OK or pid is None:
+        return False
+    try:
+        p = _psutil.Process(int(pid))
+        return p.is_running() and p.status() != _psutil.STATUS_ZOMBIE
+    except (_psutil.NoSuchProcess, _psutil.AccessDenied, ValueError):
+        return False
+
+def _sb_classify(s: dict | None) -> tuple[str, str]:
+    """Returns (emoji_label, color) based on status JSON."""
+    if s is None:
+        return "🔴 **Nord Pool API: DOWN** — status file missing", "red"
+    pid_alive = _sb_pid_alive(s.get("pid"))
+    state = s.get("state", "")
+    lma = s.get("last_message_at")
+    if lma:
+        try:
+            age = (_time_sb.time() -
+                   pd.Timestamp(lma).timestamp())
+        except Exception:
+            age = 9999
+    else:
+        age = 9999
+    if state in ("auth_error", "session_taken_over", "error") or not pid_alive:
+        return f"🔴 **Nord Pool API: DOWN** — {state or 'process not running'}", "red"
+    if age > 300:
+        return f"🔴 **Nord Pool API: DOWN** — last message {int(age)}s ago", "red"
+    if state == "connecting" or 60 < age <= 300:
+        return f"🟡 **Nord Pool API: DEGRADED / RECONNECTING** — {state}", "orange"
+    return "🟢 **Nord Pool API: RUNNING**", "green"
+
+def _sb_fmt_time(ts_str) -> str:
+    if not ts_str:
+        return "—"
+    try:
+        t = pd.Timestamp(ts_str).tz_localize("UTC") if pd.Timestamp(ts_str).tzinfo is None else pd.Timestamp(ts_str)
+        cet = t.tz_convert("Europe/Copenhagen")
+        ago = int((_time_sb.time() - t.timestamp()))
+        return f"{cet:%H:%M:%S} CET ({ago}s ago)"
+    except Exception:
+        return str(ts_str)
+
+def _sb_stop_pid(pid):
+    if not _PSUTIL_OK or not pid:
+        return
+    try:
+        p = _psutil.Process(int(pid))
+        p.terminate()
+        gone, _ = _psutil.wait_procs([p], timeout=10)
+        if p in gone:
+            return
+        p.kill()
+    except Exception:
+        pass
+
+def _sb_start_recorder():
+    log_f = open(str(_LOG_FILE), "a", encoding="utf-8")
+    flags = 0
+    if _sys_sb.platform == "win32":
+        flags = _subp_sb.CREATE_NEW_PROCESS_GROUP | _subp_sb.DETACHED_PROCESS
+    _subp_sb.Popen(
+        [_VENV_PY, _RECORDER_SCRIPT, "record-intraday"],
+        cwd=str(_PROJECT_DIR),
+        creationflags=flags,
+        stdout=log_f,
+        stderr=log_f,
+    )
+
+@st.fragment(run_every=12)
+def _render_nordpool_status_bar():
+    s = _sb_read_status()
+    label, color = _sb_classify(s)
+    st.markdown(f"**{label}**")
+    if s:
+        pid_alive = _sb_pid_alive(s.get("pid"))
+        cols = st.columns(5)
+        cols[0].caption(f"🕐 Last msg: {_sb_fmt_time(s.get('last_message_at'))}")
+        cols[1].caption(f"📈 Last trade: {_sb_fmt_time(s.get('last_trade_at'))}")
+        cols[2].caption(f"📊 Msgs/5min: {s.get('messages_last_5min', 0)}")
+        cols[3].caption(f"🖥️ Host: {s.get('host','?')} | PID: {s.get('pid','?')} {'✅' if pid_alive else '❌'}")
+        uptime_s = s.get("started_at")
+        if uptime_s:
+            try:
+                up = int(_time_sb.time() - pd.Timestamp(uptime_s).timestamp())
+                cols[4].caption(f"⏱️ Up: {up//3600}h {(up%3600)//60}m")
+            except Exception:
+                pass
+        if s.get("last_error"):
+            st.warning(f"⚠️ Last error: {s['last_error']}")
+
+    # ── Controls ──────────────────────────────────────────────────────────────
+    enabled_env = (os.getenv("NORDPOOL_RECORDER_ENABLED") or "").strip().lower()
+    guard_ok = enabled_env == "true"
+
+    with st.expander("🎛️ Nord Pool recorder controls", expanded=False):
+        if not guard_ok:
+            st.error(
+                "NORDPOOL_RECORDER_ENABLED is not 'true' on this machine. "
+                "Controls are disabled to prevent accidental session conflicts."
+            )
+            return
+
+        pid = s.get("pid") if s else None
+        pid_alive = _sb_pid_alive(pid)
+        col1, col2, col3 = st.columns(3)
+
+        # START (only when down)
+        if not pid_alive:
+            if col1.button("▶️ Start recorder", key="_sb_start"):
+                with st.spinner("Starting…"):
+                    _sb_start_recorder()
+                    _time_sb.sleep(3)
+                    for _ in range(9):
+                        _time_sb.sleep(3)
+                        ns = _sb_read_status()
+                        if ns and _sb_pid_alive(ns.get("pid")):
+                            st.success("✅ Recorder started")
+                            break
+                    else:
+                        st.error("❌ Recorder did not start within 30 s — check the log")
+
+        # RESTART
+        confirm_r = col2.checkbox("☑ Confirm restart", key="_sb_confirm_restart")
+        if col2.button("🔄 Restart recorder", key="_sb_restart", disabled=not confirm_r):
+            with st.spinner("Restarting…"):
+                _sb_stop_pid(pid)
+                _time_sb.sleep(2)
+                _sb_start_recorder()
+                _time_sb.sleep(3)
+                for _ in range(9):
+                    _time_sb.sleep(3)
+                    ns = _sb_read_status()
+                    if ns and _sb_pid_alive(ns.get("pid")):
+                        st.success("✅ Recorder restarted")
+                        break
+                else:
+                    st.error("❌ Recorder did not come back within 30 s")
+
+        # STOP
+        confirm_s = col3.checkbox("☑ Confirm stop", key="_sb_confirm_stop")
+        if col3.button("⏹️ Stop recorder", key="_sb_stop", disabled=not confirm_s):
+            _sb_stop_pid(pid)
+            st.info("Stop signal sent")
+
+        # Log viewer
+        if st.toggle("📄 View last 50 log lines", key="_sb_logview"):
+            if _LOG_FILE.exists():
+                lines = _LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
+                st.code("\n".join(lines[-50:]), language="log")
+            else:
+                st.info("Log file not found yet")
+
+
 # --- SIDEBAR CONTROLLER ---
 st.sidebar.title("⚡ Nurex Trading Command Center")
+# ── Nord Pool status bar (auto-refreshes every 12 s) ──
+with st.sidebar:
+    _render_nordpool_status_bar()
+    st.markdown("---")
+
 st.sidebar.caption("V4.1 Intraday: current LightGBM + recommended model | Port 5005")
 
 # --- AUTO-REFRESH: current trade status every 15 min, matching the scheduled trading

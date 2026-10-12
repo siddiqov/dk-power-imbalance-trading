@@ -26,7 +26,7 @@ from . import settings as S
 from .features_id import IntradayFeatureBuilder
 from nurex42 import decision as dec
 from nurex42.models import SpreadModel
-from .model_v41 import SpreadModelV41, recency_weights
+from .model_v41 import SpreadModelV41, WeightedSpreadModel, recency_weights
 from .model_logreg import SpreadModelLogReg
 from nurex42.storage import Store
 
@@ -167,6 +167,12 @@ def fit_model(Xt, extras, y, rows, cfg, times=None) -> SpreadModel:
     cols = [c for c in usable_columns(X) if not c.startswith(ID_MARKET_PREFIXES) or c in allowed]
     mc = cfg["model"]
     if not mc.get("enhanced"):
+        # 2026-10-13 research option (default off = unchanged): recency weights in the plain model
+        w = _plain_weights(times, rows, extras, cfg)
+        if w is not None:
+            m = WeightedSpreadModel(params=mc["lgbm"], deadband=mc["direction_deadband_eur"],
+                                    quantiles=tuple(mc["quantiles"]))
+            return m.fit(X[cols], yy, stress_q=cfg["risk"]["stress_quantile"], sample_weight=w)
         m = SpreadModel(params=mc["lgbm"], deadband=mc["direction_deadband_eur"], quantiles=tuple(mc["quantiles"]))
         return m.fit(X[cols], yy, stress_q=cfg["risk"]["stress_quantile"])
     # 2026-09-28 upgrade: Huber size loss, recency weights, spike classifiers (see model_v41.py)
@@ -178,6 +184,16 @@ def fit_model(Xt, extras, y, rows, cfg, times=None) -> SpreadModel:
                        size_objective=mc.get("size_objective", "huber"), huber_delta=float(mc.get("huber_delta", 40.0)),
                        spike_level=float(mc.get("spike_level_eur", 150.0)))
     return m.fit(X[cols], yy, stress_q=cfg["risk"]["stress_quantile"], sample_weight=w)
+
+
+def _plain_weights(times, rows, extras, cfg):
+    """Row weights for the plain models when model.plain_recency_half_life_days is set
+    (2026-10-13, research option; absent/null = no weights = the behaviour before)."""
+    hl = (cfg["model"] or {}).get("plain_recency_half_life_days")
+    if not hl or times is None:
+        return None
+    tt = pd.concat([pd.Series(times.loc[rows].values)] * (1 + len(extras)), ignore_index=True)
+    return recency_weights(tt, hl)
 
 
 def _design_rows(Xt, extras, y, rows, cfg):
@@ -201,7 +217,7 @@ def logreg_candidates(cfg, area: str | None = None) -> list[dict]:
     return [{"C": c, "class_weight": w} for c in sorted(cs) for w in cw]
 
 
-def fit_logreg(Xt, extras, y, rows, cfg, C, class_weight, with_quantiles=True) -> SpreadModelLogReg:
+def fit_logreg(Xt, extras, y, rows, cfg, C, class_weight, with_quantiles=True, times=None) -> SpreadModelLogReg:
     X, yy = _design_rows(Xt, extras, y, rows, cfg)
     lc = cfg.raw.get("logreg") or {}
     mc = cfg["model"]
@@ -209,7 +225,8 @@ def fit_logreg(Xt, extras, y, rows, cfg, C, class_weight, with_quantiles=True) -
                           lgbm_params=dict(mc["lgbm"]), quantiles=tuple(mc["quantiles"]),
                           with_quantiles=with_quantiles, ridge_alpha=float(lc.get("ridge_alpha", 10.0)),
                           max_iter=int(lc.get("max_iter", 1000)))
-    return m.fit(X, yy, stress_q=cfg["risk"]["stress_quantile"])
+    return m.fit(X, yy, stress_q=cfg["risk"]["stress_quantile"],
+                 sample_weight=_plain_weights(times, rows, extras, cfg))
 
 
 def validation_pnl(pred, spread, quarters, params, area, cfg, stress) -> float:
@@ -308,13 +325,16 @@ def train_with_validation(Xt, extras, t, cfg, cut: pd.Timestamp, family: str = "
     """Fit on labels known before `cut`; tune BUY/SELL thresholds on the last validation_days
     (profitable in both halves, >= 1x costs per MWh, else that side is switched off)."""
     known = t["label_known_at"] <= cut
+    win = cfg["intraday"].get("train_window_days")   # 2026-10-13 research option; null = all history
+    if win:
+        known &= t["quarter_utc"] >= cut - pd.Timedelta(days=float(win))
     val_start = cut - pd.Timedelta(days=cfg["intraday"]["validation_days"])
     fit_rows = t.index[known & (t["label_known_at"] <= val_start)]
     val_rows = t.index[known & (t["as_of_trade"] >= val_start)]
     all_rows = t.index[known]
     times = t["quarter_utc"]
     if family == "logreg":
-        return _train_logreg_with_validation(Xt, extras, t, cfg, fit_rows, val_rows, all_rows, area)
+        return _train_logreg_with_validation(Xt, extras, t, cfg, fit_rows, val_rows, all_rows, area, times=times)
     if len(fit_rows) < 3000 or len(val_rows) < 1000:
         params = {"no_trade": True, "val_net_eur": 0.0, "val_trades": 0,
                   "note": f"insufficient history (fit={len(fit_rows)}, val={len(val_rows)})"}
@@ -333,7 +353,7 @@ def train_with_validation(Xt, extras, t, cfg, cut: pd.Timestamp, family: str = "
     return m, params, len(all_rows)
 
 
-def _train_logreg_with_validation(Xt, extras, t, cfg, fit_rows, val_rows, all_rows, area):
+def _train_logreg_with_validation(Xt, extras, t, cfg, fit_rows, val_rows, all_rows, area, times=None):
     """Logistic regression with its settings chosen on the validation window.
 
     Every candidate (C x class weight) is fitted on the rows before the validation window,
@@ -351,7 +371,7 @@ def _train_logreg_with_validation(Xt, extras, t, cfg, fit_rows, val_rows, all_ro
         best, params, best_pnl = None, None, None
         for cand in cands:
             mv = fit_logreg(Xt, extras, t["spread"], fit_rows, cfg, cand["C"], cand["class_weight"],
-                            with_quantiles=False)
+                            with_quantiles=False, times=times)
             vp = mv.predict(Xt.loc[val_rows])
             p = dec.tune(vp, spread_v, q_v, mv.stress, cfg)
             pnl = validation_pnl(vp, spread_v, q_v, p, area, cfg, mv.stress)
@@ -362,7 +382,8 @@ def _train_logreg_with_validation(Xt, extras, t, cfg, fit_rows, val_rows, all_ro
                 best, params, best_pnl = cand, p, pnl
     if len(all_rows) < 3000:
         raise RuntimeError(f"only {len(all_rows)} labelled quarters")
-    m = fit_logreg(Xt, extras, t["spread"], all_rows, cfg, best["C"], best["class_weight"], with_quantiles=True)
+    m = fit_logreg(Xt, extras, t["spread"], all_rows, cfg, best["C"], best["class_weight"], with_quantiles=True,
+                   times=times)
     params = dict(params)
     params["logreg"] = {"C": best["C"], "class_weight": best["class_weight"], "candidates": tried}
     return m, params, len(all_rows)
@@ -382,6 +403,8 @@ def apply_risk_overlays(df: pd.DataFrame, cfg) -> pd.DataFrame:
     step, mn = float(r["mwh_step"]), float(r["min_mwh_per_quarter"])
     cost = cfg.cost_per_mwh
     df = df.sort_values("as_of_trade").reset_index(drop=True)
+    if "action_raw" not in df.columns:
+        df["action_raw"] = df["action"]          # decision before the overlays (research re-scoring)
     df["local_day"] = df["quarter_utc"].dt.tz_localize("UTC").dt.tz_convert(cfg["local_tz"]).dt.date
     sign0 = np.where(df["action"] == dec.BUY, 1.0, np.where(df["action"] == dec.SELL, -1.0, 0.0))
     mwh = df["mwh"].to_numpy(float).copy()
@@ -442,12 +465,20 @@ def apply_risk_overlays(df: pd.DataFrame, cfg) -> pd.DataFrame:
 
 
 # ----------------------------------------------------------------------------- replay
-def walk_forward(store: Store, cfg, area: str, start=None, end=None, fb=None, family: str | None = None) -> dict:
+def walk_forward(store: Store, cfg, area: str, start=None, end=None, fb=None, family: str | None = None,
+                 design_cache: dict | None = None) -> dict:
+    """`design_cache` (a dict) lets several replays of one zone share one feature build."""
     family = family or recommended_family(cfg, area)
     fb = fb or IntradayFeatureBuilder(store, cfg)
-    t = target_frame(fb, area, cfg, end=end)
-    log.info("[%s] building point-in-time features for %d quarters", area, len(t))
-    Xt, extras = design(fb, area, t, cfg)
+    if design_cache is not None and design_cache.get("area") == area:
+        t, Xt, extras = design_cache["t"], design_cache["Xt"], design_cache["extras"]
+    else:
+        t = target_frame(fb, area, cfg, end=end)
+        log.info("[%s] building point-in-time features for %d quarters", area, len(t))
+        Xt, extras = design(fb, area, t, cfg)
+        if design_cache is not None:
+            design_cache.clear()
+            design_cache.update({"area": area, "t": t, "Xt": Xt, "extras": extras})
     ic = cfg["intraday"]
     first = (t["quarter_utc"].min() + pd.Timedelta(days=ic["min_train_days"])).normalize()
     p0 = max(first, pd.Timestamp(start)).normalize() if start else first

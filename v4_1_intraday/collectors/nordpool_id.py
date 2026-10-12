@@ -508,3 +508,329 @@ def coverage(root: Path | None = None) -> pd.DataFrame:
                      "first": df["recv_utc"].min() if len(df) else None,
                      "last": df["recv_utc"].max() if len(df) else None})
     return pd.DataFrame(rows)
+# ─────────────────────────────────────────────────────────────────────────────
+# PATCH: append after the existing nordpool_id.py content
+# ─────────────────────────────────────────────────────────────────────────────
+import json as _json
+import logging.handlers as _lh
+import os as _os
+import socket as _socket_mod
+import sys as _sys
+import threading as _threading
+import tempfile as _tempfile
+
+# ── host guard ────────────────────────────────────────────────────────────────
+def _check_host_guard():
+    """Abort unless NORDPOOL_RECORDER_ENABLED=true in .env / environment."""
+    from .common import secret
+    val = (secret("NORDPOOL_RECORDER_ENABLED") or "").strip().lower()
+    if val != "true":
+        msg = (
+            f"NORDPOOL_RECORDER_ENABLED is '{val}' (not 'true').\n"
+            "Recorder refuses to start on this machine.\n"
+            "On the DK production machine set  NORDPOOL_RECORDER_ENABLED=true  in Nurex_V4_2/.env\n"
+            "On the UK dev PC set               NORDPOOL_RECORDER_ENABLED=false  (or leave it unset)"
+        )
+        print(msg, file=_sys.stderr)
+        log.error("Host guard: %s", msg)
+        _sys.exit(1)
+
+# ── single-instance lock (bind a local TCP port) ─────────────────────────────
+_LOCK_PORT = 47291
+_LOCK_SOCK = None
+
+def _acquire_lock():
+    global _LOCK_SOCK
+    s = _socket_mod.socket(_socket_mod.AF_INET, _socket_mod.SOCK_STREAM)
+    s.setsockopt(_socket_mod.SOL_SOCKET, _socket_mod.SO_REUSEADDR, 0)
+    try:
+        s.bind(("127.0.0.1", _LOCK_PORT))
+        s.listen(1)
+        _LOCK_SOCK = s
+        log.info("Single-instance lock acquired on port %d", _LOCK_PORT)
+    except OSError:
+        print(
+            f"nordpool_id: another instance is already running "
+            f"(port {_LOCK_PORT} is bound). Exiting.",
+            file=_sys.stderr,
+        )
+        _sys.exit(1)
+
+# ── rotating log handler ──────────────────────────────────────────────────────
+def _setup_rotating_log(root: Path):
+    log_dir = root.parent.parent / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "nordpool_recorder.log"
+    handler = _lh.RotatingFileHandler(
+        log_path, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
+    )
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    # attach to the root nurex41id logger so all sub-loggers go there
+    nurex_log = logging.getLogger("nurex41id")
+    nurex_log.addHandler(handler)
+    nurex_log.setLevel(logging.DEBUG)
+    log.info("Rotating log active: %s", log_path)
+    return log_path
+
+
+# ── heartbeat status file ─────────────────────────────────────────────────────
+class _StatusWriter:
+    """Thread-safe heartbeat: writes runtime/nordpool_status.json every 10 s."""
+
+    def __init__(self, root: Path, started_at: str):
+        self._runtime = root.parent.parent / "runtime"
+        self._runtime.mkdir(parents=True, exist_ok=True)
+        self._file = self._runtime / "nordpool_status.json"
+        self._lock = _threading.Lock()
+        self._state: dict = {
+            "pid": _os.getpid(),
+            "host": _socket_mod.gethostname(),
+            "started_at": started_at,
+            "state": "connecting",
+            "last_message_at": None,
+            "last_trade_at": None,
+            "last_orderbook_at": None,
+            "messages_last_5min": 0,
+            "last_error": None,
+        }
+        self._msg_times: list = []
+        self._stop = _threading.Event()
+        self._thread = _threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def update(self, **kwargs):
+        with self._lock:
+            self._state.update({k: v for k, v in kwargs.items() if k != "messages_last_5min"})
+            if "last_message_at" in kwargs and kwargs["last_message_at"]:
+                self._msg_times.append(kwargs["last_message_at"])
+        self._flush()
+
+    def _flush(self):
+        with self._lock:
+            now_str = pd.Timestamp.now(tz="UTC").isoformat()
+            cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(minutes=5)
+            self._msg_times = [t for t in self._msg_times if t >= cutoff]
+            data = dict(self._state)
+            data["messages_last_5min"] = len(self._msg_times)
+            data["updated_at"] = now_str
+        tmp = self._file.with_suffix(".json.tmp")
+        try:
+            tmp.write_text(_json.dumps(data, default=str), encoding="utf-8")
+            tmp.replace(self._file)
+        except Exception as exc:
+            log.warning("status write failed: %s", exc)
+
+    def _loop(self):
+        while not self._stop.wait(10):
+            self._flush()
+
+    def stop(self, final_state: str = "stopped"):
+        self.update(state=final_state)
+        self._stop.set()
+
+
+# ── stolen-session detector ───────────────────────────────────────────────────
+_STOLEN_KEYWORDS = ("another", "session", "taken", "4001", "kicked", "replaced", "login")
+
+def _is_stolen(msg: str) -> bool:
+    lower = msg.lower()
+    return any(k in lower for k in _STOLEN_KEYWORDS)
+
+
+# ── enhanced _session ─────────────────────────────────────────────────────────
+async def _session_v2(c: dict, router: Router, root: Path,
+                      stop_after: float | None, subscribe_localview: bool,
+                      sw: "_StatusWriter"):
+    """Like _session but updates the StatusWriter and detects stolen sessions."""
+    import websockets
+    sw.update(state="connecting")
+    token, user = get_token(c)
+    exp = token_expiry(token)
+    last_err = None
+    tr = None
+    for path in c["ws_paths"]:
+        if path == "sockjs":
+            server_id = f"{__import__('random').randint(0, 999):03d}"
+            url = (
+                f"wss://{c['market_data_host']}:443"
+                f"/user/{server_id}/{__import__('uuid').uuid4().hex}/websocket"
+            )
+        else:
+            url = f"wss://{c['market_data_host']}:443{path}"
+        try:
+            ws = await websockets.connect(url, max_size=None, open_timeout=20,
+                                          ping_interval=None)
+        except Exception as e:
+            last_err = e
+            log.warning("connect %s failed: %s", url, e)
+            continue
+        cand = Transport(ws, sockjs=(path == "sockjs"))
+        try:
+            if cand.sockjs:
+                first = await asyncio.wait_for(ws.recv(), 20)
+                if first != "o":
+                    raise RuntimeError(f"unexpected SockJS greeting {str(first)[:80]}")
+            await cand.send(stomp_frame("CONNECT", {
+                "accept-version": "1.2,1.1,1.0",
+                "X-AUTH-TOKEN": token,
+                "heart-beat": f"0,{int(c['heartbeat_ms'])}",
+            }))
+            fr = None
+            t0 = time.time()
+            while time.time() - t0 < 20:
+                raw = await cand.recv(5)
+                fr = parse_frame(raw) if raw else None
+                if fr:
+                    break
+            if not fr or fr[0] != "CONNECTED":
+                raise RuntimeError(f"STOMP connect refused: {fr}")
+            tr = cand
+            log.info("connected to %s (%s) as %s",
+                     c["market_data_host"], "SockJS" if cand.sockjs else "STOMP", user)
+            sw.update(state="connected")
+            break
+        except Exception as e:
+            last_err = e
+            log.warning("handshake on %s failed: %s", url, e)
+            await ws.close()
+    if tr is None:
+        sw.update(state="error", last_error=str(last_err)[:200])
+        raise RuntimeError(f"cannot open Nord Pool market data session: {last_err}")
+
+    hb = int(c["heartbeat_ms"])
+    async with tr.ws:
+        sub_id = 0
+
+        async def sub(dest):
+            nonlocal sub_id
+            sub_id += 1
+            await tr.send(stomp_frame("SUBSCRIBE",
+                                      {"destination": dest, "id": f"sub-{sub_id}"}))
+
+        base = f"/user/{user}/v1"
+        mode = c.get("publishing_mode", "streaming")
+        await sub(f"{base}/streaming/deliveryAreas")
+        await sub(f"{base}/{mode}/contracts")
+        await sub(f"{base}/streaming/ticker")
+
+        async def heartbeat():
+            while True:
+                await asyncio.sleep(hb / 1000.0)
+                await tr.send("\n")
+
+        hb_task = asyncio.create_task(heartbeat())
+        started, last_flush, area_subscribed = time.time(), time.time(), False
+        try:
+            while True:
+                now = time.time()
+                if stop_after and now - started > stop_after:
+                    break
+                if now > exp - 300:
+                    log.info("token expiring - reconnecting")
+                    break
+                if not area_subscribed and (router.area_ids or now - started > 20):
+                    ids = router.area_ids or {
+                        int(v): k for k, v in (c.get("area_ids") or {}).items()
+                    }
+                    if not ids:
+                        log.error("DK delivery area ids unknown - set intraday_api.area_ids")
+                    for aid in ids:
+                        await sub(f"{base}/{mode}/publicStatistics/{aid}")
+                        if subscribe_localview:
+                            await sub(f"{base}/{mode}/localview/{aid}")
+                    area_subscribed = True
+                    log.info("subscribed to statistics/order book for areas %s", ids)
+                msg = await tr.recv(5)
+                if msg:
+                    recv_ts = pd.Timestamp.now(tz="UTC")
+                    sw.update(last_message_at=recv_ts)
+                    fr = parse_frame(msg)
+                    if fr and fr[0] == "MESSAGE":
+                        dest = fr[1].get("destination", "")
+                        payload = decode_body(fr[2])
+                        if payload is not None:
+                            router.handle(dest, fr[1], payload, recv_ts)
+                            if "/ticker" in dest:
+                                sw.update(last_trade_at=recv_ts)
+                            if "/localview" in dest:
+                                sw.update(last_orderbook_at=recv_ts)
+                    elif fr and fr[0] == "ERROR":
+                        err_text = fr[1].get("message", fr[2][:100])
+                        log.error("STOMP error: %s", err_text)
+                        sw.update(state="error", last_error=err_text[:200])
+                if time.time() - last_flush > float(c["flush_seconds"]):
+                    n = write_rows(router.drain(), root)
+                    last_flush = time.time()
+                    log.info("flushed %d rows", n)
+        except ConnectionError as exc:
+            raw_msg = str(exc)
+            if _is_stolen(raw_msg):
+                stolen_msg = "SESSION TAKEN OVER BY ANOTHER LOGIN"
+                log.error("%s — %s", stolen_msg, raw_msg[:200])
+                sw.update(state="session_taken_over",
+                          last_error=stolen_msg)
+                raise ConnectionError(stolen_msg) from exc
+            raise
+        finally:
+            hb_task.cancel()
+            write_rows(router.drain(), root)
+
+
+# ── public entry point with all guards ───────────────────────────────────────
+def record_guarded(stop_after: float | None = None,
+                   subscribe_localview: bool = True) -> None:
+    """
+    Full production entry point:
+      - host guard (NORDPOOL_RECORDER_ENABLED must be 'true')
+      - single-instance lock
+      - rotating log file
+      - heartbeat status JSON
+      - exponential back-off reconnect
+      - stolen-session detection
+    """
+    _check_host_guard()
+    c = cfg_api()
+    root = data_dir()
+    _acquire_lock()
+    log_path = _setup_rotating_log(root)
+    started_at = pd.Timestamp.now(tz="UTC").isoformat()
+    log.info("recorder starting — pid=%d  host=%s  log=%s",
+             _os.getpid(), _socket_mod.gethostname(), log_path)
+
+    sw = _StatusWriter(root, started_at)
+    router = Router(c)
+    elapsed_start = time.time()
+    delay = 5
+    max_delay = 60
+    try:
+        while True:
+            remaining = (
+                None if stop_after is None
+                else stop_after - (time.time() - elapsed_start)
+            )
+            if remaining is not None and remaining <= 0:
+                break
+            try:
+                asyncio.run(
+                    _session_v2(c, router, root, remaining,
+                                subscribe_localview, sw)
+                )
+                delay = 5  # clean exit (token expiry) — reset delay
+            except KeyboardInterrupt:
+                log.info("recorder stopped by user")
+                break
+            except ConnectionError as exc:
+                # includes stolen-session
+                log.error("session closed: %s — retry in %ds", exc, delay)
+                sw.update(state="connecting",
+                          last_error=str(exc)[:200])
+                time.sleep(delay)
+                delay = min(delay * 2, max_delay)
+            except Exception as exc:
+                log.error("recorder error: %s — retry in %ds", exc, delay)
+                sw.update(state="error", last_error=str(exc)[:200])
+                time.sleep(delay)
+                delay = min(delay * 2, max_delay)
+    finally:
+        sw.stop("stopped")
+        log.info("recorder exited cleanly")

@@ -63,20 +63,22 @@ class SpreadModelLogReg:
         return ((Xi - self.mu) / self.sd).clip(-8, 8)
 
     # ------------------------------------------------------------------ fit / predict
-    def fit(self, X: pd.DataFrame, y: pd.Series, stress_q: float = 0.99) -> "SpreadModelLogReg":
+    def fit(self, X: pd.DataFrame, y: pd.Series, stress_q: float = 0.99,
+            sample_weight=None) -> "SpreadModelLogReg":
         from sklearn.linear_model import LogisticRegression, Ridge
         self.features = list(X.columns)
         yv = y.values.astype(float)
         cls = _labels(yv, self.deadband)
         Xp = self._prep(X, fit=True)
         self.clf = LogisticRegression(C=self.C, class_weight=self.class_weight, max_iter=self.max_iter)
-        self.clf.fit(Xp, cls)
+        w = None if sample_weight is None else np.asarray(sample_weight, dtype=float)
+        self.clf.fit(Xp, cls, sample_weight=w)
         self.reg = {}
         for c in (UP, DOWN):
             m = cls == c
             if m.sum() >= 200:
                 r = Ridge(alpha=self.ridge_alpha)
-                r.fit(Xp[m], yv[m])
+                r.fit(Xp[m], yv[m], sample_weight=None if w is None else w[m])
                 self.reg[c] = r
             else:
                 self.reg[c] = float(np.mean(yv[m])) if m.any() else 0.0
@@ -86,7 +88,7 @@ class SpreadModelLogReg:
             import lightgbm as lgb
             for a in self.quantiles:
                 r = lgb.LGBMRegressor(objective="quantile", alpha=a, **self.lgbm_params)
-                r.fit(X, yv)
+                r.fit(X, yv, sample_weight=w)
                 self.qreg[a] = r
         self.stress = {"low": float(np.quantile(yv, 1 - stress_q)), "high": float(np.quantile(yv, stress_q))}
         return self

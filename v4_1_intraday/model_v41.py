@@ -90,3 +90,36 @@ class SpreadModelV41(SpreadModel):
 
     def feature_importance(self) -> pd.Series:
         return super().feature_importance()
+
+
+class WeightedSpreadModel(SpreadModel):
+    """The plain V4.2 two-part model (same objectives, no spike classifiers) with row weights.
+    2026-10-13 research option: used only when model.plain_recency_half_life_days is set."""
+
+    def fit(self, X: pd.DataFrame, y: pd.Series, stress_q: float = 0.99,
+            sample_weight: np.ndarray | None = None) -> "WeightedSpreadModel":
+        self.features = list(X.columns)
+        yv = y.values.astype(float)
+        w = None if sample_weight is None else np.asarray(sample_weight, dtype=float)
+        cls = direction_labels(yv, self.deadband)
+        self.class_present = sorted(set(cls.tolist()))
+        p = dict(self.params)
+        if len(self.class_present) >= 2:
+            self._cmap = {c: i for i, c in enumerate(self.class_present)}
+            self.clf = lgb.LGBMClassifier(objective="multiclass" if len(self.class_present) > 2 else "binary", **p)
+            self.clf.fit(X, np.vectorize(self._cmap.get)(cls), sample_weight=w)
+        for c in (UP, DOWN):
+            m = cls == c
+            if m.sum() >= 200:
+                r = lgb.LGBMRegressor(objective="regression", **p)
+                r.fit(X[m], yv[m], sample_weight=None if w is None else w[m])
+                self.reg[c] = r
+            else:
+                self.reg[c] = float(np.mean(yv[m])) if m.any() else 0.0
+        self.flat_mean = float(np.mean(yv[cls == FLAT])) if (cls == FLAT).any() else 0.0
+        for a in self.quantiles:
+            r = lgb.LGBMRegressor(objective="quantile", alpha=a, **p)
+            r.fit(X, yv, sample_weight=w)
+            self.qreg[a] = r
+        self.stress = {"low": float(np.quantile(yv, 1 - stress_q)), "high": float(np.quantile(yv, stress_q))}
+        return self
