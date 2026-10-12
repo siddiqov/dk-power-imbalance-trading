@@ -27,7 +27,7 @@ if exist "%COPY%" (
   "%PY%" scripts_v41\copy_store_v41.py "%COPY%"
   if errorlevel 1 (
     echo FAILED to copy the store - try again in a few minutes.
-    pause
+    if not "%NUREX_UNATTENDED%"=="1" pause
     exit /b 1
   )
 )
@@ -44,4 +44,4 @@ if "%RC%"=="0" (
 )
 echo Report: %CD%\%OUT%\REPORT.md
 echo Send me REPORT.md and week_review.md ^(or paste them^).
-pause
+if not "%NUREX_UNATTENDED%"=="1" pause

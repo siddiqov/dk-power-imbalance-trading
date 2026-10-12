@@ -221,4 +221,4 @@ echo STOPPED >> "%LOG%"
 :end
 del /q "%ROOT%\.git\pull_incoming.txt" "%ROOT%\.git\pull_local.txt" "%ROOT%\.git\pull_untracked.txt" "%ROOT%\.git\pull_keep.txt" 2> nul
 endlocal
-pause
+if not "%NUREX_UNATTENDED%"=="1" pause
