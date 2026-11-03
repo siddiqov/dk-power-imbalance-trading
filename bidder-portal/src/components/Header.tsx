@@ -51,7 +51,7 @@ export function Header({
             {displayModel} Algorithm —{' '}
             {viewMode === 'range'
               ? `Custom Range (${dateStr})`
-              : '4 Delivery Quarters (135m Gate)'}
+              : 'Tradeable Quarters (135m Gate)'}
           </p>
         </div>
       </div>

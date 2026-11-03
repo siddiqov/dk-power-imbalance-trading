@@ -219,8 +219,9 @@ export function usePredictions(
         return;
       }
 
-      // 3. Live Customer View (/) — Strict 4-Quarter Guarantee with 135m Gate
-      // Gate Horizon: physical delivery begins strictly >= Now + 135 minutes
+      // 3. Live Customer View (/) — Pure Supabase Mirror (Truth in Trading)
+      // Displays the forward tradeable quarters delivering beyond the 135-minute physical gate.
+      // Unopinionated: faithfully renders whatever records Supabase provides (no synthetic backfill).
       const nowMs = Date.now();
       const targetIso = new Date(nowMs + 135 * 60 * 1000).toISOString();
       const nowIso = new Date(nowMs).toISOString();
@@ -228,8 +229,8 @@ export function usePredictions(
       let finalQuarters: QuarterPrediction[] = [];
 
       for (const modelToQuery of candidateModels) {
-        // Query A: The 4 quarters delivering beyond the 135-minute physical gate
-        const { data: primaryData } = await supabase
+        // Query forward quarters delivering beyond the 135-minute physical gate
+        const { data: primaryData, error: primaryErr } = await supabase
           .from('quarter_predictions')
           .select('*')
           .eq('price_area', priceArea)
@@ -239,63 +240,45 @@ export function usePredictions(
           .order('time_dk', { ascending: true })
           .limit(4);
 
-        let rows = (primaryData as QuarterPrediction[]) || [];
+        if (primaryErr) throw primaryErr;
 
-        // Defect A Fix: Guarantee strictly 4 quarters via contiguous backfill
-        if (rows.length > 0 && rows.length < 4) {
-          const needed = 4 - rows.length;
-          const { data: earlierData } = await supabase
-            .from('quarter_predictions')
-            .select('*')
-            .eq('price_area', priceArea)
-            .eq('model_name', modelToQuery)
-            .eq('market_mode', 'INTRADAY_D0')
-            .lt('time_dk', rows[0].time_dk)
-            .order('time_dk', { ascending: false })
-            .limit(needed);
+        const rows = (primaryData as QuarterPrediction[]) || [];
 
-          if (earlierData && earlierData.length > 0) {
-            const prepended = (earlierData as QuarterPrediction[]).reverse();
-            rows = [...prepended, ...rows];
-          }
-        }
-
-        // Tier 2 Fallback: If 0 rows beyond 135m, get earliest upcoming >= now
-        if (rows.length === 0) {
-          const { data: upcomingData } = await supabase
-            .from('quarter_predictions')
-            .select('*')
-            .eq('price_area', priceArea)
-            .eq('model_name', modelToQuery)
-            .eq('market_mode', 'INTRADAY_D0')
-            .gte('time_dk', nowIso)
-            .order('time_dk', { ascending: true })
-            .limit(4);
-
-          rows = (upcomingData as QuarterPrediction[]) || [];
-        }
-
-        // Tier 3 Fallback: Get latest 4 available quarters in database
-        if (rows.length < 4) {
-          const { data: latestData } = await supabase
-            .from('quarter_predictions')
-            .select('*')
-            .eq('price_area', priceArea)
-            .eq('model_name', modelToQuery)
-            .eq('market_mode', 'INTRADAY_D0')
-            .order('time_dk', { ascending: false })
-            .limit(4);
-
-          if (latestData && latestData.length > 0) {
-            rows = (latestData as QuarterPrediction[]).reverse();
-          }
-        }
-
-        if (rows.length >= 4) {
-          finalQuarters = rows.slice(0, 4);
-          break;
-        } else if (rows.length > 0 && finalQuarters.length === 0) {
+        // Truth in Trading: if Supabase has records beyond 135m, show them directly without artificial backfill
+        if (rows.length > 0) {
           finalQuarters = rows;
+          break;
+        }
+
+        // Tier 2 Fallback (only if 0 rows beyond 135m): upcoming quarters >= now
+        const { data: upcomingData } = await supabase
+          .from('quarter_predictions')
+          .select('*')
+          .eq('price_area', priceArea)
+          .eq('model_name', modelToQuery)
+          .eq('market_mode', 'INTRADAY_D0')
+          .gte('time_dk', nowIso)
+          .order('time_dk', { ascending: true })
+          .limit(4);
+
+        if (upcomingData && upcomingData.length > 0) {
+          finalQuarters = upcomingData as QuarterPrediction[];
+          break;
+        }
+
+        // Tier 3 Fallback (only if database has no future records at all): latest 4 available
+        const { data: latestData } = await supabase
+          .from('quarter_predictions')
+          .select('*')
+          .eq('price_area', priceArea)
+          .eq('model_name', modelToQuery)
+          .eq('market_mode', 'INTRADAY_D0')
+          .order('time_dk', { ascending: false })
+          .limit(4);
+
+        if (latestData && latestData.length > 0) {
+          finalQuarters = (latestData as QuarterPrediction[]).reverse();
+          break;
         }
       }
 
