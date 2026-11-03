@@ -19,9 +19,20 @@ export function Header({
   viewMode = 'live',
   dateStr,
   isDayAhead = false,
-  selectedModel = 'V4.1-HighAlpha',
+  selectedModel = 'StormHunter',
   isAllScreen = false,
 }: HeaderProps) {
+  const displayModelName =
+    priceArea === 'DK1'
+      ? 'StormHunter (Conformal LightGBM)'
+      : selectedModel === 'StormHunter'
+      ? 'StormHunter'
+      : selectedModel === 'StormFusion'
+      ? 'StormFusion (Multi-AI)'
+      : selectedModel === 'NeuralFlash AI'
+      ? 'NeuralFlash AI (Deep Transformer)'
+      : selectedModel;
+
   return (
     <header className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
       {/* Title & Description */}
@@ -40,14 +51,10 @@ export function Header({
             </h1>
           </div>
           <p className="text-slate-400 font-medium text-xs sm:text-sm mt-1">
-            {selectedModel === 'V4.1-HighAlpha'
-              ? 'V4.1 High-Alpha Meta'
-              : selectedModel === 'V3.2-FlowAware'
-              ? 'V3.2 Flow-Aware Meta'
-              : selectedModel} Model —{' '}
+            <span className="text-indigo-300 font-semibold">{displayModelName}</span> —{' '}
             {viewMode === 'range'
               ? `Custom Range (${dateStr})`
-              : 'Next 8 Tradeable Quarters'}
+              : 'Actionable 4 Quarters (Delivery in 2h 15m)'}
           </p>
         </div>
       </div>

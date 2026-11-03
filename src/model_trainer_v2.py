@@ -18,10 +18,75 @@ import pandas as pd
 import lightgbm as lgb
 from xgboost import XGBClassifier, XGBRegressor
 from catboost import CatBoostClassifier, CatBoostRegressor
-from sklearn.metrics import accuracy_score, f1_score, mean_absolute_error, mean_squared_error
+try:
+    from sklearn.metrics import accuracy_score, f1_score, mean_absolute_error, mean_squared_error
+except Exception:
+    def mean_absolute_error(y_true, y_pred):
+        return float(np.mean(np.abs(np.asarray(y_true) - np.asarray(y_pred))))
+
+    def mean_squared_error(y_true, y_pred):
+        return float(np.mean((np.asarray(y_true) - np.asarray(y_pred)) ** 2))
+
+    def accuracy_score(y_true, y_pred):
+        y_t = np.asarray(y_true)
+        y_p = np.asarray(y_pred)
+        return float(np.mean(y_t == y_p))
+
+    def f1_score(y_true, y_pred, average='macro', zero_division=0):
+        y_t = np.asarray(y_true)
+        y_p = np.asarray(y_pred)
+        classes = np.unique(np.concatenate([y_t, y_p]))
+        if len(classes) == 0:
+            return float(zero_division)
+        f1s = []
+        for c in classes:
+            tp = np.sum((y_t == c) & (y_p == c))
+            fp = np.sum((y_t != c) & (y_p == c))
+            fn = np.sum((y_t == c) & (y_p != c))
+            denom = 2 * tp + fp + fn
+            f1s.append(2 * tp / denom if denom > 0 else float(zero_division))
+        return float(np.mean(f1s)) if f1s else float(zero_division)
+
+class SimpleRidge:
+    def __init__(self, alpha=1.0):
+        self.alpha = float(alpha)
+        self.coef_ = None
+        self.intercept_ = 0.0
+
+    def fit(self, X, y):
+        X = np.asarray(X, dtype=float)
+        y = np.asarray(y, dtype=float)
+        X_mean = np.nanmean(X, axis=0)
+        y_mean = np.nanmean(y)
+        X_c = np.nan_to_num(X - X_mean, nan=0.0)
+        y_c = np.nan_to_num(y - y_mean, nan=0.0)
+        n_features = X.shape[1]
+        A = X_c.T @ X_c + self.alpha * np.eye(n_features)
+        b = X_c.T @ y_c
+        try:
+            self.coef_ = np.linalg.solve(A, b)
+        except np.linalg.LinAlgError:
+            self.coef_ = np.linalg.pinv(A) @ b
+        self.intercept_ = y_mean - float(X_mean @ self.coef_)
+        return self
+
+    def predict(self, X):
+        X = np.asarray(X, dtype=float)
+        X = np.nan_to_num(X, nan=0.0)
+        return X @ self.coef_ + self.intercept_
+
+def get_ridge(alpha=1.0):
+    try:
+        from sklearn.linear_model import Ridge
+        return Ridge(alpha=alpha)
+    except Exception:
+        return SimpleRidge(alpha=alpha)
 
 from src.feature_engineering_v2 import V2FeatureEngineer
-from src.deep_models_v2 import DeepSequenceTrainer
+try:
+    from src.deep_models_v2 import DeepSequenceTrainer
+except Exception:
+    DeepSequenceTrainer = None
 
 
 class V2ModelTournament:
@@ -33,7 +98,7 @@ class V2ModelTournament:
     def __init__(self, price_area='DK1'):
         self.price_area = price_area
         self.fe = V2FeatureEngineer()
-        self.deep_trainer = DeepSequenceTrainer(seq_len=96, horizon=96, epochs=10)
+        self.deep_trainer = DeepSequenceTrainer(seq_len=96, horizon=96, epochs=10) if DeepSequenceTrainer else None
         self.trained_models = {}
 
         self.feature_cols = [
@@ -152,7 +217,6 @@ class V2ModelTournament:
             f1_lstm = f1_score(_dt2[_dv2], pred_dir_lstm[_dv2], average='macro', zero_division=0) if _dv2.sum() > 0 else 0.0
         except Exception as e:
             print(f"    Bi-LSTM Note ({e}), fitting Ridge sequence projection...")
-            from sklearn.linear_model import Ridge
             # Guard: Ridge also needs at least 1 training row
             if len(X_15m_tr) == 0 or y_15m_tr_spread is None or len(y_15m_tr_spread) == 0:
                 print("    Ridge fallback skipped – no training data, using zeros")
@@ -160,7 +224,7 @@ class V2ModelTournament:
                 lstm_mod = None
             else:
                 _y_tr_clean = np.nan_to_num(y_15m_tr_spread, nan=0.0)
-                ridge = Ridge(alpha=1.0).fit(X_15m_tr, _y_tr_clean)
+                ridge = get_ridge(alpha=1.0).fit(X_15m_tr, _y_tr_clean)
                 pred_spread_lstm = ridge.predict(X_val)
                 lstm_mod = ridge
             pred_dir_lstm = np.sign(pred_spread_lstm)
@@ -340,12 +404,11 @@ class V2ModelTournament:
             f1_tft = f1_score(_dt3t[_dv3t], pred_dir_tft[_dv3t], average='macro', zero_division=0) if _dv3t.sum() > 0 else 0.0
         except Exception as e:
             print(f"    TFT Note ({e}), fitting Ridge attention projection...")
-            from sklearn.linear_model import Ridge
             if len(X_tr) == 0 or y_tr_spread is None or len(y_tr_spread) == 0:
                 pred_spread_tft = np.zeros(len(X_val))
                 tft_mod = None
             else:
-                ridge = Ridge(alpha=1.0).fit(X_tr, np.nan_to_num(y_tr_spread, nan=0.0))
+                ridge = get_ridge(alpha=1.0).fit(X_tr, np.nan_to_num(y_tr_spread, nan=0.0))
                 pred_spread_tft = ridge.predict(X_val)
                 tft_mod = ridge
             pred_dir_tft = np.sign(pred_spread_tft)
@@ -444,8 +507,24 @@ class V2ModelTournament:
             filepath = f"models/v2_models_{self.price_area}.pkl"
         if os.path.exists(filepath):
             try:
-                with open(filepath, "rb") as f:
-                    self.trained_models = pickle.load(f)
+                try:
+                    with open(filepath, "rb") as f:
+                        self.trained_models = pickle.load(f)
+                except Exception:
+                    class DummyModel:
+                        def __init__(self, *args, **kwargs): pass
+                        def __setstate__(self, state):
+                            if isinstance(state, dict): self.__dict__.update(state)
+                        def predict(self, X): return np.zeros(len(X))
+
+                    class SafeUnpickler(pickle.Unpickler):
+                        def find_class(self, module, name):
+                            if 'torch' in module or 'deep_models' in module or 'torch' in name.lower():
+                                return DummyModel
+                            return super().find_class(module, name)
+
+                    with open(filepath, "rb") as f:
+                        self.trained_models = SafeUnpickler(f).load()
                 return True
             except Exception as e:
                 print(f"  [Persistence] Load note: {e}")

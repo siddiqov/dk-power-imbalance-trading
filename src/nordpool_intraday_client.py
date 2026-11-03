@@ -25,56 +25,54 @@ class NordPoolIntradayClient:
     """
 
     BASE_URL = "https://data-api.nordpoolgroup.com"
-    SSO_URL = "https://sts.nordpoolgroup.com/connect/token"
+    # 2026-11-02: the old sts.nordpoolgroup.com login is rejected (401). Use the market-data login that the
+    # models and the history downloader already use: NORDPOOL_MD_* from Nurex_V4_2/.env + sso.nordpoolgroup.com.
+    SSO_URL = "https://sso.nordpoolgroup.com/connect/token"
 
-    def __init__(
-        self,
-        username: str = os.environ.get("NORDPOOL_USER", ""),
-        password: str = os.environ.get("NORDPOOL_PWD", ""),
-        client_id: str = os.environ.get("NORDPOOL_CLIENT_ID", ""),
-        cache_dir: str = "data/cache_nordpool"
-    ):
-        self.username = os.getenv("NORDPOOL_USERNAME", username)
-        self.password = os.getenv("NORDPOOL_PASSWORD", password)
-        self.client_id = os.getenv("NORDPOOL_CLIENT_ID", client_id)
+    def __init__(self, cache_dir: str = "data/cache_nordpool", **_ignored):
+        self.username, self.password = self._md_credentials()
         self.cache_dir = cache_dir
         os.makedirs(self.cache_dir, exist_ok=True)
         self.access_token = None
         self.token_expiry = None
 
+    @staticmethod
+    def _md_credentials():
+        vals = {}
+        try:
+            from dotenv import dotenv_values
+            root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            vals = dotenv_values(os.path.join(root, "Nurex_V4_2", ".env"))
+        except Exception:
+            pass
+        u = (vals.get("NORDPOOL_MD_USERNAME") or os.environ.get("NORDPOOL_MD_USERNAME") or "").strip()
+        p = (vals.get("NORDPOOL_MD_PASSWORD") or os.environ.get("NORDPOOL_MD_PASSWORD") or "").strip()
+        return u, p
+
     def authenticate(self) -> bool:
-        """
-        Attempts OAuth2 authentication against Nord Pool STS.
-        """
-        payloads = [
-            {
-                "grant_type": "password",
-                "username": self.username,
-                "password": self.password,
-                "client_id": self.client_id,
-                "scope": "marketdata_api"
-            },
-            {
-                "grant_type": "client_credentials",
-                "client_id": self.client_id,
-                "client_secret": self.password,
-                "scope": "marketdata_api"
-            }
-        ]
-
-        for p in payloads:
-            try:
-                res = requests.post(self.SSO_URL, data=p, timeout=10)
-                if res.status_code == 200:
-                    data = res.json()
-                    self.access_token = data.get("access_token")
-                    expires_in = data.get("expires_in", 3600)
-                    self.token_expiry = datetime.now() + timedelta(seconds=expires_in - 60)
-                    logger.info("Successfully authenticated with Nord Pool STS.")
-                    return True
-            except Exception as e:
-                logger.debug(f"Auth attempt failed: {e}")
-
+        """OAuth2 password login against Nord Pool SSO (market-data client)."""
+        if not self.username or not self.password:
+            logger.warning("NORDPOOL_MD_USERNAME / NORDPOOL_MD_PASSWORD not found")
+            return False
+        import base64
+        basic = base64.b64encode(b"client_marketdata_api:client_marketdata_api").decode()
+        try:
+            res = requests.post(self.SSO_URL, data={"grant_type": "password", "scope": "marketdata_api",
+                                                    "username": self.username, "password": self.password},
+                                headers={"Authorization": f"Basic {basic}",
+                                         "Content-Type": "application/x-www-form-urlencoded"}, timeout=15)
+            if res.status_code == 200:
+                data = res.json()
+                self.access_token = data.get("access_token")
+                self.token_expiry = datetime.now() + timedelta(seconds=int(data.get("expires_in", 3600)) - 60)
+                logger.info("Authenticated with Nord Pool SSO (market data).")
+                return True
+            logger.warning(f"Nord Pool login returned HTTP {res.status_code}")
+            if res.status_code in (400, 401, 403):
+                from src import api_breaker as _brk
+                _brk.trip("nordpool_data_api", f"login HTTP {res.status_code}")
+        except Exception as e:
+            logger.debug(f"Auth attempt failed: {e}")
         return False
 
     def get_contract_statistics(self, area: str = "DK1", date_str: str = None) -> pd.DataFrame:
@@ -99,8 +97,13 @@ class NordPoolIntradayClient:
             except Exception as e:
                 logger.warning(f"Failed reading contract cache: {e}")
 
+        # 2026-11-02: skip the API for a few hours after it rejected our login (dashboard speed)
+        from src import api_breaker as _brk
+        if _brk.blocked("nordpool_data_api"):
+            return self._get_fallback_intraday_data(area, date_str)
+
         # Attempt API fetch
-        headers = {}
+        headers = {"Accept": "application/json"}
         if self.access_token and (not self.token_expiry or datetime.now() < self.token_expiry):
             headers["Authorization"] = f"Bearer {self.access_token}"
         else:
@@ -119,6 +122,8 @@ class NordPoolIntradayClient:
                 return self._parse_contracts_json(data, area)
             else:
                 logger.warning(f"Nord Pool API returned status {res.status_code}: {res.text[:120]}")
+                if res.status_code in (401, 403):
+                    _brk.trip("nordpool_data_api", f"HTTP {res.status_code}")
         except Exception as e:
             logger.warning(f"Failed fetching Nord Pool intraday contracts: {e}")
 
@@ -159,6 +164,9 @@ class NordPoolIntradayClient:
         df_contracts = self.get_contract_statistics(area)
         if df_contracts.empty:
             return self._get_fallback_order_book()
+        from src import api_breaker as _brk
+        if _brk.blocked("nordpool_data_api"):
+            return self._get_fallback_order_book(float(df_contracts.iloc[-1]['vwap_eur']))
         
         now_utc = datetime.utcnow()
         future_contracts = df_contracts[df_contracts['time_utc'] >= now_utc].sort_values('time_utc')
@@ -170,7 +178,7 @@ class NordPoolIntradayClient:
             contract_id = future_contracts.iloc[0]['contract_id']
             mid_price = future_contracts.iloc[0]['vwap_eur']
             
-        headers = {}
+        headers = {"Accept": "application/json"}
         if self.access_token and (not self.token_expiry or datetime.now() < self.token_expiry):
             headers["Authorization"] = f"Bearer {self.access_token}"
         else:
@@ -185,6 +193,7 @@ class NordPoolIntradayClient:
             if res.status_code == 200:
                 data = res.json()
                 return self._parse_order_book_json(data, mid_price)
+            logger.warning(f"Nord Pool order book returned HTTP {res.status_code}")
         except Exception as e:
             logger.warning(f"Failed fetching live order book: {e}")
             

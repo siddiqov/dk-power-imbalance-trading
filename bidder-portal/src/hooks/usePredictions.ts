@@ -132,7 +132,7 @@ export function usePredictions(
   viewMode: PortalViewMode = 'live',
   targetDate?: string,
   dateTimeRange?: DateTimeRange,
-  selectedModel: string = 'V4.1-HighAlpha',
+  selectedModel: string = 'StormHunter',
   selectedMarketMode: string = 'INTRADAY_D0'
 ) {
   const [predictions, setPredictions] = useState<QuarterPrediction[]>([]);
@@ -141,6 +141,9 @@ export function usePredictions(
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const effectiveDate = targetDate || getTodayDateString();
+
+  // Model resolution: DK1 strictly shows StormHunter; DK2 uses selected model
+  const resolvedModel = priceArea === 'DK1' ? 'StormHunter' : (selectedModel || 'StormHunter');
 
   const fetchPredictions = useCallback(async () => {
     try {
@@ -152,13 +155,11 @@ export function usePredictions(
         .select('*')
         .eq('price_area', priceArea);
 
-      // Model filtering: For root customer portal, strictly filter for 'V4.1-HighAlpha'
-      const modelToQuery = (viewMode === 'live' || !selectedModel) ? 'V4.1-HighAlpha' : selectedModel;
-      if (modelToQuery !== 'ALL') {
-        query = query.eq('model_name', modelToQuery);
+      if (resolvedModel !== 'ALL') {
+        query = query.eq('model_name', resolvedModel);
       }
 
-      // Market mode filtering: For root customer portal, strictly filter for 'INTRADAY_D0'
+      // Market mode filtering
       if (viewMode === 'live' || !selectedMarketMode || selectedMarketMode === 'INTRADAY_D0') {
         query = query.eq('market_mode', 'INTRADAY_D0');
       } else if (selectedMarketMode !== 'ALL') {
@@ -166,22 +167,19 @@ export function usePredictions(
       }
 
       if (viewMode === 'live') {
-        // Show the last 8 locked quarters — the active delivery batch whose gate has closed.
-        // We query time_dk <= now (gate closure happened) and filter for locked statuses.
-        // Results are fetched newest-first and reversed client-side so the table is oldest→newest.
-        const now = new Date().toISOString();
+        // Show the 4 quarters which come after 2 hours and 15 minutes (135 min lead time)
+        const targetHorizon = new Date(Date.now() + 135 * 60 * 1000);
+        const targetIso = targetHorizon.toISOString();
+
         query = query
-          .in('status', ['LOCKED', 'LOCKED_PENDING', 'MISSED', 'SETTLED_AUDITED', 'SETTLED'])
-          .lte('time_dk', now)
-          .order('time_dk', { ascending: false })
-          .limit(8);
+          .gte('time_dk', targetIso)
+          .order('time_dk', { ascending: true })
+          .limit(4);
       } else if (viewMode === 'today') {
-        // 'today' mode: fetch all 96 settlement quarters for the date directly from Supabase
         query = query
           .eq('delivery_date', effectiveDate)
           .order('quarter_index', { ascending: true });
       } else if (viewMode === 'range') {
-        // 'range' mode: query by datetime range on time_dk, converting Danish local times to UTC ISO
         if (dateTimeRange?.start) {
           const startIso = denmarkTimeToUtcIso(dateTimeRange.start);
           query = query.gte('time_dk', startIso);
@@ -197,22 +195,66 @@ export function usePredictions(
 
       if (supabaseError) throw supabaseError;
 
-      // Live mode results come newest-first (for correct LIMIT direction); reverse to oldest→newest for display.
-      const rows = (data as QuarterPrediction[]) || [];
-      setPredictions(viewMode === 'live' ? [...rows].reverse() : rows);
+      let rows = (data as QuarterPrediction[]) || [];
+
+      // Fallback for live mode if future quarters >= +2h15m are not yet populated in Supabase
+      if (viewMode === 'live' && rows.length === 0) {
+        // Fallback 1: Query upcoming quarters from current time onwards
+        const nowIso = new Date().toISOString();
+        const fallbackUpcoming = await supabase
+          .from('quarter_predictions')
+          .select('*')
+          .eq('price_area', priceArea)
+          .eq('model_name', resolvedModel)
+          .gte('time_dk', nowIso)
+          .order('time_dk', { ascending: true })
+          .limit(4);
+
+        if (fallbackUpcoming.data && fallbackUpcoming.data.length > 0) {
+          rows = fallbackUpcoming.data;
+        } else {
+          // Fallback 2: Latest 4 available quarters for this model
+          const fallbackLatest = await supabase
+            .from('quarter_predictions')
+            .select('*')
+            .eq('price_area', priceArea)
+            .eq('model_name', resolvedModel)
+            .order('time_dk', { ascending: false })
+            .limit(4);
+
+          if (fallbackLatest.data && fallbackLatest.data.length > 0) {
+            rows = [...fallbackLatest.data].reverse();
+          } else {
+            // Fallback 3: Fallback to V4.1-HighAlpha baseline if new model rows haven't arrived
+            const fallbackLegacy = await supabase
+              .from('quarter_predictions')
+              .select('*')
+              .eq('price_area', priceArea)
+              .eq('model_name', 'V4.1-HighAlpha')
+              .order('time_dk', { ascending: false })
+              .limit(4);
+
+            if (fallbackLegacy.data && fallbackLegacy.data.length > 0) {
+              rows = [...fallbackLegacy.data].reverse();
+            }
+          }
+        }
+      }
+
+      setPredictions(rows);
       setLastUpdated(new Date());
     } catch (err: any) {
       setError(err.message || 'Failed to fetch predictions');
     } finally {
       setLoading(false);
     }
-  }, [priceArea, viewMode, effectiveDate, dateTimeRange?.start, dateTimeRange?.end, selectedModel, selectedMarketMode]);
+  }, [priceArea, viewMode, effectiveDate, dateTimeRange?.start, dateTimeRange?.end, resolvedModel, selectedMarketMode]);
 
   useEffect(() => {
     fetchPredictions();
 
     const subscription = supabase
-      .channel(`quarter_predictions_${priceArea}_${viewMode}_${selectedModel}_${selectedMarketMode}`)
+      .channel(`quarter_predictions_${priceArea}_${viewMode}_${resolvedModel}_${selectedMarketMode}`)
       .on(
         'postgres_changes',
         {
@@ -227,8 +269,8 @@ export function usePredictions(
       )
       .subscribe();
 
-    // Auto-refresh every 60s for live mode; 5 minutes for daily view
-    const refreshInterval = viewMode === 'live' ? 60000 : 300000;
+    // Auto-refresh every 30s for live mode; 5 minutes for daily view
+    const refreshInterval = viewMode === 'live' ? 30000 : 300000;
     const interval = setInterval(() => {
       fetchPredictions();
     }, refreshInterval);
@@ -237,7 +279,7 @@ export function usePredictions(
       subscription.unsubscribe();
       clearInterval(interval);
     };
-  }, [fetchPredictions, priceArea, viewMode, selectedModel, selectedMarketMode]);
+  }, [fetchPredictions, priceArea, viewMode, resolvedModel, selectedMarketMode]);
 
   const daySummary = useMemo(() => computeDaySummary(predictions), [predictions]);
 
@@ -249,5 +291,6 @@ export function usePredictions(
     refetch: fetchPredictions,
     daySummary,
     effectiveDate,
+    resolvedModel,
   };
 }

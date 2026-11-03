@@ -2,6 +2,24 @@ import { Cpu } from 'lucide-react';
 
 export const AVAILABLE_MODELS = [
   {
+    id: 'StormHunter',
+    shortName: 'StormHunter',
+    fullName: 'StormHunter (Conformal Sizing • Intraday Target)',
+    badge: 'Storm',
+  },
+  {
+    id: 'StormFusion',
+    shortName: 'StormFusion',
+    fullName: 'StormFusion (Multi-AI Ensemble • Chronos-2 + TiRex)',
+    badge: 'Fusion',
+  },
+  {
+    id: 'NeuralFlash AI',
+    shortName: 'NeuralFlash AI',
+    fullName: 'NeuralFlash AI (Deep Transformer • Zero-Shot Foundation)',
+    badge: 'Neural',
+  },
+  {
     id: 'V4.1-HighAlpha',
     shortName: 'V4.1 High-Alpha',
     fullName: 'V4.1 High-Alpha Meta (Microstructure & Cross-Border Balancing)',
@@ -60,46 +78,38 @@ export function ModelSelector({ selectedModel, onModelChange }: ModelSelectorPro
   const currentModel = AVAILABLE_MODELS.find((m) => m.id === selectedModel);
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2.5 w-full bg-slate-850 px-4 py-2.5 rounded-xl border border-slate-700/80 shadow-md">
-      {/* Model Tag Pills */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <div className="flex items-center gap-1.5 text-slate-400 text-xs font-bold uppercase tracking-wider mr-1">
-          <Cpu className="w-3.5 h-3.5 text-indigo-400" />
-          <span>Model:</span>
+    <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium">
+        <Cpu className="w-3.5 h-3.5 text-indigo-400" />
+        <span>Model:</span>
+      </div>
+      <div className="relative">
+        <select
+          value={selectedModel}
+          onChange={(e) => onModelChange(e.target.value)}
+          className="appearance-none bg-slate-900 border border-slate-700 hover:border-slate-600 rounded-lg pl-3 pr-8 py-1.5 text-xs font-semibold text-slate-200 cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+        >
+          {AVAILABLE_MODELS.map((m) => (
+            <option key={m.id} value={m.id} className="bg-slate-900 text-slate-200">
+              {m.fullName}
+            </option>
+          ))}
+        </select>
+        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-400">
+          <svg className="w-3 h-3 fill-current" viewBox="0 0 20 20">
+            <path
+              d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+              clipRule="evenodd"
+              fillRule="evenodd"
+            />
+          </svg>
         </div>
-
-        {AVAILABLE_MODELS.map((m) => {
-          const isActive = selectedModel === m.id;
-          return (
-            <button
-              key={m.id}
-              type="button"
-              onClick={() => onModelChange(m.id)}
-              title={`${m.fullName} [${m.badge}]`}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                isActive
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 scale-102 border border-indigo-400/30'
-                  : 'bg-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-750 border border-slate-700/60'
-              }`}
-            >
-              <span>{m.shortName}</span>
-              {isActive && (
-                <span className="ml-1.5 text-[10px] px-1 py-0.2 rounded bg-indigo-950/80 text-indigo-200 border border-indigo-500/40 uppercase font-mono">
-                  {m.badge}
-                </span>
-              )}
-            </button>
-          );
-        })}
       </div>
-
-      {/* Active Model Indicator */}
-      <div className="hidden sm:flex items-center gap-2 text-xs font-mono text-slate-400">
-        <span>Active Model:</span>
-        <span className="font-semibold text-white px-2 py-0.5 rounded bg-slate-900 border border-slate-750">
-          {currentModel ? currentModel.fullName.split(' (')[0] : selectedModel}
+      {currentModel && (
+        <span className="hidden sm:inline-block text-[10px] font-mono font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+          {currentModel.badge}
         </span>
-      </div>
+      )}
     </div>
   );
 }

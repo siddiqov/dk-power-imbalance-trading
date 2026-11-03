@@ -33,6 +33,22 @@ export interface QuarterPrediction {
 
 export type PortalViewMode = 'live' | 'today' | 'range';
 
+export const TOURNAMENT_MODELS = [
+  'StormHunter',
+  'StormFusion',
+  'NeuralFlash AI',
+  'V4.1-HighAlpha',
+  'V3.2-FlowAware',
+  'Transfer-LightGBM',
+  'Transformer-TFT',
+  'Stacking-MetaEnsemble',
+  'Hierarchical-LGBM+XGB',
+  'Pure15m-CatBoost',
+  'Deep-BiLSTM',
+] as const;
+
+export type TournamentModelName = (typeof TOURNAMENT_MODELS)[number];
+
 export interface DateTimeRange {
   start: string; // ISO or YYYY-MM-DDTHH:mm
   end: string;   // ISO or YYYY-MM-DDTHH:mm
