@@ -10,7 +10,38 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, accuracy_score
-from sklearn.linear_model import Ridge
+try:
+    from sklearn.linear_model import Ridge
+except Exception:
+    class SimpleRidge:
+        def __init__(self, alpha=1.0):
+            self.alpha = float(alpha)
+            self.coef_ = None
+            self.intercept_ = 0.0
+
+        def fit(self, X, y):
+            X = np.asarray(X, dtype=float)
+            y = np.asarray(y, dtype=float)
+            X_mean = np.nanmean(X, axis=0)
+            y_mean = np.nanmean(y)
+            X_c = np.nan_to_num(X - X_mean, nan=0.0)
+            y_c = np.nan_to_num(y - y_mean, nan=0.0)
+            n_features = X.shape[1]
+            A = X_c.T @ X_c + self.alpha * np.eye(n_features)
+            b = X_c.T @ y_c
+            try:
+                self.coef_ = np.linalg.solve(A, b)
+            except np.linalg.LinAlgError:
+                self.coef_ = np.linalg.pinv(A) @ b
+            self.intercept_ = y_mean - float(X_mean @ self.coef_)
+            return self
+
+        def predict(self, X):
+            X = np.asarray(X, dtype=float)
+            X = np.nan_to_num(X, nan=0.0)
+            return X @ self.coef_ + self.intercept_
+
+    Ridge = SimpleRidge
 import lightgbm as lgb
 from xgboost import XGBRegressor, XGBClassifier
 from catboost import CatBoostRegressor

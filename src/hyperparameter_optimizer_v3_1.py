@@ -8,7 +8,10 @@ from catboost import CatBoostRegressor
 from xgboost import XGBRegressor
 from sklearn.metrics import mean_absolute_error
 
-from src.deep_models_v3_1 import PyTorchBiLSTMRegressor
+try:
+    from src.deep_models_v3_1 import PyTorchBiLSTMRegressor
+except Exception:
+    PyTorchBiLSTMRegressor = None
 
 # Suppress verbose Optuna logs
 optuna.logging.set_verbosity(optuna.logging.WARNING)

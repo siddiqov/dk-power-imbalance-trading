@@ -17,7 +17,7 @@ import numpy as np
 
 from src.data_ingestion_v2 import V2DataEngine
 from src.feature_engineering_v2 import V2FeatureEngineer
-from src.model_trainer_v2 import V2ModelTournament
+
 
 
 class TournamentTableGenerator:
@@ -130,6 +130,7 @@ class TournamentTableGenerator:
             return pd.DataFrame()
 
         # Train models on prior historical real dataset (Walk-Forward strict isolation)
+        from src.model_trainer_v2 import V2ModelTournament
         tournament = V2ModelTournament(price_area=self.price_area)
         models_p1 = tournament.train_paradigm1_transfer_learning(None, df_zone, val_days=1)
         models_p2 = tournament.train_paradigm2_hierarchical(None, df_zone, val_days=1)
@@ -316,6 +317,7 @@ class TournamentTableGenerator:
         df_day_d = pd.DataFrame(quarter_data)
 
         # 2. Genuine Multi-Model Inference (Zero Synthetic Data / Zero Placeholders)
+        from src.model_trainer_v2 import V2ModelTournament
         tournament = V2ModelTournament(price_area=self.price_area)
         if not tournament.load_models():
             # Train models if not yet saved on disk

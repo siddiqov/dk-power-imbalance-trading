@@ -5,7 +5,7 @@
 #
 # Runs every 15 minutes automatically:
 # - Ingests authentic Energi Data Service records (DayAheadPrices & ImbalancePrice)
-# - Evaluates all 6 tournament models across DK1 & DK2
+# - Evaluates all tournament models across DK1 & DK2 (StormHunter, StormFusion, NeuralFlash AI)
 # - Locks Pre-Market Bids & Predictions (Intraday + Day-Ahead) to Supabase & SQLite
 # - Reconciles live settlements and realized PnL every 15 minutes
 # ==============================================================================
@@ -89,6 +89,14 @@ def main():
                 market_modes=["INTRADAY_D0", "DAY_AHEAD_D1"],
                 reconcile=True,
             )
+
+            # 1b. Tournament Feed Models Push (StormHunter, StormFusion, NeuralFlash AI)
+            try:
+                from scripts.publish_tournament_portal import publish_from_trades_all
+                pushed_tourn = publish_from_trades_all()
+                total_pushed += pushed_tourn
+            except Exception as e_tourn:
+                logger.warning(f"  ⚠️ Tournament portal push note: {e_tourn}")
 
             # 2. Generate and lock local Day-Ahead Auction Bidding Sheets
             try:

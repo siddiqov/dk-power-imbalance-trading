@@ -2,6 +2,7 @@
 # src/supabase_publisher.py
 # Publishes Multi-Model predictions & trade audit ledger to Supabase for the Bidder Portal.
 # Upserts all 96 quarters per price area; reconciles live settlements every 15 minutes.
+# Supports both official supabase-py and zero-dependency direct PostgREST REST API.
 # ==============================================================================
 
 import os
@@ -21,6 +22,9 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger(__name__)
 
 ALL_MODELS = [
+    "StormHunter",
+    "StormFusion",
+    "NeuralFlash AI",
     "V4.1-HighAlpha",
     "V3.2-FlowAware",
     "Transformer-TFT",
@@ -65,13 +69,27 @@ class SupabasePublisher:
             self.table = None
             self.log_table = None
             self.logs_table = None
+            self.use_rest = False
             return
-        # Lazy import to avoid requiring supabase for non-publisher usage
-        from supabase import create_client
-        self.client = create_client(url, key)
-        self.table = self.client.table("quarter_predictions")
-        self.log_table = self.client.table("prediction_updates_log")
-        self.logs_table = self.log_table
+
+        self.url = url.rstrip("/")
+        self.key = key
+        self.use_rest = False
+
+        # Attempt to import supabase client; fallback gracefully to direct REST API via requests
+        try:
+            from supabase import create_client
+            self.client = create_client(url, key)
+            self.table = self.client.table("quarter_predictions")
+            self.log_table = self.client.table("prediction_updates_log")
+            self.logs_table = self.log_table
+        except (ImportError, Exception):
+            logger.info("[SupabasePublisher] 'supabase' library not present or failed to load. Using direct PostgREST REST API.")
+            self.client = "rest"
+            self.use_rest = True
+            self.table = None
+            self.log_table = None
+            self.logs_table = None
 
     def upsert_predictions(
         self,
@@ -107,7 +125,6 @@ class SupabasePublisher:
 
         rows = []
         for trade in trades:
-            # Derive quarter index from string like 'Q1' or 'Q1 (+15m)'
             q_raw = trade.get("quarter", "Q1")
             q_str = q_raw.split()[0].replace("Q", "").strip()
             try:
@@ -155,7 +172,6 @@ class SupabasePublisher:
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
 
-            # Optional settlement fields if trade was already audited
             if trade.get("actual_settled_eur") is not None:
                 val = _clean_numeric(trade.get("actual_settled_eur"))
                 if val is not None:
@@ -179,10 +195,37 @@ class SupabasePublisher:
             logger.warning(f"No trades to upsert for {price_area} {delivery_date}")
             return 0
 
-        # Upsert in batches (try with new composite constraint, fallback to legacy if not migrated yet)
         batch_size = 50
         total_upserted = 0
 
+        # Direct REST API fallback
+        if self.use_rest:
+            headers = {
+                "apikey": self.key,
+                "Authorization": f"Bearer {self.key}",
+                "Content-Type": "application/json",
+                "Prefer": "resolution=merge-duplicates",
+            }
+            endpoint = f"{self.url}/rest/v1/quarter_predictions?on_conflict=market_mode,price_area,delivery_date,quarter_index,model_name"
+            for i in range(0, len(rows), batch_size):
+                batch = rows[i : i + batch_size]
+                try:
+                    res = requests.post(endpoint, headers=headers, json=batch, timeout=20)
+                    if res.status_code in (200, 201):
+                        total_upserted += len(batch)
+                    else:
+                        logger.warning(f"  [Supabase REST] Upsert status {res.status_code}: {res.text[:200]}")
+                except Exception as e:
+                    logger.warning(f"  [Supabase REST] Error: {e}")
+
+            self._log_update(price_area, delivery_date, total_upserted, len(trades))
+            logger.info(
+                f"  [Supabase REST] Upserted {total_upserted} quarters for {price_area} "
+                f"({delivery_date}) [{market_mode}] model={model_name}"
+            )
+            return total_upserted
+
+        # Official supabase-py client
         for i in range(0, len(rows), batch_size):
             batch = rows[i : i + batch_size]
             try:
@@ -192,7 +235,6 @@ class SupabasePublisher:
                 ).execute()
             except Exception as e:
                 err_str = str(e)
-                # If migration_v2 has not dropped old 4-column constraint yet, handle gracefully
                 if "23505" in err_str or "quarter_predictions_upsert_key" in err_str or "market_mode" in err_str or "duplicate key" in err_str:
                     logger.warning(
                         f"  [Supabase] 4-column unique constraint detected in DB. "
@@ -203,7 +245,6 @@ class SupabasePublisher:
                     raise e
             total_upserted += len(batch)
 
-        # Log this update
         self._log_update(price_area, delivery_date, total_upserted, len(trades))
 
         logger.info(
@@ -216,7 +257,6 @@ class SupabasePublisher:
         """
         Fetches authentic settled imbalance prices from Energi Data Service (ImbalancePrice)
         and reconciles all past quarters for all models in Supabase.
-        Calculates exact gross PnL, Nord Pool/TSO fees (€0.51/MWh), and net realized profit.
         """
         import json
         url_imb = "https://api.energidataservice.dk/dataset/ImbalancePrice"
@@ -240,22 +280,29 @@ class SupabasePublisher:
             return 0
 
         if not settled_dict or not self.client:
-            if not self.client:
-                logger.info(f"  [Local Ledger] Skipping remote Supabase settlement reconciliation for {price_area} on {delivery_date}.")
-            else:
-                logger.info(f"  [Reconciliation] No settled records yet for {price_area} on {delivery_date}")
             return 0
 
         # Query pending records from Supabase
+        pending_rows = []
         try:
-            query = (
-                self.table.select("*")
-                .eq("price_area", price_area)
-                .eq("delivery_date", delivery_date)
-                .neq("status", "SETTLED_AUDITED")
-            )
-            result = query.execute()
-            pending_rows = result.data or []
+            if self.use_rest:
+                headers = {"apikey": self.key, "Authorization": f"Bearer {self.key}"}
+                r = requests.get(
+                    f"{self.url}/rest/v1/quarter_predictions?price_area=eq.{price_area}&delivery_date=eq.{delivery_date}&status=neq.SETTLED_AUDITED",
+                    headers=headers,
+                    timeout=15,
+                )
+                if r.status_code == 200:
+                    pending_rows = r.json()
+            else:
+                query = (
+                    self.table.select("*")
+                    .eq("price_area", price_area)
+                    .eq("delivery_date", delivery_date)
+                    .neq("status", "SETTLED_AUDITED")
+                )
+                result = query.execute()
+                pending_rows = result.data or []
         except Exception as e:
             logger.warning(f"  [Reconciliation] Failed to fetch pending rows: {e}")
             return 0
@@ -263,7 +310,6 @@ class SupabasePublisher:
         if not pending_rows:
             return 0
 
-        cph_tz = zoneinfo.ZoneInfo("Europe/Copenhagen")
         updated_count = 0
         fee_per_mwh = 0.51  # €0.06 Nord Pool + €0.20 TSO + €0.25 Slippage
         tax_rate = 0.22     # Danish 22% corporate tax
@@ -275,7 +321,6 @@ class SupabasePublisher:
             q_idx = row["quarter_index"]
             hour = (q_idx - 1) // 4
             minute = ((q_idx - 1) % 4) * 15
-            d_parts = [int(p) for p in delivery_date.split("-")]
             t_dk_str = f"{delivery_date} {hour:02d}:{minute:02d}"
 
             if t_dk_str in settled_dict:
@@ -284,11 +329,7 @@ class SupabasePublisher:
                 volume = float(row.get("volume_mwh") or 0.0)
                 action = str(row.get("decision") or "HOLD")
 
-                direction = 0
-                if "BUY" in action:
-                    direction = 1
-                elif "SELL" in action:
-                    direction = -1
+                direction = 1 if "BUY" in action else (-1 if "SELL" in action else 0)
 
                 da_cash = -(direction * volume * spot_price)
                 settle_cash = direction * volume * actual_price
@@ -314,15 +355,31 @@ class SupabasePublisher:
                 updates_batch.append(row_update)
 
         if updates_batch:
-            # Batch update in chunks of 50 using composite unique key (avoids identity column 'id')
             on_conflict_cols = "market_mode,price_area,delivery_date,quarter_index,model_name"
-            for i in range(0, len(updates_batch), 50):
-                chunk = updates_batch[i : i + 50]
-                try:
-                    self.table.upsert(chunk, on_conflict=on_conflict_cols).execute()
-                    updated_count += len(chunk)
-                except Exception as e:
-                    logger.warning(f"  [Reconciliation] Upsert error: {e}")
+            if self.use_rest:
+                headers = {
+                    "apikey": self.key,
+                    "Authorization": f"Bearer {self.key}",
+                    "Content-Type": "application/json",
+                    "Prefer": "resolution=merge-duplicates",
+                }
+                endpoint = f"{self.url}/rest/v1/quarter_predictions?on_conflict={on_conflict_cols}"
+                for i in range(0, len(updates_batch), 50):
+                    chunk = updates_batch[i : i + 50]
+                    try:
+                        res = requests.post(endpoint, headers=headers, json=chunk, timeout=20)
+                        if res.status_code in (200, 201):
+                            updated_count += len(chunk)
+                    except Exception as e:
+                        logger.warning(f"  [Reconciliation REST] Error: {e}")
+            else:
+                for i in range(0, len(updates_batch), 50):
+                    chunk = updates_batch[i : i + 50]
+                    try:
+                        self.table.upsert(chunk, on_conflict=on_conflict_cols).execute()
+                        updated_count += len(chunk)
+                    except Exception as e:
+                        logger.warning(f"  [Reconciliation] Upsert error: {e}")
 
             logger.info(
                 f"  [Reconciliation] ✅ Audited and settled {updated_count} quarters for {price_area} ({delivery_date})"
@@ -338,6 +395,28 @@ class SupabasePublisher:
         total_quarters: int,
     ):
         """Append an entry to the prediction_updates_log table."""
+        if self.use_rest:
+            try:
+                headers = {
+                    "apikey": self.key,
+                    "Authorization": f"Bearer {self.key}",
+                    "Content-Type": "application/json",
+                }
+                requests.post(
+                    f"{self.url}/rest/v1/prediction_updates_log",
+                    headers=headers,
+                    json={
+                        "price_area": price_area,
+                        "delivery_date": delivery_date,
+                        "quarters_updated": quarters_updated,
+                        "total_quarters": total_quarters,
+                    },
+                    timeout=10,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to write update log via REST: {e}")
+            return
+
         try:
             self.log_table.insert(
                 {
@@ -352,6 +431,20 @@ class SupabasePublisher:
 
     def get_latest_update_time(self, price_area: str) -> Optional[str]:
         """Get the timestamp of the most recent prediction push for a zone."""
+        if self.use_rest:
+            try:
+                headers = {"apikey": self.key, "Authorization": f"Bearer {self.key}"}
+                r = requests.get(
+                    f"{self.url}/rest/v1/prediction_updates_log?price_area=eq.{price_area}&order=triggered_at.desc&limit=1",
+                    headers=headers,
+                    timeout=10,
+                )
+                if r.status_code == 200 and r.json():
+                    return r.json()[0]["triggered_at"]
+            except Exception as e:
+                logger.warning(f"Failed to query update log via REST: {e}")
+            return None
+
         try:
             result = (
                 self.log_table.select("triggered_at")
