@@ -103,21 +103,21 @@ function getColumnValue(prediction: QuarterPrediction, key: string, hasMultipleD
     case 'time':
       return formatTime(prediction.quarter_index);
     case 'spot':
-      return prediction.spot_price_eur != null ? prediction.spot_price_eur.toFixed(2) : '';
+      return prediction.spot_price_eur != null && !isNaN(Number(prediction.spot_price_eur)) ? Number(prediction.spot_price_eur).toFixed(2) : '';
     case 'pred_imbalance':
-      return prediction.pred_imbalance_eur != null ? prediction.pred_imbalance_eur.toFixed(2) : '';
+      return prediction.pred_imbalance_eur != null && !isNaN(Number(prediction.pred_imbalance_eur)) ? Number(prediction.pred_imbalance_eur).toFixed(2) : '';
     case 'pred_spread':
-      return prediction.pred_spread_eur != null ? prediction.pred_spread_eur.toFixed(2) : '';
+      return prediction.pred_spread_eur != null && !isNaN(Number(prediction.pred_spread_eur)) ? Number(prediction.pred_spread_eur).toFixed(2) : '';
     case 'probabilities':
-      return `${Number(prediction.p_up ?? 0).toFixed(1)}% / ${Number(prediction.p_down ?? 0).toFixed(1)}%`;
+      return `${(Number(prediction.p_up) || 0).toFixed(1)}% / ${(Number(prediction.p_down) || 0).toFixed(1)}%`;
     case 'decision':
       return prediction.decision || '';
     case 'volume':
-      return prediction.volume_mwh != null ? prediction.volume_mwh.toFixed(1) : '';
+      return prediction.volume_mwh != null && !isNaN(Number(prediction.volume_mwh)) ? Number(prediction.volume_mwh).toFixed(1) : '';
     case 'settled':
-      return prediction.actual_settled_eur != null ? prediction.actual_settled_eur.toFixed(2) : '';
+      return prediction.actual_settled_eur != null && !isNaN(Number(prediction.actual_settled_eur)) ? Number(prediction.actual_settled_eur).toFixed(2) : '';
     case 'net_pnl':
-      return prediction.net_pnl_eur != null ? prediction.net_pnl_eur.toFixed(2) : '';
+      return prediction.net_pnl_eur != null && !isNaN(Number(prediction.net_pnl_eur)) ? Number(prediction.net_pnl_eur).toFixed(2) : '';
     case 'status':
       return prediction.status || 'PENDING';
     default:

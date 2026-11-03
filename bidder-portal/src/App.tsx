@@ -6,12 +6,13 @@ import { LastUpdated } from './components/LastUpdated';
 import { DailySummaryBanner } from './components/DailySummaryBanner';
 import { RangeFilterBar } from './components/RangeFilterBar';
 import { ModelSelector } from './components/ModelSelector';
+import { DK2ModelToggle, DK2ModelOption } from './components/DK2ModelToggle';
 import { usePredictions, getTodayDateString } from './hooks/usePredictions';
 import { PortalViewMode, DateTimeRange } from './types';
 
 /**
  * isAllScreen = true ONLY when pathname starts with /all or /today.
- * Base URL / is always the clean customer view — no toggles, no filters.
+ * Base URL / is always the clean customer view — 4-quarter rolling conveyor belt.
  */
 function getInitialParams(): {
   isAllScreen: boolean;
@@ -28,16 +29,13 @@ function getInitialParams(): {
     const zone = params.get('zone')?.toUpperCase();
     const start = params.get('start') || undefined;
     const end = params.get('end') || undefined;
-    const model = params.get('model') || 'V4.1-HighAlpha';
+    const model = params.get('model') || 'StormHunter';
     const modeParam = params.get('mode')?.toUpperCase() === 'DAY_AHEAD_D1' ? 'DAY_AHEAD_D1' : 'INTRADAY_D0';
 
-    // Only unlock the full UI when manually navigating to /all or /today
     const isAllScreen = pathname.startsWith('/all') || pathname.startsWith('/today');
-
-    // /all is dedicated to Custom Range view
     const initialMode: PortalViewMode = isAllScreen ? 'range' : 'live';
-
     const initialZone: 'DK1' | 'DK2' = zone === 'DK2' ? 'DK2' : 'DK1';
+
     return {
       isAllScreen,
       initialMode,
@@ -52,7 +50,7 @@ function getInitialParams(): {
       isAllScreen: false,
       initialMode: 'live',
       initialZone: 'DK1',
-      initialModel: 'V4.1-HighAlpha',
+      initialModel: 'StormHunter',
       initialMarketMode: 'INTRADAY_D0',
     };
   }
@@ -67,14 +65,40 @@ function App() {
   const [selectedModel, setSelectedModel] = useState<string>(initial.initialModel);
   const [marketMode, setMarketMode] = useState<'INTRADAY_D0' | 'DAY_AHEAD_D1'>(initial.initialMarketMode);
 
+  // Persistent DK2 Model Selection
+  const [dk2Model, setDk2Model] = useState<DK2ModelOption>(() => {
+    try {
+      const saved = localStorage.getItem('bidder_portal_dk2_model') as DK2ModelOption;
+      if (saved === 'StormHunter' || saved === 'StormFusion' || saved === 'NeuralFlash AI') {
+        return saved;
+      }
+    } catch {
+      // ignore
+    }
+    return 'StormHunter';
+  });
+
+  const handleDk2ModelChange = (model: DK2ModelOption) => {
+    setDk2Model(model);
+    try {
+      localStorage.setItem('bidder_portal_dk2_model', model);
+    } catch {
+      // ignore
+    }
+  };
+
   const [dateRange, setDateRange] = useState<DateTimeRange>({
     start: initial.initialStart || `${todayStr}T00:00`,
     end: initial.initialEnd || `${todayStr}T23:45`,
   });
 
-  // Locked to pathname — never changes by button click on /
   const isAllScreen = initial.isAllScreen;
   const effectiveMode: PortalViewMode = isAllScreen ? viewMode : 'live';
+
+  // Active algorithmic model for customer live view:
+  // DK1 is strictly locked to StormHunter
+  // DK2 is user-selected via the 3-way toggle
+  const activeCustomerModel = priceArea === 'DK1' ? 'StormHunter' : dk2Model;
 
   const updateUrl = useCallback(
     (
@@ -99,7 +123,7 @@ function App() {
           ? url.searchParams.set('zone', 'DK2')
           : url.searchParams.delete('zone');
 
-        if (isAllScreen && model && model !== 'V4.1-HighAlpha') {
+        if (isAllScreen && model && model !== 'StormHunter') {
           url.searchParams.set('model', model);
         } else {
           url.searchParams.delete('model');
@@ -151,7 +175,7 @@ function App() {
       effectiveMode,
       undefined,
       dateRange,
-      isAllScreen ? selectedModel : 'V4.1-HighAlpha',
+      isAllScreen ? selectedModel : activeCustomerModel,
       isAllScreen ? marketMode : 'INTRADAY_D0'
     );
 
@@ -169,21 +193,21 @@ function App() {
               : effectiveDate
           }
           isDayAhead={isAllScreen && marketMode === 'DAY_AHEAD_D1'}
-          selectedModel={isAllScreen ? selectedModel : 'V4.1-HighAlpha'}
+          selectedModel={isAllScreen ? selectedModel : activeCustomerModel}
           isAllScreen={isAllScreen}
         />
 
         {/* ════════════════════════════════════════════════════
             BASE URL  /  →  CUSTOMER VIEW
-            Clean: countdown timer + next 8 quarters only.
-            No ViewToggle, no RangeFilterBar, no filters.
-            Strictly V4.1-HighAlpha + INTRADAY_D0.
+            Guaranteed 4-Quarter Rolling Window (135m Gate).
+            DK1: StormHunter Champion (No toggle).
+            DK2: 3-Way Segmented Toggle (StormHunter | StormFusion | NeuralFlash AI).
             ════════════════════════════════════════════════════ */}
         {!isAllScreen && (
           <>
-            <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-800 p-5 sm:p-6 rounded-xl border border-slate-700 shadow-lg">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-800 p-5 sm:p-6 rounded-xl border border-slate-700 shadow-lg">
               <CountdownTimer
-                lastLockedQuarter={predictions.length > 0 ? predictions[predictions.length - 1] : undefined}
+                targetQuarter={predictions[0]}
                 onExpire={refetch}
               />
               <div className="flex flex-wrap items-center gap-3">
@@ -191,12 +215,23 @@ function App() {
               </div>
             </div>
 
+            {/* DK2 Segmented 3-Way Toggle Bar */}
+            {priceArea === 'DK2' && (
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <DK2ModelToggle
+                  selectedModel={dk2Model}
+                  onChange={handleDk2ModelChange}
+                  disabled={loading}
+                />
+              </div>
+            )}
+
             {!loading && predictions.length === 0 && !error && (
               <div className="flex flex-col items-center justify-center gap-3 py-14 text-slate-500">
-                <span className="text-4xl">🔒</span>
-                <p className="text-base font-medium text-slate-400">No locked decisions yet today.</p>
+                <span className="text-4xl">⚡</span>
+                <p className="text-base font-medium text-slate-400">Synchronizing physical delivery window...</p>
                 <p className="text-sm text-slate-500">
-                  Gate closes every 15 minutes — data will appear shortly after the publisher runs.
+                  Data stream active. Next 4 delivery quarters will render automatically.
                 </p>
               </div>
             )}
@@ -214,8 +249,6 @@ function App() {
 
         {/* ════════════════════════════════════════════════════
             /all  →  INTERNAL / MULTI-MODEL AUDIT VIEW
-            Dedicated Custom Range view with RangeFilterBar,
-            DailySummaryBanner, KpiCards, ModelSelector, and Table.
             ════════════════════════════════════════════════════ */}
         {isAllScreen && (
           <>
@@ -251,7 +284,6 @@ function App() {
               }
             />
 
-            {/* Compact Model Selector directly above QuarterTable */}
             <ModelSelector
               selectedModel={selectedModel}
               onModelChange={handleModelChange}

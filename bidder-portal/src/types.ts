@@ -6,18 +6,18 @@ export interface QuarterPrediction {
   quarter_index: number;
   quarter_label: string;
   time_dk: string;
-  spot_price_eur: number;
-  pred_imbalance_eur: number;
-  pred_spread_eur: number;
-  p_up: number;
-  p_down: number;
+  spot_price_eur: number | null;
+  pred_imbalance_eur: number | null;
+  pred_spread_eur: number | null;
+  p_up: number | null;
+  p_down: number | null;
   decision: string;
-  direction: string;
-  volume_mwh: number;
+  direction?: string | number | null;
+  volume_mwh?: number | null;
   model_name: string;
-  q10_price_eur?: number;
-  q50_price_eur?: number;
-  q90_price_eur?: number;
+  q10_price_eur?: number | null;
+  q50_price_eur?: number | null;
+  q90_price_eur?: number | null;
   actual_settled_eur?: number | null;
   spread_captured_eur?: number | null;
   da_cash_flow_eur?: number | null;
@@ -28,10 +28,12 @@ export interface QuarterPrediction {
   net_pnl_eur?: number | null;
   status?: string;
   settled_at?: string;
-  updated_at: string;
+  updated_at?: string;
 }
 
 export type PortalViewMode = 'live' | 'today' | 'range';
+
+export type DK2ModelOption = 'StormHunter' | 'StormFusion' | 'NeuralFlash AI';
 
 export interface DateTimeRange {
   start: string; // ISO or YYYY-MM-DDTHH:mm

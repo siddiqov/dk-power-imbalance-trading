@@ -1,6 +1,6 @@
 import { ZoneSelector } from './ZoneSelector';
 import { DenmarkClock } from './DenmarkClock';
-import { Activity, Clock } from 'lucide-react';
+import { Activity, Clock, ShieldCheck } from 'lucide-react';
 import { PortalViewMode } from '../types';
 
 interface HeaderProps {
@@ -19,9 +19,11 @@ export function Header({
   viewMode = 'live',
   dateStr,
   isDayAhead = false,
-  selectedModel = 'V4.1-HighAlpha',
+  selectedModel = 'StormHunter',
   isAllScreen = false,
 }: HeaderProps) {
+  const displayModel = priceArea === 'DK1' && !isAllScreen ? 'StormHunter' : selectedModel;
+
   return (
     <header className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
       {/* Title & Description */}
@@ -34,20 +36,22 @@ export function Header({
           )}
         </div>
         <div>
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 flex-wrap">
             <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
               {isDayAhead ? 'Day-Ahead Auction Signals' : 'Intraday Quarter Signals'}
             </h1>
+            {priceArea === 'DK1' && !isAllScreen && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                StormHunter Champion
+              </span>
+            )}
           </div>
           <p className="text-slate-400 font-medium text-xs sm:text-sm mt-1">
-            {selectedModel === 'V4.1-HighAlpha'
-              ? 'V4.1 High-Alpha Meta'
-              : selectedModel === 'V3.2-FlowAware'
-              ? 'V3.2 Flow-Aware Meta'
-              : selectedModel} Model —{' '}
+            {displayModel} Algorithm —{' '}
             {viewMode === 'range'
               ? `Custom Range (${dateStr})`
-              : 'Next 8 Tradeable Quarters'}
+              : '4 Delivery Quarters (135m Gate)'}
           </p>
         </div>
       </div>

@@ -28,18 +28,18 @@ export function QuarterRow({
   };
 
   const formatCurrency = (val: number | null | undefined) => {
-    if (val == null || isNaN(val)) return '—';
+    if (val == null || isNaN(Number(val))) return '—';
     return `€ ${Number(val).toFixed(2)}`;
   };
 
   const formatSpread = (val: number | null | undefined) => {
-    if (val == null || isNaN(val)) return '—';
+    if (val == null || isNaN(Number(val))) return '—';
     const num = Number(val);
     const formatted = `€ ${Math.abs(num).toFixed(2)}`;
     return num > 0 ? `+${formatted}` : num < 0 ? `-${formatted}` : `€ 0.00`;
   };
 
-  const isSpreadPositive = prediction.pred_spread_eur > 0;
+  const isSpreadPositive = (prediction.pred_spread_eur ?? 0) > 0;
   const isNetPnlPositive = prediction.net_pnl_eur != null && prediction.net_pnl_eur > 0;
   const isNetPnlNegative = prediction.net_pnl_eur != null && prediction.net_pnl_eur < 0;
 
@@ -51,6 +51,10 @@ export function QuarterRow({
   const isLocked = (prediction.status || '').toUpperCase() === 'LOCKED'
     || (prediction.status || '').toUpperCase() === 'LOCKED_PENDING';
   const isMissed = (prediction.status || '').toUpperCase() === 'MISSED';
+
+  const formattedVolume = (prediction.volume_mwh != null && !isNaN(Number(prediction.volume_mwh)))
+    ? `${Number(prediction.volume_mwh).toFixed(1)} MWh`
+    : '0.0 MWh';
 
   return (
     <>
@@ -135,7 +139,7 @@ export function QuarterRow({
 
         {/* Probabilities */}
         <td className="px-3.5 py-3 text-center">
-          <ConfidenceBar pUp={prediction.p_up} pDown={prediction.p_down} />
+          <ConfidenceBar pUp={prediction.p_up ?? 0} pDown={prediction.p_down ?? 0} />
         </td>
 
         {/* Decision Badge */}
@@ -145,7 +149,7 @@ export function QuarterRow({
 
         {/* Trade Volume */}
         <td className="px-3.5 py-3 text-right text-slate-300 font-medium font-mono text-xs">
-          {prediction.volume_mwh.toFixed(1)} MWh
+          {formattedVolume}
         </td>
 
         {/* ── AUDIT COLUMNS (Only shown in Audit View /all) ── */}
@@ -261,11 +265,19 @@ export function QuarterRow({
                     </div>
                     <div className="flex justify-between text-slate-400">
                       <span>Friction (€0.51/MWh):</span>
-                      <span className="text-rose-400">{prediction.fees_eur != null ? `-€ ${prediction.fees_eur.toFixed(2)}` : '—'}</span>
+                      <span className="text-rose-400">
+                        {prediction.fees_eur != null && !isNaN(Number(prediction.fees_eur))
+                          ? `-€ ${Number(prediction.fees_eur).toFixed(2)}`
+                          : '—'}
+                      </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
                       <span>Corp Tax (22%):</span>
-                      <span className="text-rose-400">{prediction.tax_eur != null ? `-€ ${prediction.tax_eur.toFixed(2)}` : '—'}</span>
+                      <span className="text-rose-400">
+                        {prediction.tax_eur != null && !isNaN(Number(prediction.tax_eur))
+                          ? `-€ ${Number(prediction.tax_eur).toFixed(2)}`
+                          : '—'}
+                      </span>
                     </div>
                     <div className="flex justify-between font-bold border-t border-slate-750 pt-1">
                       <span className="text-slate-200">Net Realized PnL:</span>

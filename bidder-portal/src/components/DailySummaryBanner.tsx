@@ -59,7 +59,7 @@ export function DailySummaryBanner({
   };
 
   const formatPnl = (val: number) => {
-    const abs = Math.abs(val).toFixed(2);
+    const abs = Math.abs(Number(val) || 0).toFixed(2);
     return val >= 0 ? `+€ ${abs}` : `-€ ${abs}`;
   };
 
@@ -300,7 +300,7 @@ export function DailySummaryBanner({
                 Total Trade Vol
               </div>
               <div className="text-lg font-bold font-mono text-slate-100 mt-1">
-                {summary.totalVolume.toFixed(1)} <span className="text-xs font-normal text-slate-400">MWh</span>
+                {(Number(summary.totalVolume) || 0).toFixed(1)} <span className="text-xs font-normal text-slate-400">MWh</span>
               </div>
             </div>
           </div>
@@ -371,7 +371,7 @@ export function DailySummaryBanner({
 
             <div className="px-2.5 py-1.5 rounded-lg bg-slate-850 border border-slate-750 text-xs font-mono">
               <span className="text-slate-400 mr-1.5">Total Vol:</span>
-              <strong className="text-slate-200">{summary.totalVolume.toFixed(1)} MWh</strong>
+              <strong className="text-slate-200">{(Number(summary.totalVolume) || 0).toFixed(1)} MWh</strong>
             </div>
           </div>
         </div>
