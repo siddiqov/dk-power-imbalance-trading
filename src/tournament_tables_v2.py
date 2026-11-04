@@ -214,8 +214,7 @@ class TournamentTableGenerator:
             "filter": json.dumps({"PriceArea": self.price_area}),
             "start": start_dt.strftime("%Y-%m-%dT00:00"),
             "end": start_dt.strftime("%Y-%m-%dT23:59"),
-            "sort": "TimeDK ASC",
-            "limit": 200
+                        "limit": 200
         }
         spot_dict = {}
         try:
@@ -262,8 +261,7 @@ class TournamentTableGenerator:
                 "filter": json.dumps({"PriceArea": self.price_area}),
                 "start": start_dt.strftime("%Y-%m-%dT00:00"),
                 "end": start_dt.strftime("%Y-%m-%dT23:59"),
-                "sort": "TimeDK ASC",
-                "limit": 200
+                                "limit": 200
             }, verify=False, timeout=10).json()
             for r in res_imb.get("records", []):
                 if r.get("PriceArea") == self.price_area and pd.notnull(r.get("ImbalancePriceEUR")):
